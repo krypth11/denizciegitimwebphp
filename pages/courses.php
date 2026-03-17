@@ -38,29 +38,39 @@ include '../includes/sidebar.php';
     <div class="card">
         <div class="card-body">
             <div class="table-responsive">
-                <table id="coursesTable" class="table table-hover align-middle">
+                <table id="coursesTable" class="table table-hover align-middle mobile-card-table">
                     <thead>
                         <tr>
-                            <th>Sıra</th>
+                            <th class="mobile-hide">Sıra</th>
                             <th>Ders Adı</th>
-                            <th>Yeterlilik</th>
-                            <th>Açıklama</th>
-                            <th>Oluşturulma</th>
+                            <th class="mobile-hide">Yeterlilik</th>
+                            <th class="mobile-hide">Açıklama</th>
+                            <th class="mobile-hide">Oluşturulma</th>
                             <th>İşlemler</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($courses as $c): ?>
-                        <tr>
-                            <td><?= (int)$c['order_index'] ?></td>
-                            <td><strong><?= htmlspecialchars($c['name']) ?></strong></td>
+                        <tr class="mobile-card-row">
+                            <td class="mobile-hide"><?= (int)$c['order_index'] ?></td>
                             <td>
+                                <div class="mobile-card-head">
+                                    <strong class="mobile-card-title"><?= htmlspecialchars($c['name']) ?></strong>
+                                    <span class="badge bg-secondary">#<?= (int)$c['order_index'] ?></span>
+                                </div>
+                                <div class="mobile-card-meta d-none">
+                                    <span><?= htmlspecialchars($c['qualification_name'] ?? 'N/A') ?></span>
+                                    <span>•</span>
+                                    <span><?= htmlspecialchars($c['description'] ?? '-') ?></span>
+                                </div>
+                            </td>
+                            <td class="mobile-hide">
                                 <span class="badge bg-primary"><?= htmlspecialchars($c['qualification_name'] ?? 'N/A') ?></span>
                             </td>
-                            <td><?= htmlspecialchars($c['description'] ?? '-') ?></td>
-                            <td><?= format_date($c['created_at']) ?></td>
+                            <td class="mobile-hide"><?= htmlspecialchars($c['description'] ?? '-') ?></td>
+                            <td class="mobile-hide"><?= format_date($c['created_at']) ?></td>
                             <td>
-                                <div class="table-actions">
+                                <div class="table-actions mobile-list-actions">
                                     <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($c['id']) ?>">
                                         <i class="bi bi-pencil"></i>
                                     </button>

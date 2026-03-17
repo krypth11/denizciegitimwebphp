@@ -29,25 +29,35 @@ include '../includes/sidebar.php';
     <div class="card">
         <div class="card-body">
             <div class="table-responsive">
-                <table id="qualificationsTable" class="table table-hover align-middle">
+                <table id="qualificationsTable" class="table table-hover align-middle mobile-card-table">
                     <thead>
                         <tr>
-                            <th>Sıra</th>
+                            <th class="mobile-hide">Sıra</th>
                             <th>İsim</th>
-                            <th>Açıklama</th>
-                            <th>Oluşturulma</th>
+                            <th class="mobile-hide">Açıklama</th>
+                            <th class="mobile-hide">Oluşturulma</th>
                             <th>İşlemler</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($qualifications as $q): ?>
-                            <tr>
-                                <td><?= (int)$q['order_index'] ?></td>
-                                <td><?= htmlspecialchars($q['name']) ?></td>
-                                <td><?= htmlspecialchars($q['description'] ?? '-') ?></td>
-                                <td><?= format_date($q['created_at']) ?></td>
+                            <tr class="mobile-card-row">
+                                <td class="mobile-hide"><?= (int)$q['order_index'] ?></td>
                                 <td>
-                                    <div class="table-actions">
+                                    <div class="mobile-card-head">
+                                        <strong class="mobile-card-title"><?= htmlspecialchars($q['name']) ?></strong>
+                                        <span class="badge bg-secondary">#<?= (int)$q['order_index'] ?></span>
+                                    </div>
+                                    <div class="mobile-card-meta d-none">
+                                        <span><?= htmlspecialchars($q['description'] ?? '-') ?></span>
+                                        <span>•</span>
+                                        <span><?= format_date($q['created_at']) ?></span>
+                                    </div>
+                                </td>
+                                <td class="mobile-hide"><?= htmlspecialchars($q['description'] ?? '-') ?></td>
+                                <td class="mobile-hide"><?= format_date($q['created_at']) ?></td>
+                                <td>
+                                    <div class="table-actions mobile-list-actions">
                                         <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>">
                                             <i class="bi bi-pencil"></i>
                                         </button>
