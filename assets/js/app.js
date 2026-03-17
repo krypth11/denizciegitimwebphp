@@ -57,9 +57,36 @@ function formatDate(dateString) {
     let activeMode = 'alert';
     let actionTaken = false;
 
+    function ensureDialogMarkup() {
+        let modal = document.getElementById('appDialogModal');
+        if (modal) return modal;
+
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = `
+            <div class="modal fade" id="appDialogModal" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header bg-info text-white">
+                            <h5 class="modal-title" id="appDialogTitle">Bilgi</h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body" id="appDialogBody"></div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" id="appDialogCancelBtn" data-bs-dismiss="modal">İptal</button>
+                            <button type="button" class="btn btn-primary" id="appDialogConfirmBtn">Tamam</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(wrapper.firstElementChild);
+        return document.getElementById('appDialogModal');
+    }
+
     function getEls() {
+        const modal = ensureDialogMarkup();
         return {
-            modal: document.getElementById('appDialogModal'),
+            modal,
             title: document.getElementById('appDialogTitle'),
             body: document.getElementById('appDialogBody'),
             cancel: document.getElementById('appDialogCancelBtn'),
@@ -166,6 +193,9 @@ function formatDate(dateString) {
 
             els.confirm.onclick = function () {
                 actionTaken = true;
+                if (activeResolver) {
+                    activeResolver();
+                }
                 modal.hide();
             };
 
@@ -173,9 +203,6 @@ function formatDate(dateString) {
 
             els.modal.addEventListener('hidden.bs.modal', function onHidden() {
                 els.modal.removeEventListener('hidden.bs.modal', onHidden);
-                if (activeResolver) {
-                    activeResolver();
-                }
                 resetDialogState();
                 els.confirm.onclick = null;
                 els.cancel.onclick = null;
@@ -211,35 +238,33 @@ function formatDate(dateString) {
 
             els.confirm.onclick = function () {
                 actionTaken = true;
+                const onConfirmCb = activeOnConfirm;
+                if (typeof onConfirmCb === 'function') {
+                    onConfirmCb();
+                }
+                if (activeResolver) {
+                    activeResolver(true);
+                }
                 modal.hide();
             };
 
             els.cancel.onclick = function () {
                 actionTaken = false;
+                const onCancelCb = activeOnCancel;
+                if (typeof onCancelCb === 'function') {
+                    onCancelCb();
+                }
+                if (activeResolver) {
+                    activeResolver(false);
+                }
                 modal.hide();
             };
 
             els.modal.addEventListener('hidden.bs.modal', function onHidden() {
                 els.modal.removeEventListener('hidden.bs.modal', onHidden);
-
-                const confirmed = !!actionTaken;
-                const onConfirmCb = activeOnConfirm;
-                const onCancelCb = activeOnCancel;
-                const resolver = activeResolver;
-
                 resetDialogState();
                 els.confirm.onclick = null;
                 els.cancel.onclick = null;
-
-                if (confirmed && typeof onConfirmCb === 'function') {
-                    onConfirmCb();
-                }
-                if (!confirmed && typeof onCancelCb === 'function') {
-                    onCancelCb();
-                }
-                if (resolver) {
-                    resolver(confirmed);
-                }
             });
 
             modal.show();
