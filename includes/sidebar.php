@@ -1,69 +1,80 @@
-    <!-- Sidebar -->
-    <div class="sidebar">
-        <!-- Sidebar Header -->
-        <div class="sidebar-header">
-            <h4><i class="bi bi-mortarboard-fill"></i> Denizci Eğitim</h4>
+<?php
+$menuGroups = [
+    [
+        ['slug' => 'dashboard', 'url' => '/dashboard.php', 'icon' => 'bi-speedometer2', 'label' => 'Dashboard'],
+    ],
+    [
+        ['slug' => 'qualifications', 'url' => '/pages/qualifications.php', 'icon' => 'bi-award', 'label' => 'Yeterlilikler'],
+        ['slug' => 'courses', 'url' => '/pages/courses.php', 'icon' => 'bi-book', 'label' => 'Dersler'],
+        ['slug' => 'questions', 'url' => '/pages/questions.php', 'icon' => 'bi-question-circle', 'label' => 'Sorular'],
+    ],
+    [
+        ['slug' => 'maritime-english', 'url' => '/pages/maritime-english.php', 'icon' => 'bi-translate', 'label' => 'Maritime English'],
+        ['slug' => 'me-questions', 'url' => '/pages/me-questions.php', 'icon' => 'bi-chat-square-text', 'label' => 'ME Sorular'],
+        ['slug' => 'maritime-signals', 'url' => '/pages/maritime-signals.php', 'icon' => 'bi-flag', 'label' => 'İşaretler'],
+    ],
+    [
+        ['slug' => 'users', 'url' => '/pages/users.php', 'icon' => 'bi-people', 'label' => 'Kullanıcılar'],
+        ['slug' => 'settings', 'url' => '/pages/settings.php', 'icon' => 'bi-gear', 'label' => 'Ayarlar'],
+    ],
+];
+
+function render_sidebar_menu($menuGroups, $current_page)
+{
+    foreach ($menuGroups as $groupIndex => $group) {
+        foreach ($group as $item) {
+            $isActive = ($current_page ?? '') === $item['slug'] ? 'active' : '';
+            echo '<a class="nav-link ' . $isActive . '" href="' . $item['url'] . '">';
+            echo '<i class="bi ' . $item['icon'] . '"></i><span>' . htmlspecialchars($item['label']) . '</span>';
+            echo '</a>';
+        }
+        if ($groupIndex < count($menuGroups) - 1) {
+            echo '<hr class="my-2 mx-2">';
+        }
+    }
+}
+?>
+
+<aside class="sidebar d-none d-lg-flex">
+    <div class="sidebar-header">
+        <h4><i class="bi bi-mortarboard-fill"></i> Denizci Eğitim</h4>
+    </div>
+    <nav class="nav flex-column">
+        <?php render_sidebar_menu($menuGroups, $current_page ?? ''); ?>
+    </nav>
+    <div class="sidebar-footer">
+        <div class="user-info">
+            <i class="bi bi-person-circle"></i>
+            <small class="d-block"><?= htmlspecialchars($user['email']) ?></small>
         </div>
+        <a href="/logout.php" class="btn btn-danger w-100 btn-sm">
+            <i class="bi bi-box-arrow-left"></i> Çıkış Yap
+        </a>
+    </div>
+</aside>
 
-        <!-- Navigation -->
-        <nav class="nav flex-column mt-3" style="padding-bottom: 180px;">
-            <a class="nav-link <?= ($current_page ?? '') === 'dashboard' ? 'active' : '' ?>" href="/dashboard.php">
-                <i class="bi bi-speedometer2"></i> Dashboard
-            </a>
-
-            <hr class="my-2 mx-3">
-
-            <a class="nav-link <?= ($current_page ?? '') === 'qualifications' ? 'active' : '' ?>" href="/pages/qualifications.php">
-                <i class="bi bi-award"></i> Yeterlilikler
-            </a>
-
-            <a class="nav-link <?= ($current_page ?? '') === 'courses' ? 'active' : '' ?>" href="/pages/courses.php">
-                <i class="bi bi-book"></i> Dersler
-            </a>
-
-            <a class="nav-link <?= ($current_page ?? '') === 'questions' ? 'active' : '' ?>" href="/pages/questions.php">
-                <i class="bi bi-question-circle"></i> Sorular
-            </a>
-
-            <hr class="my-2 mx-3">
-
-            <a class="nav-link <?= ($current_page ?? '') === 'maritime-english' ? 'active' : '' ?>" href="/pages/maritime-english.php">
-                <i class="bi bi-translate"></i> Maritime English
-            </a>
-
-            <a class="nav-link <?= ($current_page ?? '') === 'me-questions' ? 'active' : '' ?>" href="/pages/me-questions.php">
-                <i class="bi bi-chat-square-text"></i> ME Sorular
-            </a>
-
-            <a class="nav-link <?= ($current_page ?? '') === 'maritime-signals' ? 'active' : '' ?>" href="/pages/maritime-signals.php">
-                <i class="bi bi-flag"></i> İşaretler
-            </a>
-
-            <hr class="my-2 mx-3">
-
-            <a class="nav-link <?= ($current_page ?? '') === 'users' ? 'active' : '' ?>" href="/pages/users.php">
-                <i class="bi bi-people"></i> Kullanıcılar
-            </a>
-
-            <a class="nav-link <?= ($current_page ?? '') === 'settings' ? 'active' : '' ?>" href="/pages/settings.php">
-                <i class="bi bi-gear"></i> Ayarlar
-            </a>
+<div class="offcanvas offcanvas-start d-lg-none" tabindex="-1" id="adminSidebar" aria-labelledby="adminSidebarLabel">
+    <div class="offcanvas-header border-bottom">
+        <h5 class="offcanvas-title" id="adminSidebarLabel">Denizci Eğitim</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body p-0">
+        <div class="sidebar-header py-3">
+            <h4><i class="bi bi-mortarboard-fill"></i> Menü</h4>
+        </div>
+        <nav class="nav flex-column">
+            <?php render_sidebar_menu($menuGroups, $current_page ?? ''); ?>
         </nav>
-
-        <!-- Sidebar Footer -->
         <div class="sidebar-footer">
-            <div class="user-info">
-                <i class="bi bi-person-circle"></i>
-                <small class="d-block"><?= htmlspecialchars($user['email']) ?></small>
-            </div>
             <a href="/logout.php" class="btn btn-danger w-100 btn-sm">
                 <i class="bi bi-box-arrow-left"></i> Çıkış Yap
             </a>
         </div>
     </div>
+</div>
 
-    <!-- Main Content -->
-    <div class="main-content">
+<main class="main-content">
+
 
 
 

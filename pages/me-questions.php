@@ -10,7 +10,16 @@ include '../includes/header.php';
 include '../includes/sidebar.php';
 ?>
 <div class="container-fluid">
-    <h2>ME Sorular</h2>
-    <div class="alert alert-info mt-3">Bu sayfa kurulumun sonraki adımında tamamlanacak.</div>
+    <div class="page-header">
+        <div>
+            <h2>ME Sorular</h2>
+            <p class="text-muted mb-0">Maritime English soru listesi ve yönetimi bu alana eklenecektir.</p>
+        </div>
+    </div>
+    <div class="card placeholder-page">
+        <div class="card-body">
+            <div class="alert alert-info mb-0">Bu sayfa kurulumun sonraki adımında tamamlanacak.</div>
+        </div>
+    </div>
 </div>
 <?php include '../includes/footer.php'; ?>

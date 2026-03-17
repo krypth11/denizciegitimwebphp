@@ -23,48 +23,57 @@ include '../includes/sidebar.php';
 ?>
 
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>Dersler</h2>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
-            <i class="bi bi-plus-lg"></i> Yeni Ders Ekle
-        </button>
+    <div class="page-header">
+        <div>
+            <h2>Dersler</h2>
+            <p class="text-muted mb-0">Dersleri yeterliliklere göre düzenleyin.</p>
+        </div>
+        <div class="page-actions">
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
+                <i class="bi bi-plus-lg"></i> Yeni Ders Ekle
+            </button>
+        </div>
     </div>
 
-    <div class="card border-0 shadow-sm">
+    <div class="card">
         <div class="card-body">
-            <table id="coursesTable" class="table table-hover">
-                <thead>
-                    <tr>
-                        <th>Sıra</th>
-                        <th>Ders Adı</th>
-                        <th>Yeterlilik</th>
-                        <th>Açıklama</th>
-                        <th>Oluşturulma</th>
-                        <th>İşlemler</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($courses as $c): ?>
-                    <tr>
-                        <td><?= (int)$c['order_index'] ?></td>
-                        <td><strong><?= htmlspecialchars($c['name']) ?></strong></td>
-                        <td>
-                            <span class="badge bg-primary"><?= htmlspecialchars($c['qualification_name'] ?? 'N/A') ?></span>
-                        </td>
-                        <td><?= htmlspecialchars($c['description'] ?? '-') ?></td>
-                        <td><?= format_date($c['created_at']) ?></td>
-                        <td>
-                            <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($c['id']) ?>">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($c['id']) ?>">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+            <div class="table-responsive">
+                <table id="coursesTable" class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Sıra</th>
+                            <th>Ders Adı</th>
+                            <th>Yeterlilik</th>
+                            <th>Açıklama</th>
+                            <th>Oluşturulma</th>
+                            <th>İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($courses as $c): ?>
+                        <tr>
+                            <td><?= (int)$c['order_index'] ?></td>
+                            <td><strong><?= htmlspecialchars($c['name']) ?></strong></td>
+                            <td>
+                                <span class="badge bg-primary"><?= htmlspecialchars($c['qualification_name'] ?? 'N/A') ?></span>
+                            </td>
+                            <td><?= htmlspecialchars($c['description'] ?? '-') ?></td>
+                            <td><?= format_date($c['created_at']) ?></td>
+                            <td>
+                                <div class="table-actions">
+                                    <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($c['id']) ?>">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($c['id']) ?>">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>

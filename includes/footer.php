@@ -1,4 +1,6 @@
-    </div> <!-- End Main Content -->
+    </main>
+    </div>
+    </div>
 
     <!-- jQuery - EN ÖNCE YÜKLENECEK! -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
@@ -23,15 +25,5 @@
         <?= $extra_js ?>
     <?php endif; ?>
 
-    <!-- jQuery Test Script -->
-    <script>
-    // jQuery yüklendiğini doğrula
-    if (typeof jQuery === 'undefined') {
-        console.error('HATA: jQuery yüklenemedi!');
-        alert('HATA: jQuery yüklenemedi! Lütfen internet bağlantınızı kontrol edin.');
-    } else {
-        console.log('jQuery başarıyla yüklendi. Versiyon:', jQuery.fn.jquery);
-    }
-    </script>
 </body>
 </html>

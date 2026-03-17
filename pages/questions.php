@@ -56,32 +56,26 @@ include '../includes/header.php';
 include '../includes/sidebar.php';
 ?>
 
-<style>
-.question-row:hover { background-color: #f8f9fa; }
-.option-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
-.option-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 5px 8px; font-size: 12px; }
-.option-item.correct { background: #d1fae5; border-color: #34d399; color: #065f46; font-weight: 600; }
-.ai-card.approved { background: #ecfdf5; border-left: 4px solid #22c55e; }
-.ai-card.cancelled { background: #fef2f2; border-left: 4px solid #ef4444; opacity: .9; }
-</style>
-
 <div class="container-fluid">
     <div class="row mb-4">
-        <div class="col-md-4"><div class="card border-0 shadow-sm"><div class="card-body"><div class="d-flex justify-content-between align-items-center"><div><h6 class="text-muted mb-1">Toplam Soru</h6><h3 class="mb-0"><?= number_format($total_questions) ?></h3></div><div class="bg-primary bg-opacity-10 rounded p-3"><i class="bi bi-question-circle fs-2 text-primary"></i></div></div></div></div></div>
-        <div class="col-md-4"><div class="card border-0 shadow-sm"><div class="card-body"><div class="d-flex justify-content-between align-items-center"><div><h6 class="text-muted mb-1">Sayısal Sorular</h6><h3 class="mb-0"><?= number_format($sayisal_count) ?></h3></div><div class="bg-success bg-opacity-10 rounded p-3"><i class="bi bi-calculator fs-2 text-success"></i></div></div></div></div></div>
-        <div class="col-md-4"><div class="card border-0 shadow-sm"><div class="card-body"><div class="d-flex justify-content-between align-items-center"><div><h6 class="text-muted mb-1">Sözel Sorular</h6><h3 class="mb-0"><?= number_format($sozel_count) ?></h3></div><div class="bg-info bg-opacity-10 rounded p-3"><i class="bi bi-chat-text fs-2 text-info"></i></div></div></div></div></div>
+        <div class="col-md-4"><div class="card"><div class="card-body"><div class="d-flex justify-content-between align-items-center"><div><h6 class="text-muted mb-1">Toplam Soru</h6><h3 class="mb-0"><?= number_format($total_questions) ?></h3></div><div class="stat-icon" style="background:#eef3ff;color:#5f84d8;"><i class="bi bi-question-circle"></i></div></div></div></div></div>
+        <div class="col-md-4"><div class="card"><div class="card-body"><div class="d-flex justify-content-between align-items-center"><div><h6 class="text-muted mb-1">Sayısal Sorular</h6><h3 class="mb-0"><?= number_format($sayisal_count) ?></h3></div><div class="stat-icon" style="background:#edf8f1;color:#5ea67a;"><i class="bi bi-calculator"></i></div></div></div></div></div>
+        <div class="col-md-4"><div class="card"><div class="card-body"><div class="d-flex justify-content-between align-items-center"><div><h6 class="text-muted mb-1">Sözel Sorular</h6><h3 class="mb-0"><?= number_format($sozel_count) ?></h3></div><div class="stat-icon" style="background:#eef6ff;color:#4b8dbf;"><i class="bi bi-chat-text"></i></div></div></div></div></div>
     </div>
 
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2>Sorular</h2>
-        <div class="btn-group">
+    <div class="page-header">
+        <div>
+            <h2>Sorular</h2>
+            <p class="text-muted mb-0">Soru bankasını filtreleyin, düzenleyin ve AI ile üretin.</p>
+        </div>
+        <div class="page-actions">
             <button class="btn btn-danger" id="bulkDeleteBtn" style="display:none;"><i class="bi bi-trash"></i> Seçilenleri Sil (<span id="selectedCount">0</span>)</button>
             <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#aiModal"><i class="bi bi-stars"></i> AI ile Üret</button>
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal"><i class="bi bi-plus-lg"></i> Manuel Ekle</button>
         </div>
     </div>
 
-    <div class="card border-0 shadow-sm mb-3">
+    <div class="card mb-3">
         <div class="card-body">
             <form method="GET" class="row g-3">
                 <div class="col-md-3">
@@ -113,7 +107,7 @@ include '../includes/sidebar.php';
                         <option value="karışık" <?= $filter_type === 'karışık' ? 'selected' : '' ?>>Karışık</option>
                     </select>
                 </div>
-                <div class="col-md-3 d-flex align-items-end">
+                <div class="col-md-3 d-flex align-items-end toolbar-wrap">
                     <button type="submit" class="btn btn-primary me-2"><i class="bi bi-funnel"></i> Filtrele</button>
                     <a href="/pages/questions.php" class="btn btn-secondary"><i class="bi bi-x-circle"></i> Temizle</a>
                 </div>
@@ -121,8 +115,9 @@ include '../includes/sidebar.php';
         </div>
     </div>
 
-    <div class="card border-0 shadow-sm">
+    <div class="card">
         <div class="card-body">
+            <div class="table-responsive">
             <table id="questionsTable" class="table table-hover align-middle">
                 <thead>
                     <tr>
@@ -136,7 +131,7 @@ include '../includes/sidebar.php';
                 </thead>
                 <tbody>
                     <?php foreach ($questions as $q): ?>
-                    <tr class="question-row">
+                    <tr>
                         <td onclick="event.stopPropagation()"><input type="checkbox" class="question-checkbox" value="<?= htmlspecialchars($q['id']) ?>"></td>
                         <td>
                             <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
@@ -145,23 +140,26 @@ include '../includes/sidebar.php';
                         </td>
                         <td>
                             <strong><?= htmlspecialchars(mb_substr($q['question_text'], 0, 80)) ?>...</strong>
-                            <div class="option-grid mt-2">
-                                <div class="option-item <?= $q['correct_answer'] === 'A' ? 'correct' : '' ?>">A) <?= htmlspecialchars(mb_substr($q['option_a'], 0, 28)) ?></div>
-                                <div class="option-item <?= $q['correct_answer'] === 'B' ? 'correct' : '' ?>">B) <?= htmlspecialchars(mb_substr($q['option_b'], 0, 28)) ?></div>
-                                <div class="option-item <?= $q['correct_answer'] === 'C' ? 'correct' : '' ?>">C) <?= htmlspecialchars(mb_substr($q['option_c'], 0, 28)) ?></div>
-                                <div class="option-item <?= $q['correct_answer'] === 'D' ? 'correct' : '' ?>">D) <?= htmlspecialchars(mb_substr($q['option_d'], 0, 28)) ?></div>
+                            <div class="questions-option-grid mt-2">
+                                <div class="questions-option-item <?= $q['correct_answer'] === 'A' ? 'correct' : '' ?>">A) <?= htmlspecialchars(mb_substr($q['option_a'], 0, 28)) ?></div>
+                                <div class="questions-option-item <?= $q['correct_answer'] === 'B' ? 'correct' : '' ?>">B) <?= htmlspecialchars(mb_substr($q['option_b'], 0, 28)) ?></div>
+                                <div class="questions-option-item <?= $q['correct_answer'] === 'C' ? 'correct' : '' ?>">C) <?= htmlspecialchars(mb_substr($q['option_c'], 0, 28)) ?></div>
+                                <div class="questions-option-item <?= $q['correct_answer'] === 'D' ? 'correct' : '' ?>">D) <?= htmlspecialchars(mb_substr($q['option_d'], 0, 28)) ?></div>
                             </div>
                         </td>
                         <td><small class="text-muted"><?= htmlspecialchars($q['qualification_name']) ?></small></td>
                         <td><strong><?= htmlspecialchars($q['course_name']) ?></strong></td>
                         <td onclick="event.stopPropagation()">
-                            <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Düzenle"><i class="bi bi-pencil"></i></button>
-                            <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Sil"><i class="bi bi-trash"></i></button>
+                            <div class="table-actions">
+                                <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Düzenle"><i class="bi bi-pencil"></i></button>
+                                <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Sil"><i class="bi bi-trash"></i></button>
+                            </div>
                         </td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
 </div>

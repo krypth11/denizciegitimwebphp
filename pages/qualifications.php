@@ -14,44 +14,53 @@ include '../includes/sidebar.php';
 ?>
 
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>Yeterlilikler</h2>
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
-            <i class="bi bi-plus-lg"></i> Yeni Ekle
-        </button>
+    <div class="page-header">
+        <div>
+            <h2>Yeterlilikler</h2>
+            <p class="text-muted mb-0">Yeterlilik kayıtlarını görüntüleyin ve yönetin.</p>
+        </div>
+        <div class="page-actions">
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
+                <i class="bi bi-plus-lg"></i> Yeni Ekle
+            </button>
+        </div>
     </div>
 
-    <div class="card border-0 shadow-sm">
+    <div class="card">
         <div class="card-body">
-            <table id="qualificationsTable" class="table table-hover">
-                <thead>
-                    <tr>
-                        <th>Sıra</th>
-                        <th>İsim</th>
-                        <th>Açıklama</th>
-                        <th>Oluşturulma</th>
-                        <th>İşlemler</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($qualifications as $q): ?>
+            <div class="table-responsive">
+                <table id="qualificationsTable" class="table table-hover align-middle">
+                    <thead>
                         <tr>
-                            <td><?= (int)$q['order_index'] ?></td>
-                            <td><?= htmlspecialchars($q['name']) ?></td>
-                            <td><?= htmlspecialchars($q['description'] ?? '-') ?></td>
-                            <td><?= format_date($q['created_at']) ?></td>
-                            <td>
-                                <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>">
-                                    <i class="bi bi-pencil"></i>
-                                </button>
-                                <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($q['id']) ?>">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </td>
+                            <th>Sıra</th>
+                            <th>İsim</th>
+                            <th>Açıklama</th>
+                            <th>Oluşturulma</th>
+                            <th>İşlemler</th>
                         </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($qualifications as $q): ?>
+                            <tr>
+                                <td><?= (int)$q['order_index'] ?></td>
+                                <td><?= htmlspecialchars($q['name']) ?></td>
+                                <td><?= htmlspecialchars($q['description'] ?? '-') ?></td>
+                                <td><?= format_date($q['created_at']) ?></td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($q['id']) ?>">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>

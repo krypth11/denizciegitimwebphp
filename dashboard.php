@@ -21,60 +21,65 @@ include 'includes/sidebar.php';
 ?>
 
 <div class="container-fluid">
-    <h2 class="mb-4">Dashboard</h2>
+    <div class="page-header">
+        <div>
+            <h2>Dashboard</h2>
+            <p class="text-muted mb-0">Genel panel metrikleri ve içerik özeti</p>
+        </div>
+    </div>
 
     <div class="row g-4 mb-4">
         <div class="col-md-3">
-            <div class="card border-0 shadow-sm">
+            <div class="card">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <h6 class="text-muted mb-1">Toplam Soru</h6>
                             <h3 class="mb-0"><?= number_format($stats['total_questions']) ?></h3>
                         </div>
-                        <div class="bg-primary bg-opacity-10 rounded p-3"><i class="bi bi-question-circle fs-2 text-primary"></i></div>
+                        <div class="stat-icon" style="background:#eef3ff;color:#5f84d8;"><i class="bi bi-question-circle"></i></div>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="col-md-3">
-            <div class="card border-0 shadow-sm">
+            <div class="card">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <h6 class="text-muted mb-1">Dersler</h6>
                             <h3 class="mb-0"><?= number_format($stats['total_courses']) ?></h3>
                         </div>
-                        <div class="bg-success bg-opacity-10 rounded p-3"><i class="bi bi-book fs-2 text-success"></i></div>
+                        <div class="stat-icon" style="background:#edf8f1;color:#5ea67a;"><i class="bi bi-book"></i></div>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="col-md-3">
-            <div class="card border-0 shadow-sm">
+            <div class="card">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <h6 class="text-muted mb-1">Yeterlilikler</h6>
                             <h3 class="mb-0"><?= number_format($stats['total_qualifications']) ?></h3>
                         </div>
-                        <div class="bg-warning bg-opacity-10 rounded p-3"><i class="bi bi-award fs-2 text-warning"></i></div>
+                        <div class="stat-icon" style="background:#fff8ec;color:#d59a4a;"><i class="bi bi-award"></i></div>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="col-md-3">
-            <div class="card border-0 shadow-sm">
+            <div class="card">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <h6 class="text-muted mb-1">Kullanıcılar</h6>
                             <h3 class="mb-0"><?= number_format($stats['total_users']) ?></h3>
                         </div>
-                        <div class="bg-info bg-opacity-10 rounded p-3"><i class="bi bi-people fs-2 text-info"></i></div>
+                        <div class="stat-icon" style="background:#eef6ff;color:#4b8dbf;"><i class="bi bi-people"></i></div>
                     </div>
                 </div>
             </div>
@@ -83,13 +88,13 @@ include 'includes/sidebar.php';
 
     <div class="row">
         <div class="col-md-6">
-            <div class="card border-0 shadow-sm">
+            <div class="card">
                 <div class="card-header bg-white"><h5 class="mb-0">Soru Tipleri</h5></div>
                 <div class="card-body"><canvas id="questionTypeChart"></canvas></div>
             </div>
         </div>
         <div class="col-md-6">
-            <div class="card border-0 shadow-sm">
+            <div class="card">
                 <div class="card-header bg-white"><h5 class="mb-0">Son Aktiviteler</h5></div>
                 <div class="card-body"><p class="text-muted">Henüz aktivite yok</p></div>
             </div>
