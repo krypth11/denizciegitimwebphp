@@ -3,7 +3,7 @@ require_once 'includes/config.php';
 require_once 'includes/auth.php';
 require_once 'includes/functions.php';
 
-if (verify_token()) {
+if (is_authenticated_session()) {
     header('Location: dashboard.php');
     exit;
 }
@@ -12,41 +12,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = sanitize_input($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    if (empty($email) || empty($password)) {
-        $error = 'Email ve şifre gerekli!';
-    } else {
-        $stmt = $pdo->prepare(
-            "SELECT up.id, up.email, up.is_admin, au.user_id as admin_check
-             FROM user_profiles up
-             LEFT JOIN admin_users au ON up.id = au.user_id
-             WHERE up.email = ? AND up.is_deleted = 0
-             LIMIT 1"
-        );
-        $stmt->execute([$email]);
-        $user = $stmt->fetch();
+    $now = time();
+    $lockedUntil = (int)($_SESSION['login_locked_until'] ?? 0);
+    if ($lockedUntil > $now) {
+        $wait = $lockedUntil - $now;
+        $error = 'Çok fazla başarısız deneme. Lütfen ' . $wait . ' saniye sonra tekrar deneyin.';
+    }
 
-        if (!$user) {
-            $error = 'Kullanıcı bulunamadı!';
+    if (!isset($error)) {
+        if (empty($email) || empty($password)) {
+            $error = 'Email ve şifre gerekli!';
+        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $error = 'Geçerli bir email adresi girin.';
         } else {
-            $is_admin = ((int)$user['is_admin'] === 1 || !empty($user['admin_check']));
+            $upCols = get_table_columns($pdo, 'user_profiles');
+            $auCols = get_table_columns($pdo, 'admin_users');
 
-            if (!$is_admin) {
-                $error = 'Admin yetkisi gerekli!';
+            $select = ['up.id', 'up.email'];
+            $where = ['up.email = ?'];
+
+            if (in_array('is_admin', $upCols, true)) {
+                $select[] = 'up.is_admin';
             } else {
-                // Geçici şifre kontrolü: herhangi bir şifre kabul
+                $select[] = '0 as is_admin';
+            }
+
+            if (in_array('is_deleted', $upCols, true)) {
+                $where[] = 'up.is_deleted = 0';
+            }
+
+            $passwordCandidates = ['password_hash', 'password', 'hashed_password', 'pass_hash', 'passwd'];
+            foreach ($passwordCandidates as $col) {
+                if (in_array($col, $upCols, true)) {
+                    $select[] = 'up.' . $col . ' as up_' . $col;
+                }
+            }
+
+            $adminSelect = ['au.user_id as admin_check'];
+            foreach ($passwordCandidates as $col) {
+                if (in_array($col, $auCols, true)) {
+                    $adminSelect[] = 'au.' . $col . ' as au_' . $col;
+                }
+            }
+
+            $sql = 'SELECT ' . implode(', ', array_merge($select, $adminSelect))
+                . ' FROM user_profiles up'
+                . ' LEFT JOIN admin_users au ON up.id = au.user_id'
+                . ' WHERE ' . implode(' AND ', $where)
+                . ' LIMIT 1';
+
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$email]);
+            $user = $stmt->fetch();
+
+            $isValidLogin = false;
+            $isAdmin = false;
+
+            if ($user) {
+                $hash = extract_password_hash_from_row($user);
+                if ($hash && verify_password($password, $hash)) {
+                    $isValidLogin = true;
+                    $isAdmin = ((int)($user['is_admin'] ?? 0) === 1 || !empty($user['admin_check']));
+                }
+            }
+
+            if (!$isValidLogin) {
+                $_SESSION['login_attempt_count'] = (int)($_SESSION['login_attempt_count'] ?? 0) + 1;
+                $_SESSION['login_last_attempt'] = $now;
+
+                if ($_SESSION['login_attempt_count'] >= 5) {
+                    $_SESSION['login_locked_until'] = $now + 300;
+                    $_SESSION['login_attempt_count'] = 0;
+                }
+
+                $error = 'Email veya şifre hatalı.';
+            } elseif (!$isAdmin) {
+                $error = 'Bu panele erişim için admin yetkisi gereklidir.';
+            } else {
+                session_regenerate_id(true);
+
+                $_SESSION['auth_user_id'] = $user['id'];
+                $_SESSION['auth_email'] = $user['email'];
+                $_SESSION['auth_is_admin'] = 1;
+                $_SESSION['auth_last_activity'] = $now;
+                $_SESSION['auth_user_agent'] = hash('sha256', $_SERVER['HTTP_USER_AGENT'] ?? 'unknown');
+
+                unset($_SESSION['login_attempt_count'], $_SESSION['login_last_attempt'], $_SESSION['login_locked_until']);
+
                 $token = create_token($user['id'], $user['email'], true);
-
-                setcookie('auth_token', $token, [
-                    'expires' => time() + JWT_EXPIRY,
-                    'path' => '/',
-                    'secure' => true,
-                    'httponly' => true,
-                    'samesite' => 'Lax',
-                ]);
-
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['email'] = $user['email'];
-                $_SESSION['is_admin'] = true;
+                set_auth_cookie($token);
 
                 $pdo->prepare('UPDATE user_profiles SET last_sign_in_at = NOW() WHERE id = ?')->execute([$user['id']]);
 

@@ -1,9 +1,9 @@
 <?php
 // includes/config.php
 
-// Hata raporlama (production'da kapat)
+// Hata raporlama (hataları logla, kullanıcıya basma)
 error_reporting(E_ALL);
-ini_set('display_errors', '1');
+ini_set('display_errors', '0');
 
 // Timezone
 date_default_timezone_set('Europe/Istanbul');
@@ -21,9 +21,15 @@ define('SITE_NAME', 'Denizci Eğitim Admin Panel');
 // JWT ayarları
 define('JWT_SECRET', 'dEnIzCi_EgItIm_2026_sEcReT_kEy_ChAnGe_Me');
 define('JWT_EXPIRY', 86400); // 24 saat
+define('SESSION_TIMEOUT', 1800); // 30 dakika
 
 // Session
 if (session_status() === PHP_SESSION_NONE) {
+    $isSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.cookie_httponly', '1');
+    ini_set('session.cookie_secure', $isSecure ? '1' : '0');
+    ini_set('session.cookie_samesite', 'Lax');
     session_start();
 }
 
@@ -40,7 +46,9 @@ try {
         ]
     );
 } catch (PDOException $e) {
-    die('Database bağlantı hatası: ' . $e->getMessage());
+    error_log('Database connection error: ' . $e->getMessage());
+    http_response_code(500);
+    die('Sistem hatası oluştu. Lütfen daha sonra tekrar deneyin.');
 }
 
 function json_response($data, $status = 200)
