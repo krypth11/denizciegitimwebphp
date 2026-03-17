@@ -2,6 +2,9 @@
 if (!isset($user)) {
     $user = require_auth();
 }
+
+$customCssPath = $_SERVER['DOCUMENT_ROOT'] . '/assets/css/custom.css';
+$customCssVersion = file_exists($customCssPath) ? filemtime($customCssPath) : time();
 ?>
 <!DOCTYPE html>
 <html lang="tr">
@@ -20,7 +23,7 @@ if (!isset($user)) {
     <link href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css" rel="stylesheet">
 
     <!-- Custom CSS -->
-    <link href="/assets/css/custom.css" rel="stylesheet">
+    <link href="/assets/css/custom.css?v=<?= (int)$customCssVersion ?>" rel="stylesheet">
 </head>
 <body>
     <div class="app-shell">
