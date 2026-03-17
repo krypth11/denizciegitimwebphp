@@ -15,10 +15,8 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-    <!-- Custom JS dosyası (varsa) -->
-    <?php if (file_exists($_SERVER['DOCUMENT_ROOT'] . '/assets/js/app.js')): ?>
-        <script src="/assets/js/app.js"></script>
-    <?php endif; ?>
+    <!-- Custom JS -->
+    <script src="/assets/js/app.js"></script>
 
     <!-- Sayfa özel JavaScript -->
     <?php if (isset($extra_js)): ?>
