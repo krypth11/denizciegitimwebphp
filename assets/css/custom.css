@@ -37,6 +37,12 @@ body {
     color: var(--text);
     font-size: 14px;
     line-height: 1.45;
+    margin: 0;
+}
+
+html,
+body {
+    height: 100%;
 }
 
 .text-muted,
@@ -46,21 +52,35 @@ small,
 }
 
 .app-shell {
+    display: flex;
+    flex-direction: column;
     min-height: 100vh;
 }
 
 .app-main {
-    min-height: calc(100vh - 57px);
+    flex: 1;
+    min-height: 0;
     width: 100%;
 }
 
 .topbar {
-    position: sticky;
-    top: 0;
+    position: relative;
     z-index: 1025;
     background: rgba(255, 255, 255, 0.95);
     border-bottom: 1px solid var(--border);
-    backdrop-filter: blur(6px);
+}
+
+.topbar-inner {
+    min-height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.topbar-user {
+    margin-left: auto;
 }
 
 .topbar .navbar-brand {
@@ -74,9 +94,11 @@ small,
     flex: 0 0 260px;
     background: var(--bg-surface);
     border-right: 1px solid var(--border);
-    min-height: calc(100vh - 57px);
+    min-height: 0;
+    max-height: 100%;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
 }
 
 .sidebar-header {
@@ -105,7 +127,8 @@ small,
     border-bottom: 1px solid var(--border);
 }
 
-.sidebar .nav-link {
+.sidebar .nav-link,
+.offcanvas .nav-link {
     color: #4b5565;
     border-radius: var(--radius-sm);
     padding: 10px 12px;
@@ -116,18 +139,21 @@ small,
     transition: background-color .15s ease, color .15s ease;
 }
 
-.sidebar .nav-link i {
+.sidebar .nav-link i,
+.offcanvas .nav-link i {
     font-size: 15px;
     width: 18px;
     text-align: center;
 }
 
-.sidebar .nav-link:hover {
+.sidebar .nav-link:hover,
+.offcanvas .nav-link:hover {
     background: #f3f6fc;
     color: #344054;
 }
 
-.sidebar .nav-link.active {
+.sidebar .nav-link.active,
+.offcanvas .nav-link.active {
     background: var(--primary-soft);
     color: var(--primary);
     font-weight: 600;
@@ -151,6 +177,7 @@ small,
     flex: 1;
     padding: var(--space-5);
     min-width: 0;
+    overflow-x: hidden;
 }
 
 .page-header {
@@ -429,6 +456,11 @@ textarea::placeholder {
         padding: 16px;
     }
 
+    .topbar-user {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
     .page-header h1,
     .page-header h2 {
         font-size: 20px;
@@ -444,10 +476,17 @@ textarea::placeholder {
         width: 100%;
     }
 
-    .page-actions .btn,
-    .btn-group .btn {
+    .page-actions .btn {
         flex: 1 1 auto;
         justify-content: center;
+    }
+
+    .topbar-user {
+        justify-content: space-between;
+    }
+
+    .questions-option-grid {
+        grid-template-columns: 1fr;
     }
 
     .modal-dialog {

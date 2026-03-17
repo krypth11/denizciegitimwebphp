@@ -28,8 +28,8 @@ include 'includes/sidebar.php';
         </div>
     </div>
 
-    <div class="row g-4 mb-4">
-        <div class="col-md-3">
+    <div class="row g-3 g-lg-4 mb-4">
+        <div class="col-sm-6 col-xl-3">
             <div class="card">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
@@ -43,7 +43,7 @@ include 'includes/sidebar.php';
             </div>
         </div>
 
-        <div class="col-md-3">
+        <div class="col-sm-6 col-xl-3">
             <div class="card">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
@@ -57,7 +57,7 @@ include 'includes/sidebar.php';
             </div>
         </div>
 
-        <div class="col-md-3">
+        <div class="col-sm-6 col-xl-3">
             <div class="card">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
@@ -71,7 +71,7 @@ include 'includes/sidebar.php';
             </div>
         </div>
 
-        <div class="col-md-3">
+        <div class="col-sm-6 col-xl-3">
             <div class="card">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
@@ -86,14 +86,14 @@ include 'includes/sidebar.php';
         </div>
     </div>
 
-    <div class="row">
-        <div class="col-md-6">
+    <div class="row g-3 g-lg-4">
+        <div class="col-lg-6">
             <div class="card">
                 <div class="card-header bg-white"><h5 class="mb-0">Soru Tipleri</h5></div>
                 <div class="card-body"><canvas id="questionTypeChart"></canvas></div>
             </div>
         </div>
-        <div class="col-md-6">
+        <div class="col-lg-6">
             <div class="card">
                 <div class="card-header bg-white"><h5 class="mb-0">Son Aktiviteler</h5></div>
                 <div class="card-body"><p class="text-muted">Henüz aktivite yok</p></div>
