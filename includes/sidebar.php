@@ -74,6 +74,12 @@ function render_sidebar_menu($menuGroups, $current_page)
 </div>
 
 <main class="main-content">
+    <div class="mobile-menu-row d-lg-none mb-3">
+        <button class="btn btn-secondary btn-sm" type="button" data-bs-toggle="offcanvas" data-bs-target="#adminSidebar" aria-controls="adminSidebar">
+            <i class="bi bi-list"></i> Menü
+        </button>
+    </div>
+
 
 
 

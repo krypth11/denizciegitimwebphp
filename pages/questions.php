@@ -126,7 +126,7 @@ include '../includes/sidebar.php';
                         <th>Soru / Şıklar</th>
                         <th>Yeterlilik</th>
                         <th>Ders</th>
-                        <th style="width:80px;">İşlemler</th>
+                        <th class="questions-actions-col" style="width:80px;">İşlemler</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -149,8 +149,8 @@ include '../includes/sidebar.php';
                         </td>
                         <td><small class="text-muted"><?= htmlspecialchars($q['qualification_name']) ?></small></td>
                         <td><strong><?= htmlspecialchars($q['course_name']) ?></strong></td>
-                        <td onclick="event.stopPropagation()">
-                            <div class="table-actions">
+                        <td class="questions-actions-cell" onclick="event.stopPropagation()">
+                            <div class="table-actions questions-actions-wrap">
                                 <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Düzenle"><i class="bi bi-pencil"></i></button>
                                 <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Sil"><i class="bi bi-trash"></i></button>
                             </div>

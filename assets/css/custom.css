@@ -63,12 +63,7 @@ small,
 }
 
 .topbar {
-    position: sticky;
-    top: 0;
-    z-index: 1025;
-    width: 100%;
-    background: rgba(255, 255, 255, 0.98);
-    border-bottom: 1px solid var(--border);
+    display: none;
 }
 
 .topbar-inner {
@@ -95,15 +90,15 @@ small,
 .app-main {
     flex: 1;
     display: flex;
-    min-height: 0;
+    min-height: 100vh;
 }
 
 .sidebar {
     width: 240px;
     flex: 0 0 240px;
-    height: calc(100vh - 52px);
+    height: 100vh;
     position: sticky;
-    top: 52px;
+    top: 0;
     overflow-y: auto;
     background: var(--bg-surface);
     border-right: 1px solid var(--border);
@@ -186,6 +181,11 @@ small,
     min-width: 0;
     padding: 24px;
     overflow-x: hidden;
+}
+
+.mobile-menu-row {
+    display: flex;
+    justify-content: flex-start;
 }
 
 .page-header {
@@ -415,6 +415,12 @@ textarea::placeholder {
     font-weight: 600;
 }
 
+.questions-actions-wrap {
+    display: inline-flex;
+    gap: 6px;
+    flex-wrap: nowrap;
+}
+
 .ai-card.approved {
     background: #f1f8f4;
     border-left: 3px solid #9bc7ad;
@@ -494,6 +500,25 @@ textarea::placeholder {
 
     .questions-option-grid {
         grid-template-columns: 1fr;
+    }
+
+    .questions-actions-col,
+    .questions-actions-cell {
+        min-width: 96px;
+        width: 96px;
+    }
+
+    .questions-actions-wrap {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+    }
+
+    .questions-actions-wrap .btn {
+        width: 100%;
+        min-height: 30px;
+        padding: 5px 8px;
+        justify-content: center;
     }
 
     .modal-dialog {

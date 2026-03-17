@@ -27,21 +27,4 @@ $customCssVersion = file_exists($customCssPath) ? filemtime($customCssPath) : ti
 </head>
 <body>
     <div class="app-shell">
-        <nav class="topbar">
-            <div class="container-fluid px-3 px-lg-4 topbar-inner">
-                <div class="d-flex align-items-center gap-2">
-                    <button class="btn btn-secondary btn-sm d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#adminSidebar" aria-controls="adminSidebar">
-                        <i class="bi bi-list"></i>
-                    </button>
-                    <a class="navbar-brand" href="/dashboard.php">Denizci Eğitim Admin</a>
-                </div>
-                <div class="d-flex align-items-center gap-2 topbar-user">
-                    <small class="text-muted d-none d-md-inline"><?= htmlspecialchars($user['email']) ?></small>
-                    <a href="/logout.php" class="btn btn-danger btn-sm">
-                        <i class="bi bi-box-arrow-right"></i>
-                        <span class="d-none d-sm-inline">Çıkış</span>
-                    </a>
-                </div>
-            </div>
-        </nav>
         <div class="app-main">
