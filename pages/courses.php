@@ -53,7 +53,7 @@ include '../includes/sidebar.php';
                         <?php foreach ($courses as $c): ?>
                         <tr class="mobile-card-row">
                             <td class="mobile-hide"><?= (int)$c['order_index'] ?></td>
-                            <td>
+                            <td class="course-main-cell">
                                 <div class="mobile-card-head">
                                     <strong class="mobile-card-title"><?= htmlspecialchars($c['name']) ?></strong>
                                     <span class="badge bg-secondary">#<?= (int)$c['order_index'] ?></span>
@@ -69,7 +69,7 @@ include '../includes/sidebar.php';
                             </td>
                             <td class="mobile-hide"><?= htmlspecialchars($c['description'] ?? '-') ?></td>
                             <td class="mobile-hide"><?= format_date($c['created_at']) ?></td>
-                            <td>
+                            <td class="course-actions-cell">
                                 <div class="table-actions mobile-list-actions">
                                     <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($c['id']) ?>">
                                         <i class="bi bi-pencil"></i>
