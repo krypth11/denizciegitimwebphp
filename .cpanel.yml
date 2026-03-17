@@ -1,0 +1,4 @@
+deployment
+  tasks
+    - export DEPLOYPATH=homeu2621168public_html
+    - bincp -R  $DEPLOYPATH
