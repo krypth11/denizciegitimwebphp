@@ -42,11 +42,33 @@ try {
 
     $saved_count = 0;
 
+    $type_map = [
+        'mixed' => 'karışık',
+        'verbal' => 'sözel',
+        'numerical' => 'sayısal',
+        'karışık' => 'karışık',
+        'sözel' => 'sözel',
+        'sayısal' => 'sayısal',
+    ];
+
     foreach ($questions as $q) {
+        if (($q['status'] ?? 'pending') !== 'approved') {
+            continue;
+        }
+
         if (empty($q['question_text']) || empty($q['option_a']) ||
             empty($q['option_b']) || empty($q['option_c']) ||
             empty($q['option_d']) || empty($q['correct_answer']) ||
             empty($q['course_id']) || empty($q['question_type'])) {
+            continue;
+        }
+
+        if (!in_array($q['correct_answer'], ['A', 'B', 'C', 'D'], true)) {
+            continue;
+        }
+
+        $normalized_type = $type_map[$q['question_type']] ?? null;
+        if ($normalized_type === null) {
             continue;
         }
 
@@ -55,7 +77,7 @@ try {
         if ($stmt->execute([
             $id,
             $q['course_id'],
-            $q['question_type'],
+            $normalized_type,
             $q['question_text'],
             $q['option_a'],
             $q['option_b'],
@@ -77,7 +99,7 @@ try {
     } else {
         echo json_encode([
             'success' => false,
-            'message' => 'Hiçbir soru kaydedilemedi!',
+            'message' => 'Hiçbir onaylı soru kaydedilemedi!',
         ], JSON_UNESCAPED_UNICODE);
     }
 } catch (Exception $e) {

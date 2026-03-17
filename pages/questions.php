@@ -25,12 +25,10 @@ if (!empty($filter_qualification)) {
     $sql .= ' AND c.qualification_id = ?';
     $params[] = $filter_qualification;
 }
-
 if (!empty($filter_course)) {
     $sql .= ' AND q.course_id = ?';
     $params[] = $filter_course;
 }
-
 if (!empty($filter_type)) {
     $sql .= ' AND q.question_type = ?';
     $params[] = $filter_type;
@@ -43,7 +41,6 @@ $stmt->execute($params);
 $questions = $stmt->fetchAll();
 
 $qualifications = $pdo->query('SELECT * FROM qualifications ORDER BY order_index, name')->fetchAll();
-
 $courses = $pdo->query(
     "SELECT c.*, q.name as qualification_name
      FROM courses c
@@ -62,74 +59,26 @@ include '../includes/sidebar.php';
 <style>
 .question-row { cursor: pointer; }
 .question-row:hover { background-color: #f8f9fa; }
-.correct-badge {
-    display: inline-block;
-    width: 30px;
-    height: 30px;
-    line-height: 30px;
-    text-align: center;
-    border-radius: 50%;
-    font-weight: bold;
-    color: white;
-    background-color: #28a745;
-}
+.option-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+.option-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 5px 8px; font-size: 12px; }
+.option-item.correct { background: #d1fae5; border-color: #34d399; color: #065f46; font-weight: 600; }
+.ai-card.approved { background: #ecfdf5; border-left: 4px solid #22c55e; }
+.ai-card.cancelled { background: #fef2f2; border-left: 4px solid #ef4444; opacity: .9; }
 </style>
 
 <div class="container-fluid">
     <div class="row mb-4">
-        <div class="col-md-4">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Toplam Soru</h6>
-                            <h3 class="mb-0"><?= number_format($total_questions) ?></h3>
-                        </div>
-                        <div class="bg-primary bg-opacity-10 rounded p-3"><i class="bi bi-question-circle fs-2 text-primary"></i></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Sayısal Sorular</h6>
-                            <h3 class="mb-0"><?= number_format($sayisal_count) ?></h3>
-                        </div>
-                        <div class="bg-success bg-opacity-10 rounded p-3"><i class="bi bi-calculator fs-2 text-success"></i></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h6 class="text-muted mb-1">Sözel Sorular</h6>
-                            <h3 class="mb-0"><?= number_format($sozel_count) ?></h3>
-                        </div>
-                        <div class="bg-info bg-opacity-10 rounded p-3"><i class="bi bi-chat-text fs-2 text-info"></i></div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <div class="col-md-4"><div class="card border-0 shadow-sm"><div class="card-body"><div class="d-flex justify-content-between align-items-center"><div><h6 class="text-muted mb-1">Toplam Soru</h6><h3 class="mb-0"><?= number_format($total_questions) ?></h3></div><div class="bg-primary bg-opacity-10 rounded p-3"><i class="bi bi-question-circle fs-2 text-primary"></i></div></div></div></div></div>
+        <div class="col-md-4"><div class="card border-0 shadow-sm"><div class="card-body"><div class="d-flex justify-content-between align-items-center"><div><h6 class="text-muted mb-1">Sayısal Sorular</h6><h3 class="mb-0"><?= number_format($sayisal_count) ?></h3></div><div class="bg-success bg-opacity-10 rounded p-3"><i class="bi bi-calculator fs-2 text-success"></i></div></div></div></div></div>
+        <div class="col-md-4"><div class="card border-0 shadow-sm"><div class="card-body"><div class="d-flex justify-content-between align-items-center"><div><h6 class="text-muted mb-1">Sözel Sorular</h6><h3 class="mb-0"><?= number_format($sozel_count) ?></h3></div><div class="bg-info bg-opacity-10 rounded p-3"><i class="bi bi-chat-text fs-2 text-info"></i></div></div></div></div></div>
     </div>
 
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2>Sorular</h2>
         <div class="btn-group">
-            <button class="btn btn-danger" id="bulkDeleteBtn" style="display:none;">
-                <i class="bi bi-trash"></i> Seçilenleri Sil (<span id="selectedCount">0</span>)
-            </button>
-            <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#aiModal">
-                <i class="bi bi-stars"></i> AI ile Üret
-            </button>
-            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
-                <i class="bi bi-plus-lg"></i> Manuel Ekle
-            </button>
+            <button class="btn btn-danger" id="bulkDeleteBtn" style="display:none;"><i class="bi bi-trash"></i> Seçilenleri Sil (<span id="selectedCount">0</span>)</button>
+            <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#aiModal"><i class="bi bi-stars"></i> AI ile Üret</button>
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal"><i class="bi bi-plus-lg"></i> Manuel Ekle</button>
         </div>
     </div>
 
@@ -141,9 +90,7 @@ include '../includes/sidebar.php';
                     <select class="form-select" name="qualification" id="filter_qualification">
                         <option value="">Tüm Yeterlilikler</option>
                         <?php foreach ($qualifications as $q): ?>
-                            <option value="<?= htmlspecialchars($q['id']) ?>" <?= $filter_qualification === $q['id'] ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($q['name']) ?>
-                            </option>
+                            <option value="<?= htmlspecialchars($q['id']) ?>" <?= $filter_qualification === $q['id'] ? 'selected' : '' ?>><?= htmlspecialchars($q['name']) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -152,9 +99,7 @@ include '../includes/sidebar.php';
                     <select class="form-select" name="course" id="filter_course">
                         <option value="">Tüm Dersler</option>
                         <?php foreach ($courses as $c): ?>
-                            <option value="<?= htmlspecialchars($c['id']) ?>"
-                                    data-qualification="<?= htmlspecialchars($c['qualification_id']) ?>"
-                                    <?= $filter_course === $c['id'] ? 'selected' : '' ?>>
+                            <option value="<?= htmlspecialchars($c['id']) ?>" data-qualification="<?= htmlspecialchars($c['qualification_id']) ?>" <?= $filter_course === $c['id'] ? 'selected' : '' ?>>
                                 <?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?>
                             </option>
                         <?php endforeach; ?>
@@ -166,6 +111,7 @@ include '../includes/sidebar.php';
                         <option value="">Tümü</option>
                         <option value="sayısal" <?= $filter_type === 'sayısal' ? 'selected' : '' ?>>Sayısal</option>
                         <option value="sözel" <?= $filter_type === 'sözel' ? 'selected' : '' ?>>Sözel</option>
+                        <option value="karışık" <?= $filter_type === 'karışık' ? 'selected' : '' ?>>Karışık</option>
                     </select>
                 </div>
                 <div class="col-md-3 d-flex align-items-end">
@@ -178,17 +124,16 @@ include '../includes/sidebar.php';
 
     <div class="card border-0 shadow-sm">
         <div class="card-body">
-            <table id="questionsTable" class="table table-hover">
+            <table id="questionsTable" class="table table-hover align-middle">
                 <thead>
                     <tr>
                         <th style="width:40px;"><input type="checkbox" id="selectAll"></th>
                         <th style="width:70px;">Tip</th>
-                        <th>Soru</th>
+                        <th>Soru / Şıklar</th>
                         <th>Yeterlilik</th>
                         <th>Ders</th>
-                        <th style="width:80px;">Doğru</th>
                         <th>Tarih</th>
-                        <th style="width:100px;">İşlemler</th>
+                        <th style="width:110px;">İşlemler</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -196,24 +141,21 @@ include '../includes/sidebar.php';
                     <tr class="question-row" data-id="<?= htmlspecialchars($q['id']) ?>">
                         <td onclick="event.stopPropagation()"><input type="checkbox" class="question-checkbox" value="<?= htmlspecialchars($q['id']) ?>"></td>
                         <td>
-                            <?php if ($q['question_type'] === 'sayısal'): ?>
-                                <span class="badge bg-success">Sayısal</span>
-                            <?php else: ?>
-                                <span class="badge bg-info">Sözel</span>
-                            <?php endif; ?>
+                            <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
+                            <?php elseif ($q['question_type'] === 'karışık'): ?><span class="badge bg-warning text-dark">Karışık</span>
+                            <?php else: ?><span class="badge bg-info">Sözel</span><?php endif; ?>
                         </td>
                         <td>
-                            <strong><?= htmlspecialchars(mb_substr($q['question_text'], 0, 60)) ?>...</strong><br>
-                            <small class="text-muted">
-                                <span class="me-2">A) <?= htmlspecialchars(mb_substr($q['option_a'], 0, 15)) ?>...</span>
-                                <span class="me-2">B) <?= htmlspecialchars(mb_substr($q['option_b'], 0, 15)) ?>...</span>
-                                <span class="me-2">C) <?= htmlspecialchars(mb_substr($q['option_c'], 0, 15)) ?>...</span>
-                                <span>D) <?= htmlspecialchars(mb_substr($q['option_d'], 0, 15)) ?>...</span>
-                            </small>
+                            <strong><?= htmlspecialchars(mb_substr($q['question_text'], 0, 80)) ?>...</strong>
+                            <div class="option-grid mt-2">
+                                <div class="option-item <?= $q['correct_answer'] === 'A' ? 'correct' : '' ?>">A) <?= htmlspecialchars(mb_substr($q['option_a'], 0, 28)) ?></div>
+                                <div class="option-item <?= $q['correct_answer'] === 'B' ? 'correct' : '' ?>">B) <?= htmlspecialchars(mb_substr($q['option_b'], 0, 28)) ?></div>
+                                <div class="option-item <?= $q['correct_answer'] === 'C' ? 'correct' : '' ?>">C) <?= htmlspecialchars(mb_substr($q['option_c'], 0, 28)) ?></div>
+                                <div class="option-item <?= $q['correct_answer'] === 'D' ? 'correct' : '' ?>">D) <?= htmlspecialchars(mb_substr($q['option_d'], 0, 28)) ?></div>
+                            </div>
                         </td>
                         <td><small class="text-muted"><?= htmlspecialchars($q['qualification_name']) ?></small></td>
                         <td><strong><?= htmlspecialchars($q['course_name']) ?></strong></td>
-                        <td><span class="correct-badge"><?= htmlspecialchars($q['correct_answer']) ?></span></td>
                         <td><?= format_date($q['created_at']) ?></td>
                         <td onclick="event.stopPropagation()">
                             <button class="btn btn-sm btn-info view-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Görüntüle"><i class="bi bi-eye"></i></button>
@@ -228,201 +170,72 @@ include '../includes/sidebar.php';
     </div>
 </div>
 
-<!-- View Modal -->
-<div class="modal fade" id="viewModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Soru Detayı</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="viewModalBody"></div>
-            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button></div>
-        </div>
-    </div>
-</div>
+<!-- View / Add / Edit modalları -->
+<div class="modal fade" id="viewModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Soru Detayı</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body" id="viewModalBody"></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button></div></div></div></div>
 
-<!-- Add Modal -->
 <div class="modal fade" id="addModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Yeni Soru Ekle</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    <div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Yeni Soru Ekle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <form id="addForm"><div class="modal-body">
+            <div class="row">
+                <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" required><option value="">Seçiniz...</option><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
             </div>
-            <form id="addForm">
-                <div class="modal-body">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Ders *</label>
-                            <select class="form-select" name="course_id" required>
-                                <option value="">Seçiniz...</option>
-                                <?php foreach ($courses as $c): ?>
-                                    <option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Tip *</label>
-                            <select class="form-select" name="question_type" required>
-                                <option value="">Seçiniz...</option>
-                                <option value="sayısal">Sayısal</option>
-                                <option value="sözel">Sözel</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" rows="3" required></textarea></div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3"><label class="form-label">A Şıkkı *</label><input type="text" class="form-control" name="option_a" required></div>
-                        <div class="col-md-6 mb-3"><label class="form-label">B Şıkkı *</label><input type="text" class="form-control" name="option_b" required></div>
-                        <div class="col-md-6 mb-3"><label class="form-label">C Şıkkı *</label><input type="text" class="form-control" name="option_c" required></div>
-                        <div class="col-md-6 mb-3"><label class="form-label">D Şıkkı *</label><input type="text" class="form-control" name="option_d" required></div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Doğru Cevap *</label>
-                        <select class="form-select" name="correct_answer" required>
-                            <option value="">Seçiniz...</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
-                        </select>
-                    </div>
-                    <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" rows="2"></textarea></div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
-                    <button type="submit" class="btn btn-primary">Kaydet</button>
-                </div>
-            </form>
-        </div>
-    </div>
+            <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" rows="3" required></textarea></div>
+            <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" required></div></div>
+            <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" required><option value="">Seçiniz...</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option></select></div>
+            <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" rows="2"></textarea></div>
+        </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Kaydet</button></div></form>
+    </div></div>
 </div>
 
-<!-- Edit Modal -->
 <div class="modal fade" id="editModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Soru Düzenle</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    <div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Soru Düzenle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <form id="editForm"><input type="hidden" name="id" id="edit_id"><div class="modal-body">
+            <div class="row">
+                <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="edit_course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" id="edit_question_type" required><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
             </div>
-            <form id="editForm">
-                <input type="hidden" name="id" id="edit_id">
-                <div class="modal-body">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Ders *</label>
-                            <select class="form-select" name="course_id" id="edit_course_id" required>
-                                <option value="">Seçiniz...</option>
-                                <?php foreach ($courses as $c): ?>
-                                    <option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label">Tip *</label>
-                            <select class="form-select" name="question_type" id="edit_question_type" required>
-                                <option value="sayısal">Sayısal</option>
-                                <option value="sözel">Sözel</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" id="edit_question_text" rows="3" required></textarea></div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3"><label class="form-label">A Şıkkı *</label><input type="text" class="form-control" name="option_a" id="edit_option_a" required></div>
-                        <div class="col-md-6 mb-3"><label class="form-label">B Şıkkı *</label><input type="text" class="form-control" name="option_b" id="edit_option_b" required></div>
-                        <div class="col-md-6 mb-3"><label class="form-label">C Şıkkı *</label><input type="text" class="form-control" name="option_c" id="edit_option_c" required></div>
-                        <div class="col-md-6 mb-3"><label class="form-label">D Şıkkı *</label><input type="text" class="form-control" name="option_d" id="edit_option_d" required></div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Doğru Cevap *</label>
-                        <select class="form-select" name="correct_answer" id="edit_correct_answer" required>
-                            <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option>
-                        </select>
-                    </div>
-                    <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" id="edit_explanation" rows="2"></textarea></div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
-                    <button type="submit" class="btn btn-primary">Güncelle</button>
-                </div>
-            </form>
-        </div>
-    </div>
+            <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" id="edit_question_text" rows="3" required></textarea></div>
+            <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" id="edit_option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" id="edit_option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" id="edit_option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" id="edit_option_d" required></div></div>
+            <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" id="edit_correct_answer" required><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option></select></div>
+            <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" id="edit_explanation" rows="2"></textarea></div>
+        </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Güncelle</button></div></form>
+    </div></div>
 </div>
 
 <!-- AI Modal -->
 <div class="modal fade" id="aiModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header bg-success text-white">
-                <h5 class="modal-title"><i class="bi bi-stars"></i> AI ile Soru Üret</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    <div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header bg-success text-white"><h5 class="modal-title"><i class="bi bi-stars"></i> AI ile Soru Üret</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <form id="aiForm"><div class="modal-body">
+            <div class="mb-3"><label class="form-label">Yeterlilik *</label><select class="form-select" id="ai_qualification_id" required><option value="">Önce yeterlilik seçin...</option><?php foreach ($qualifications as $q): ?><option value="<?= htmlspecialchars($q['id']) ?>"><?= htmlspecialchars($q['name']) ?></option><?php endforeach; ?></select></div>
+            <div class="mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="ai_course_id" required disabled><option value="">Önce yeterlilik seçin...</option></select></div>
+            <div class="mb-3"><label class="form-label">Soru Türü *</label><select class="form-select" name="question_type" required><option value="mixed">Karışık</option><option value="verbal">Sözel</option><option value="numerical">Sayısal</option></select></div>
+            <div class="mb-2"><label class="form-label d-block">Soru Sayısı *</label>
+                <div class="btn-group mb-2" role="group">
+                    <button type="button" class="btn btn-outline-primary ai-count-btn active" data-count="5">5</button>
+                    <button type="button" class="btn btn-outline-primary ai-count-btn" data-count="10">10</button>
+                    <button type="button" class="btn btn-outline-primary ai-count-btn" data-count="20">20</button>
+                    <button type="button" class="btn btn-outline-primary ai-count-btn" data-count="50">50</button>
+                </div>
+                <input type="number" class="form-control" id="ai_count_custom" min="1" max="100" value="5">
+                <input type="hidden" name="question_count" id="ai_question_count" value="5">
+                <small class="text-muted">Min 1 - Max 100</small>
             </div>
-            <form id="aiForm">
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Yeterlilik *</label>
-                        <select class="form-select" id="ai_qualification_id" required>
-                            <option value="">Önce yeterlilik seçin...</option>
-                            <?php foreach ($qualifications as $q): ?>
-                                <option value="<?= htmlspecialchars($q['id']) ?>"><?= htmlspecialchars($q['name']) ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Ders *</label>
-                        <select class="form-select" name="course_id" id="ai_course_id" required disabled>
-                            <option value="">Önce yeterlilik seçin...</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Tip *</label>
-                        <select class="form-select" name="question_type" required>
-                            <option value="">Seçiniz...</option>
-                            <option value="sayısal">Sayısal</option>
-                            <option value="sözel">Sözel</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Kaç Soru? *</label>
-                        <input type="number" class="form-control" name="count" value="10" min="1" max="20" required>
-                        <small class="text-muted">1-20 arası soru üretilebilir</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Konu / Açıklama (Opsiyonel)</label>
-                        <textarea class="form-control" name="topic" rows="2" placeholder="Örn: Denizcilik mevzuatı, Radar kullanımı, vb."></textarea>
-                    </div>
-                    <div id="aiProgress" class="d-none">
-                        <div class="alert alert-info">
-                            <div class="d-flex align-items-center">
-                                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
-                                <strong>AI Çalışıyor...</strong> Sorular üretiliyor, lütfen bekleyin...
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
-                    <button type="submit" class="btn btn-success" id="aiGenerateBtn"><i class="bi bi-stars"></i> Üret</button>
-                </div>
-            </form>
-        </div>
-    </div>
+            <div class="mb-3"><label class="form-label">Konu / Açıklama (Opsiyonel)</label><textarea class="form-control" name="topic" rows="2" placeholder="Örn: Denizcilik mevzuatı, Radar kullanımı"></textarea></div>
+            <div id="aiProgress" class="d-none"><div class="alert alert-info"><div class="d-flex align-items-center"><div class="spinner-border spinner-border-sm me-2"></div><strong>AI Çalışıyor...</strong> Sorular üretiliyor, lütfen bekleyin...</div></div></div>
+        </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-success" id="aiGenerateBtn"><i class="bi bi-stars"></i> Üret</button></div></form>
+    </div></div>
 </div>
 
-<!-- AI Preview Modal -->
+<!-- AI Preview -->
 <div class="modal fade" id="aiPreviewModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-            <div class="modal-header bg-success text-white">
-                <h5 class="modal-title"><i class="bi bi-check-circle"></i> Üretilen Sorular</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="aiPreviewBody" style="max-height: 70vh; overflow-y: auto;"></div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-danger" data-bs-dismiss="modal"><i class="bi bi-x-circle"></i> İptal Et</button>
-                <button type="button" class="btn btn-success" id="saveAiQuestionsBtn"><i class="bi bi-save"></i> Tümünü Kaydet</button>
-            </div>
+    <div class="modal-dialog modal-xl"><div class="modal-content"><div class="modal-header bg-success text-white"><h5 class="modal-title"><i class="bi bi-check-circle"></i> Üretilen Sorular</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body" id="aiPreviewBody" style="max-height:70vh;overflow-y:auto"></div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-danger" data-bs-dismiss="modal"><i class="bi bi-x-circle"></i> Kapat</button>
+            <button type="button" class="btn btn-success" id="saveAiQuestionsBtn">0 Soruyu Kaydet</button>
         </div>
-    </div>
+    </div></div>
 </div>
 
 <?php
@@ -431,206 +244,238 @@ $extra_js = <<<'JAVASCRIPT'
 let generatedQuestions = [];
 let coursesData = JSON.parse(document.getElementById('courses-data-json').textContent);
 
+function normalizeCount(v) {
+    const n = parseInt(v, 10);
+    if (Number.isNaN(n) || n < 1 || n > 100) return null;
+    return n;
+}
+
+function statusCounts() {
+    return {
+        approved: generatedQuestions.filter(q => q.status === 'approved').length,
+        pending: generatedQuestions.filter(q => q.status === 'pending').length,
+        cancelled: generatedQuestions.filter(q => q.status === 'cancelled').length
+    };
+}
+
+function renderAiPreview() {
+    const counts = statusCounts();
+    $('#saveAiQuestionsBtn').text(counts.approved + ' Soruyu Kaydet').prop('disabled', counts.approved === 0);
+
+    let html = `
+      <div class="row mb-3">
+        <div class="col-md-4"><div class="alert alert-success mb-0">Onaylanan: <strong>${counts.approved}</strong></div></div>
+        <div class="col-md-4"><div class="alert alert-warning mb-0">Bekleyen: <strong>${counts.pending}</strong></div></div>
+        <div class="col-md-4"><div class="alert alert-danger mb-0">İptal Edilen: <strong>${counts.cancelled}</strong></div></div>
+      </div>`;
+
+    generatedQuestions.forEach((q, index) => {
+        const cardClass = q.status === 'approved' ? 'approved' : (q.status === 'cancelled' ? 'cancelled' : '');
+        const tag = q.status === 'approved' ? '<span class="badge bg-success">Onaylandı</span>' : (q.status === 'cancelled' ? '<span class="badge bg-danger">İptal</span>' : '<span class="badge bg-secondary">Bekleyen</span>');
+
+        if (q._editing) {
+            html += `
+            <div class="card mb-3 ai-card ${cardClass}">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <strong>#${index + 1}</strong> ${tag}
+              </div>
+              <div class="card-body">
+                <div class="mb-2"><label class="form-label">Soru</label><textarea class="form-control ai-draft-field" data-index="${index}" data-field="question_text" rows="2">${q._draft.question_text || ''}</textarea></div>
+                <div class="row">
+                  <div class="col-md-6 mb-2"><label class="form-label">A</label><input class="form-control ai-draft-field" data-index="${index}" data-field="option_a" value="${q._draft.option_a || ''}"></div>
+                  <div class="col-md-6 mb-2"><label class="form-label">B</label><input class="form-control ai-draft-field" data-index="${index}" data-field="option_b" value="${q._draft.option_b || ''}"></div>
+                  <div class="col-md-6 mb-2"><label class="form-label">C</label><input class="form-control ai-draft-field" data-index="${index}" data-field="option_c" value="${q._draft.option_c || ''}"></div>
+                  <div class="col-md-6 mb-2"><label class="form-label">D</label><input class="form-control ai-draft-field" data-index="${index}" data-field="option_d" value="${q._draft.option_d || ''}"></div>
+                </div>
+                <div class="row">
+                  <div class="col-md-3"><label class="form-label">Doğru Cevap</label><select class="form-select ai-draft-field" data-index="${index}" data-field="correct_answer"><option ${q._draft.correct_answer==='A'?'selected':''}>A</option><option ${q._draft.correct_answer==='B'?'selected':''}>B</option><option ${q._draft.correct_answer==='C'?'selected':''}>C</option><option ${q._draft.correct_answer==='D'?'selected':''}>D</option></select></div>
+                  <div class="col-md-9"><label class="form-label">Açıklama</label><input class="form-control ai-draft-field" data-index="${index}" data-field="explanation" value="${q._draft.explanation || ''}"></div>
+                </div>
+                <div class="mt-3">
+                  <button class="btn btn-primary btn-sm ai-edit-save" data-index="${index}">Düzenlemeyi Onayla</button>
+                  <button class="btn btn-secondary btn-sm ai-edit-cancel" data-index="${index}">İptal</button>
+                </div>
+              </div>
+            </div>`;
+        } else {
+            const b = (letter) => q.correct_answer === letter ? 'bg-success text-white' : 'bg-light';
+            html += `
+            <div class="card mb-3 ai-card ${cardClass}">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <div><strong>#${index + 1}</strong> ${tag}</div>
+                <div class="btn-group btn-group-sm">
+                  ${q.status === 'approved' || q.status === 'cancelled' ? `<button class="btn btn-outline-secondary ai-revert" data-index="${index}">Geri Al</button>` : ''}
+                  ${q.status !== 'approved' ? `<button class="btn btn-outline-success ai-approve" data-index="${index}">Onayla</button>` : ''}
+                  ${q.status !== 'cancelled' ? `<button class="btn btn-outline-danger ai-cancel" data-index="${index}">İptal</button>` : ''}
+                  <button class="btn btn-outline-warning ai-edit" data-index="${index}">Düzenle</button>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="mb-2"><strong>Soru:</strong> ${q.question_text || ''}</div>
+                <div class="row g-2">
+                  <div class="col-md-6"><div class="p-2 rounded ${b('A')}">A) ${q.option_a || ''}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('B')}">B) ${q.option_b || ''}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('C')}">C) ${q.option_c || ''}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('D')}">D) ${q.option_d || ''}</div></div>
+                </div>
+                ${q.explanation ? `<div class="mt-2 text-muted"><small>${q.explanation}</small></div>` : ''}
+              </div>
+            </div>`;
+        }
+    });
+
+    $('#aiPreviewBody').html(html || '<div class="alert alert-warning">Soru yok.</div>');
+}
+
 $(document).ready(function() {
     $('#questionsTable').DataTable({
         language: { url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/tr.json' },
-        order: [[6, 'desc']],
+        order: [[5, 'desc']],
         pageLength: 50,
         responsive: true,
-        columnDefs: [{ orderable: false, targets: [0, 7] }]
+        columnDefs: [{ orderable: false, targets: [0, 6] }]
     });
 
     $('#filter_qualification').on('change', function() {
         const qualId = $(this).val();
         $('#filter_course option').each(function() {
             const optQual = $(this).data('qualification');
-            if (!qualId || !optQual || optQual === qualId) $(this).show();
-            else $(this).hide();
+            if (!qualId || !optQual || optQual === qualId) $(this).show(); else $(this).hide();
         });
         $('#filter_course').val('');
     });
 
     $('#ai_qualification_id').on('change', function() {
         const qualId = $(this).val();
-        const courseSelect = $('#ai_course_id');
-        courseSelect.html('<option value="">Ders seçin...</option>');
-        if (qualId) {
-            const filtered = coursesData.filter(c => c.qualification_id === qualId);
-            filtered.forEach(c => courseSelect.append(`<option value="${c.id}">${c.name}</option>`));
-            courseSelect.prop('disabled', false);
-        } else {
-            courseSelect.prop('disabled', true);
-        }
+        const $course = $('#ai_course_id');
+        $course.html('<option value="">Ders seçin...</option>');
+        if (!qualId) return $course.prop('disabled', true);
+        coursesData.filter(c => c.qualification_id === qualId).forEach(c => $course.append(`<option value="${c.id}">${c.name}</option>`));
+        $course.prop('disabled', false);
+    });
+
+    $('.ai-count-btn').on('click', function() {
+        $('.ai-count-btn').removeClass('active');
+        $(this).addClass('active');
+        const v = $(this).data('count');
+        $('#ai_count_custom').val(v);
+        $('#ai_question_count').val(v);
+    });
+
+    $('#ai_count_custom').on('input', function() {
+        const v = normalizeCount($(this).val());
+        if (v === null) return;
+        $('#ai_question_count').val(v);
+        $('.ai-count-btn').removeClass('active');
     });
 
     $('#selectAll').on('change', function() {
-        $('.question-checkbox').prop('checked', $(this).prop('checked'));
-        updateBulkDeleteBtn();
+        $('.question-checkbox').prop('checked', this.checked);
+        toggleBulk();
     });
-    $(document).on('change', '.question-checkbox', updateBulkDeleteBtn);
-
-    function updateBulkDeleteBtn() {
-        const checked = $('.question-checkbox:checked').length;
-        if (checked > 0) {
-            $('#bulkDeleteBtn').show();
-            $('#selectedCount').text(checked);
-        } else {
-            $('#bulkDeleteBtn').hide();
-        }
+    $(document).on('change', '.question-checkbox', toggleBulk);
+    function toggleBulk() {
+        const n = $('.question-checkbox:checked').length;
+        $('#selectedCount').text(n);
+        $('#bulkDeleteBtn').toggle(n > 0);
     }
+
+    $('#bulkDeleteBtn').on('click', function() {
+        const ids = $('.question-checkbox:checked').map(function(){ return $(this).val(); }).get();
+        if (!confirm(ids.length + ' soruyu silmek istediğinizden emin misiniz?')) return;
+        $.post('../ajax/questions.php?action=bulk_delete', { ids }, function(r){ if(r.success){alert(r.message);location.reload();} else alert('Hata: '+r.message); }, 'json');
+    });
 
     $('.question-row').on('click', function() {
         const id = $(this).data('id');
-        $('.view-btn[data-id="' + id + '"]').trigger('click');
-    });
-
-    $('#bulkDeleteBtn').on('click', function() {
-        const ids = $('.question-checkbox:checked').map(function() { return $(this).val(); }).get();
-        if (!confirm(ids.length + ' soruyu silmek istediğinizden emin misiniz?')) return;
-        $.ajax({
-            url: '../ajax/questions.php?action=bulk_delete',
-            method: 'POST',
-            data: { ids: ids },
-            dataType: 'json',
-            success: r => r.success ? (alert(r.message), location.reload()) : alert('Hata: ' + r.message)
-        });
+        $('.view-btn[data-id="'+id+'"]').trigger('click');
     });
 
     $('.view-btn').on('click', function() {
         const id = $(this).data('id');
-        $.getJSON('../ajax/questions.php?action=get&id=' + id, function(response) {
-            if (!response.success) return alert('Hata: ' + response.message);
-            const q = response.data;
+        $.getJSON('../ajax/questions.php?action=get&id='+id, function(r){
+            if(!r.success) return alert('Hata: '+r.message);
+            const q=r.data;
             $('#viewModalBody').html(`
-                <div class="mb-3"><strong>Soru:</strong><br>${q.question_text}</div>
-                <div class="row">
-                    <div class="col-md-6 mb-2"><span class="badge ${q.correct_answer==='A'?'bg-success':'bg-secondary'}">A)</span> ${q.option_a}</div>
-                    <div class="col-md-6 mb-2"><span class="badge ${q.correct_answer==='B'?'bg-success':'bg-secondary'}">B)</span> ${q.option_b}</div>
-                    <div class="col-md-6 mb-2"><span class="badge ${q.correct_answer==='C'?'bg-success':'bg-secondary'}">C)</span> ${q.option_c}</div>
-                    <div class="col-md-6 mb-2"><span class="badge ${q.correct_answer==='D'?'bg-success':'bg-secondary'}">D)</span> ${q.option_d}</div>
-                </div>
-                <div class="mt-3"><strong>Doğru Cevap:</strong> <span class="badge bg-success">${q.correct_answer}</span></div>
-                ${q.explanation ? `<div class="mt-3"><strong>Açıklama:</strong><br>${q.explanation}</div>` : ''}
+              <div class="mb-2"><strong>Soru:</strong><br>${q.question_text}</div>
+              <div class="row g-2">
+                <div class="col-md-6"><div class="p-2 rounded ${q.correct_answer==='A'?'bg-success text-white':'bg-light'}">A) ${q.option_a}</div></div>
+                <div class="col-md-6"><div class="p-2 rounded ${q.correct_answer==='B'?'bg-success text-white':'bg-light'}">B) ${q.option_b}</div></div>
+                <div class="col-md-6"><div class="p-2 rounded ${q.correct_answer==='C'?'bg-success text-white':'bg-light'}">C) ${q.option_c}</div></div>
+                <div class="col-md-6"><div class="p-2 rounded ${q.correct_answer==='D'?'bg-success text-white':'bg-light'}">D) ${q.option_d}</div></div>
+              </div>
+              ${q.explanation ? `<div class="mt-2"><strong>Açıklama:</strong><br>${q.explanation}</div>` : ''}
             `);
             bootstrap.Modal.getOrCreateInstance(document.getElementById('viewModal')).show();
         });
     });
 
-    $('#addForm').on('submit', function(e) {
-        e.preventDefault();
-        $.post('../ajax/questions.php?action=add', $(this).serialize(), function(r) {
-            if (r.success) { alert(r.message); location.reload(); }
-            else alert('Hata: ' + r.message);
-        }, 'json');
-    });
-
-    $('.edit-btn').on('click', function() {
-        const id = $(this).data('id');
-        $.getJSON('../ajax/questions.php?action=get&id=' + id, function(r) {
-            if (!r.success) return alert('Hata: ' + r.message);
-            const q = r.data;
-            $('#edit_id').val(q.id);
-            $('#edit_course_id').val(q.course_id);
-            $('#edit_question_type').val(q.question_type);
-            $('#edit_question_text').val(q.question_text);
-            $('#edit_option_a').val(q.option_a);
-            $('#edit_option_b').val(q.option_b);
-            $('#edit_option_c').val(q.option_c);
-            $('#edit_option_d').val(q.option_d);
-            $('#edit_correct_answer').val(q.correct_answer);
-            $('#edit_explanation').val(q.explanation || '');
+    $('#addForm').on('submit', function(e){ e.preventDefault(); $.post('../ajax/questions.php?action=add', $(this).serialize(), r => r.success ? (alert(r.message), location.reload()) : alert('Hata: '+r.message), 'json'); });
+    $('.edit-btn').on('click', function(){
+        const id=$(this).data('id');
+        $.getJSON('../ajax/questions.php?action=get&id='+id, function(r){
+            if(!r.success) return alert('Hata: '+r.message);
+            const q=r.data;
+            $('#edit_id').val(q.id); $('#edit_course_id').val(q.course_id); $('#edit_question_type').val(q.question_type);
+            $('#edit_question_text').val(q.question_text); $('#edit_option_a').val(q.option_a); $('#edit_option_b').val(q.option_b);
+            $('#edit_option_c').val(q.option_c); $('#edit_option_d').val(q.option_d); $('#edit_correct_answer').val(q.correct_answer); $('#edit_explanation').val(q.explanation||'');
             bootstrap.Modal.getOrCreateInstance(document.getElementById('editModal')).show();
         });
     });
+    $('#editForm').on('submit', function(e){ e.preventDefault(); $.post('../ajax/questions.php?action=update', $(this).serialize(), r => r.success ? (alert(r.message), location.reload()) : alert('Hata: '+r.message), 'json'); });
+    $('.delete-btn').on('click', function(){ if(!confirm('Bu soruyu silmek istediğinizden emin misiniz?')) return; const id=$(this).data('id'); $.post('../ajax/questions.php?action=delete',{id}, r=> r.success ? (alert(r.message),location.reload()) : alert('Hata: '+r.message),'json'); });
 
-    $('#editForm').on('submit', function(e) {
+    $('#aiForm').on('submit', function(e){
         e.preventDefault();
-        $.post('../ajax/questions.php?action=update', $(this).serialize(), function(r) {
-            if (r.success) { alert(r.message); location.reload(); }
-            else alert('Hata: ' + r.message);
-        }, 'json');
-    });
+        const count = normalizeCount($('#ai_question_count').val());
+        if (count === null) return alert('Soru sayısı 1-100 arasında olmalıdır!');
 
-    $('.delete-btn').on('click', function() {
-        if (!confirm('Bu soruyu silmek istediğinizden emin misiniz?')) return;
-        const id = $(this).data('id');
-        $.post('../ajax/questions.php?action=delete', { id }, function(r) {
-            if (r.success) { alert(r.message); location.reload(); }
-            else alert('Hata: ' + r.message);
-        }, 'json');
-    });
-
-    $('#aiForm').on('submit', function(e) {
-        e.preventDefault();
         $('#aiProgress').removeClass('d-none');
         $('#aiGenerateBtn').prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Üretiliyor...');
         $.ajax({
-            url: '../ajax/ai-generate-questions.php',
-            method: 'POST',
-            data: $(this).serialize(),
-            dataType: 'json',
-            timeout: 90000,
-            success: function(response) {
+            url:'../ajax/ai-generate-questions.php', method:'POST', data:$(this).serialize(), dataType:'json', timeout:90000,
+            success:function(r){
                 $('#aiProgress').addClass('d-none');
                 $('#aiGenerateBtn').prop('disabled', false).html('<i class="bi bi-stars"></i> Üret');
-                if (response.success && response.questions) {
-                    generatedQuestions = response.questions;
-                    bootstrap.Modal.getOrCreateInstance(document.getElementById('aiModal')).hide();
-                    showAiPreview(generatedQuestions);
-                } else {
-                    alert('Hata: ' + (response.message || 'Bilinmeyen hata'));
-                }
+                if(!(r.success && Array.isArray(r.questions))) return alert('Hata: '+(r.message||'Bilinmeyen hata'));
+                generatedQuestions = r.questions.map(q => ({ ...q, status:'pending' }));
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('aiModal')).hide();
+                renderAiPreview();
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('aiPreviewModal')).show();
             },
-            error: function(xhr) {
+            error:function(xhr){
                 $('#aiProgress').addClass('d-none');
                 $('#aiGenerateBtn').prop('disabled', false).html('<i class="bi bi-stars"></i> Üret');
-                console.error(xhr.responseText);
-                alert('AI hatası! Lütfen tekrar deneyin.');
+                console.error(xhr.responseText); alert('AI hatası!');
             }
         });
     });
 
-    function showAiPreview(questions) {
-        let html = `<div class="alert alert-success"><strong>${questions.length} soru üretildi!</strong> Soruları kontrol edin, düzenleyin ve kaydedin.</div>`;
-        questions.forEach((q, index) => {
-            const b = a => q.correct_answer === a ? 'bg-success' : 'bg-secondary';
-            html += `
-                <div class="card mb-3">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <strong>#${index + 1} - ${q.question_type}</strong>
-                        <button class="btn btn-sm btn-danger remove-ai-question" data-index="${index}"><i class="bi bi-x"></i> Kaldır</button>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3"><strong>Soru:</strong><br>${q.question_text}</div>
-                        <div class="row">
-                            <div class="col-md-6 mb-2"><span class="badge ${b('A')}">A)</span> ${q.option_a}</div>
-                            <div class="col-md-6 mb-2"><span class="badge ${b('B')}">B)</span> ${q.option_b}</div>
-                            <div class="col-md-6 mb-2"><span class="badge ${b('C')}">C)</span> ${q.option_c}</div>
-                            <div class="col-md-6 mb-2"><span class="badge ${b('D')}">D)</span> ${q.option_d}</div>
-                        </div>
-                        ${q.explanation ? `<div class="mt-3"><strong>Açıklama:</strong><br><em class="text-muted">${q.explanation}</em></div>` : ''}
-                    </div>
-                </div>`;
+    $(document).on('click', '.ai-approve', function(){ generatedQuestions[$(this).data('index')].status='approved'; renderAiPreview(); });
+    $(document).on('click', '.ai-cancel', function(){ generatedQuestions[$(this).data('index')].status='cancelled'; renderAiPreview(); });
+    $(document).on('click', '.ai-revert', function(){ generatedQuestions[$(this).data('index')].status='pending'; renderAiPreview(); });
+    $(document).on('click', '.ai-edit', function(){ const i=$(this).data('index'); generatedQuestions[i]._editing=true; generatedQuestions[i]._draft={...generatedQuestions[i]}; renderAiPreview(); });
+    $(document).on('input change', '.ai-draft-field', function(){ const i=$(this).data('index'); const f=$(this).data('field'); generatedQuestions[i]._draft[f]=$(this).val(); });
+    $(document).on('click', '.ai-edit-cancel', function(){ const i=$(this).data('index'); generatedQuestions[i]._editing=false; delete generatedQuestions[i]._draft; renderAiPreview(); });
+    $(document).on('click', '.ai-edit-save', function(){
+        const i=$(this).data('index'); const d=generatedQuestions[i]._draft;
+        if(!d.question_text||!d.option_a||!d.option_b||!d.option_c||!d.option_d||!['A','B','C','D'].includes(d.correct_answer)){
+            return alert('Düzenleme geçersiz. Zorunlu alanları kontrol edin.');
+        }
+        Object.assign(generatedQuestions[i], {
+            question_text:d.question_text, option_a:d.option_a, option_b:d.option_b, option_c:d.option_c, option_d:d.option_d,
+            correct_answer:d.correct_answer, explanation:d.explanation||''
         });
-        $('#aiPreviewBody').html(html);
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('aiPreviewModal')).show();
-    }
-
-    $(document).on('click', '.remove-ai-question', function() {
-        const index = $(this).data('index');
-        generatedQuestions.splice(index, 1);
-        showAiPreview(generatedQuestions);
+        generatedQuestions[i]._editing=false; delete generatedQuestions[i]._draft; renderAiPreview();
     });
 
-    $('#saveAiQuestionsBtn').on('click', function() {
-        if (!generatedQuestions.length) return alert('Kaydedilecek soru yok!');
-        $(this).prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Kaydediliyor...');
-        $.post('../ajax/save-ai-questions.php', { questions: JSON.stringify(generatedQuestions) }, function(r) {
-            if (r.success) { alert(r.message); location.reload(); }
-            else {
-                alert('Hata: ' + r.message);
-                $('#saveAiQuestionsBtn').prop('disabled', false).html('<i class="bi bi-save"></i> Tümünü Kaydet');
-            }
+    $('#saveAiQuestionsBtn').on('click', function(){
+        const approved = generatedQuestions.filter(q => q.status === 'approved');
+        if(!approved.length) return alert('Kaydedilecek onaylı soru yok!');
+        $(this).prop('disabled', true).text('Kaydediliyor...');
+        $.post('../ajax/save-ai-questions.php', { questions: JSON.stringify(approved) }, function(r){
+            if(r.success){ alert(r.message); location.reload(); }
+            else { alert('Hata: '+r.message); $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet'); }
         }, 'json');
     });
 });
