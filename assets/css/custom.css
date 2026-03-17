@@ -715,6 +715,55 @@ textarea::placeholder {
         text-align: left;
     }
 
+    .courses-mobile-tools .form-select,
+    .courses-mobile-tools .form-control {
+        min-height: 36px;
+    }
+
+    .course-mobile-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: var(--shadow-soft);
+    }
+
+    .course-mobile-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    .course-mobile-title {
+        flex: 1;
+        min-width: 0;
+        font-size: 15px;
+        line-height: 1.4;
+        word-break: normal;
+        overflow-wrap: break-word;
+        white-space: normal;
+    }
+
+    .course-mobile-meta {
+        display: grid;
+        gap: 4px;
+        color: var(--text-muted);
+        font-size: 12px;
+        word-break: normal;
+        overflow-wrap: break-word;
+    }
+
+    .course-mobile-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .course-mobile-actions .btn {
+        width: 100%;
+        min-height: 36px;
+        justify-content: center;
+    }
+
     .modal-dialog {
         margin: 10px;
     }
