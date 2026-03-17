@@ -70,6 +70,7 @@ include '../includes/sidebar.php';
         </div>
         <div class="page-actions">
             <button class="btn btn-danger" id="bulkDeleteBtn" style="display:none;"><i class="bi bi-trash"></i> Seçilenleri Sil (<span id="selectedCount">0</span>)</button>
+            <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#bulkUploadModal"><i class="bi bi-upload"></i> Toplu Soru Yükle</button>
             <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#aiModal"><i class="bi bi-stars"></i> AI ile Üret</button>
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal"><i class="bi bi-plus-lg"></i> Manuel Ekle</button>
         </div>
@@ -231,6 +232,80 @@ include '../includes/sidebar.php';
     </div></div>
 </div>
 
+<!-- Bulk Upload Modal -->
+<div class="modal fade" id="bulkUploadModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-secondary text-white">
+                <h5 class="modal-title"><i class="bi bi-upload"></i> Toplu Soru Yükle</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="bulkUploadForm">
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Yeterlilik *</label>
+                            <select class="form-select" id="bulk_qualification_id" required>
+                                <option value="">Seçiniz...</option>
+                                <?php foreach ($qualifications as $q): ?>
+                                    <option value="<?= htmlspecialchars($q['id']) ?>"><?= htmlspecialchars($q['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Ders *</label>
+                            <select class="form-select" id="bulk_course_id" required disabled>
+                                <option value="">Önce yeterlilik seçin...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Soru Türü *</label>
+                            <select class="form-select" id="bulk_question_type" required>
+                                <option value="">Seçiniz...</option>
+                                <option value="sözel">Sözel</option>
+                                <option value="sayısal">Sayısal</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mt-3">
+                        <label class="form-label">Soruları Yapıştırın *</label>
+                        <textarea class="form-control" id="bulk_questions_text" rows="12" placeholder="Soruları buraya yapıştırın..." required></textarea>
+                    </div>
+
+                    <div class="alert alert-info mt-3 mb-0">
+                        <strong>Beklenen Format:</strong>
+<pre class="mb-0 mt-2" style="white-space:pre-wrap; font-size:12px;">1. Soru metni?
+A) Şık A
+B) Şık B
+C) Şık C
+D) Şık D
+Açıklama:
+Açıklama metni
+⸻
+2. İkinci soru?
+A) ...
+B) ...
+C) ...
+D) ...
+Açıklama:
+...
+⸻
+Cevap Anahtarı
+1-A
+2-B
+3-C</pre>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-diagram-3"></i> Ayrıştır / Önizle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- AI Preview -->
 <div class="modal fade" id="aiPreviewModal" tabindex="-1">
     <div class="modal-dialog modal-xl"><div class="modal-content"><div class="modal-header bg-success text-white"><h5 class="modal-title"><i class="bi bi-check-circle"></i> Üretilen Sorular</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
@@ -255,6 +330,129 @@ function normalizeCount(v) {
     return n;
 }
 
+function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
+    const fullText = (rawText || '').replace(/\r\n/g, '\n').trim();
+    const result = { parsed: [], parsed_count: 0, skipped_count: 0, total_blocks: 0 };
+
+    if (!fullText) {
+        return result;
+    }
+
+    const lowerText = fullText.toLocaleLowerCase('tr-TR');
+    const answerKeyIndex = lowerText.indexOf('cevap anahtarı');
+    const bodyText = answerKeyIndex >= 0 ? fullText.slice(0, answerKeyIndex).trim() : fullText;
+    const answerKeyText = answerKeyIndex >= 0 ? fullText.slice(answerKeyIndex) : '';
+
+    const answerMap = {};
+    if (answerKeyText) {
+        const answerRegex = /(\d+)\s*[-:]\s*([ABCD])/gi;
+        let answerMatch;
+        while ((answerMatch = answerRegex.exec(answerKeyText)) !== null) {
+            answerMap[parseInt(answerMatch[1], 10)] = answerMatch[2].toUpperCase();
+        }
+    }
+
+    const startRegex = /^\s*(\d+)\.\s*(.*)$/gm;
+    const starts = [];
+    let startMatch;
+    while ((startMatch = startRegex.exec(bodyText)) !== null) {
+        starts.push({ num: parseInt(startMatch[1], 10), index: startMatch.index });
+    }
+
+    result.total_blocks = starts.length;
+    if (!starts.length) {
+        return result;
+    }
+
+    const normalizeText = (txt) => (txt || '').replace(/\s+/g, ' ').trim();
+    const cleanOptionText = (txt) => normalizeText((txt || '').replace(/\(\s*doğru\s*\)/ig, '').replace(/^[*✓✔]+\s*/, ''));
+
+    for (let i = 0; i < starts.length; i++) {
+        const blockStart = starts[i].index;
+        const blockEnd = i + 1 < starts.length ? starts[i + 1].index : bodyText.length;
+        const blockText = bodyText.slice(blockStart, blockEnd).trim();
+        const number = starts[i].num;
+
+        const lines = blockText.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+        if (!lines.length) {
+            result.skipped_count++;
+            continue;
+        }
+
+        lines[0] = lines[0].replace(/^\s*\d+\.\s*/, '').trim();
+
+        const questionLines = [];
+        const options = { A: '', B: '', C: '', D: '' };
+        let currentOption = null;
+        let explanationMode = false;
+        const explanationLines = [];
+        let inferredCorrect = '';
+
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) continue;
+
+            if (explanationMode) {
+                explanationLines.push(line);
+                continue;
+            }
+
+            const expMatch = line.match(/^açıklama\s*:\s*(.*)$/i);
+            if (expMatch) {
+                explanationMode = true;
+                if (expMatch[1]) explanationLines.push(expMatch[1].trim());
+                continue;
+            }
+
+            const optMatch = line.match(/^([ABCD])[\)\.\-:]\s*(.*)$/i);
+            if (optMatch) {
+                currentOption = optMatch[1].toUpperCase();
+                let optValue = optMatch[2] || '';
+                if (/^\s*[*✓✔]/.test(optValue) || /\(\s*doğru\s*\)/i.test(optValue)) {
+                    inferredCorrect = currentOption;
+                }
+                options[currentOption] = cleanOptionText(optValue);
+                continue;
+            }
+
+            if (currentOption) {
+                options[currentOption] = normalizeText(`${options[currentOption]} ${line}`);
+            } else {
+                questionLines.push(line);
+            }
+        }
+
+        const questionText = normalizeText(questionLines.join(' '));
+        const correctAnswer = (answerMap[number] || inferredCorrect || '').toUpperCase();
+
+        const isValid =
+            questionText.length >= 10 &&
+            options.A && options.B && options.C && options.D &&
+            ['A', 'B', 'C', 'D'].includes(correctAnswer);
+
+        if (!isValid) {
+            result.skipped_count++;
+            continue;
+        }
+
+        result.parsed.push({
+            question_text: questionText,
+            option_a: options.A,
+            option_b: options.B,
+            option_c: options.C,
+            option_d: options.D,
+            correct_answer: correctAnswer,
+            explanation: normalizeText(explanationLines.join(' ')),
+            question_type: selectedType,
+            course_id: selectedCourseId,
+            status: 'pending'
+        });
+    }
+
+    result.parsed_count = result.parsed.length;
+    return result;
+}
+
 function statusCounts() {
     return {
         approved: generatedQuestions.filter(q => q.status === 'approved').length,
@@ -269,7 +467,15 @@ function renderAiPreview() {
 
     let html = '';
 
-    if (generationMeta) {
+    if (generationMeta && generationMeta.source === 'bulk') {
+        const parsed = generationMeta.parsed_count ?? generatedQuestions.length;
+        const skipped = generationMeta.skipped_count ?? 0;
+        const total = generationMeta.total_blocks ?? parsed + skipped;
+        html += `
+          <div class="alert alert-info">
+            Toplam blok: <strong>${total}</strong> • Ayrıştırılan: <strong>${parsed}</strong> • Atlanan: <strong>${skipped}</strong>
+          </div>`;
+    } else if (generationMeta) {
         const requested = generationMeta.requested_count ?? generatedQuestions.length;
         const generated = generationMeta.generated_count ?? generatedQuestions.length;
         const filteredDup = generationMeta.filtered_duplicates ?? 0;
@@ -374,6 +580,53 @@ $(document).ready(function() {
         if (!qualId) return $course.prop('disabled', true);
         coursesData.filter(c => c.qualification_id === qualId).forEach(c => $course.append(`<option value="${c.id}">${c.name}</option>`));
         $course.prop('disabled', false);
+    });
+
+    $('#bulk_qualification_id').on('change', function() {
+        const qualId = $(this).val();
+        const $course = $('#bulk_course_id');
+        $course.html('<option value="">Ders seçin...</option>');
+        if (!qualId) {
+            $course.prop('disabled', true);
+            return;
+        }
+        coursesData
+            .filter(c => c.qualification_id === qualId)
+            .forEach(c => $course.append(`<option value="${c.id}">${c.name}</option>`));
+        $course.prop('disabled', false);
+    });
+
+    $('#bulkUploadForm').on('submit', function(e) {
+        e.preventDefault();
+
+        const qualificationId = $('#bulk_qualification_id').val();
+        const courseId = $('#bulk_course_id').val();
+        const questionType = $('#bulk_question_type').val();
+        const rawText = $('#bulk_questions_text').val();
+
+        if (!qualificationId) return alert('Lütfen yeterlilik seçiniz.');
+        if (!courseId) return alert('Lütfen ders seçiniz.');
+        if (!questionType) return alert('Lütfen soru türü seçiniz.');
+        if (!rawText || !rawText.trim()) return alert('Lütfen soru metnini yapıştırınız.');
+
+        const parsedResult = parseBulkQuestions(rawText, questionType, courseId);
+        if (!parsedResult.parsed_count) {
+            return alert('Hiç soru ayrıştırılamadı. Format hatalı olabilir.');
+        }
+
+        generatedQuestions = parsedResult.parsed;
+        generationMeta = {
+            source: 'bulk',
+            parsed_count: parsedResult.parsed_count,
+            skipped_count: parsedResult.skipped_count,
+            total_blocks: parsedResult.total_blocks
+        };
+
+        alert(`${parsedResult.parsed_count} soru işlendi, ${parsedResult.skipped_count} soru atlandı.`);
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('bulkUploadModal')).hide();
+        renderAiPreview();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('aiPreviewModal')).show();
     });
 
     $('.ai-count-btn').on('click', function() {
