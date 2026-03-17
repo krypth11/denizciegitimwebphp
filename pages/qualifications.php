@@ -191,18 +191,17 @@ $extra_js = <<<'JAVASCRIPT'
 <script>
 // jQuery hazır mı kontrol et
 $(document).ready(function() {
-    console.log('Qualifications page - jQuery ready!');
-
     const appAlert = (title, message, type = 'info') => {
         if (typeof window.showAppAlert === 'function') {
             window.showAppAlert(title, message, type);
         }
     };
 
-    const appConfirm = (title, message, onConfirm, options = {}) => {
+    const appConfirm = (title, message, options = {}) => {
         if (typeof window.showAppConfirm === 'function') {
-            window.showAppConfirm(title, message, onConfirm, options);
+            return window.showAppConfirm({ title, message, ...options });
         }
+        return Promise.resolve(false);
     };
 
     // DataTable başlat (sadece desktop)
@@ -215,7 +214,6 @@ $(document).ready(function() {
             pageLength: 25,
             responsive: true
         });
-        console.log('DataTable initialized');
     }
 
     // Mobil kart filtre + sayfa boyutu
@@ -252,22 +250,14 @@ $(document).ready(function() {
     // Yeni Ekle Form
     $('#addForm').on('submit', function(e) {
         e.preventDefault();
-        console.log('Add form submit triggered');
-
         const formData = $(this).serialize();
-        console.log('Form data:', formData);
 
         $.ajax({
             url: '../ajax/qualifications.php?action=add',
             method: 'POST',
             data: formData,
             dataType: 'json',
-            beforeSend: function() {
-                console.log('Sending AJAX request...');
-            },
             success: function(response) {
-                console.log('AJAX Success:', response);
-
                 if (response.success) {
                     appAlert('Başarılı', response.message || 'Başarıyla eklendi!', 'success');
                     setTimeout(() => location.reload(), 350);
@@ -289,15 +279,12 @@ $(document).ready(function() {
     // Düzenle Butonu
     $('.edit-btn').on('click', function() {
         const id = $(this).data('id');
-        console.log('Edit button clicked, ID:', id);
 
         $.ajax({
             url: '../ajax/qualifications.php?action=get&id=' + id,
             method: 'GET',
             dataType: 'json',
             success: function(response) {
-                console.log('Get response:', response);
-
                 if (response.success) {
                     $('#edit_id').val(response.data.id);
                     $('#edit_name').val(response.data.name);
@@ -320,10 +307,7 @@ $(document).ready(function() {
     // Düzenle Form
     $('#editForm').on('submit', function(e) {
         e.preventDefault();
-        console.log('Edit form submit triggered');
-
         const formData = $(this).serialize();
-        console.log('Edit form data:', formData);
 
         $.ajax({
             url: '../ajax/qualifications.php?action=update',
@@ -331,8 +315,6 @@ $(document).ready(function() {
             data: formData,
             dataType: 'json',
             success: function(response) {
-                console.log('Update response:', response);
-
                 if (response.success) {
                     appAlert('Başarılı', response.message || 'Başarıyla güncellendi!', 'success');
                     setTimeout(() => location.reload(), 350);
@@ -348,39 +330,34 @@ $(document).ready(function() {
     });
 
     // Sil Butonu
-    $('.delete-btn').on('click', function() {
+    $('.delete-btn').on('click', async function() {
         const id = $(this).data('id');
-        console.log('Delete button clicked, ID:', id);
-
-        appConfirm('Silme Onayı', 'Bu kaydı silmek istediğinizden emin misiniz?', function() {
-            $.ajax({
-                url: '../ajax/qualifications.php?action=delete',
-                method: 'POST',
-                data: { id: id },
-                dataType: 'json',
-                success: function(response) {
-                    console.log('Delete response:', response);
-
-                    if (response.success) {
-                        appAlert('Başarılı', response.message || 'Başarıyla silindi!', 'success');
-                        setTimeout(() => location.reload(), 350);
-                    } else {
-                        appAlert('Hata', response.message || 'Silme başarısız', 'error');
-                    }
-                },
-                error: function(xhr, status, error) {
-                    console.error('Delete AJAX Error:', {xhr, status, error});
-                    appAlert('Hata', 'Silme hatası: ' + error, 'error');
-                }
-            });
-        }, {
+        const ok = await appConfirm('Silme Onayı', 'Bu kaydı silmek istediğinizden emin misiniz?', {
             type: 'warning',
             confirmText: 'Sil',
             cancelText: 'İptal'
         });
-    });
+        if (!ok) return;
 
-    console.log('All event handlers attached successfully');
+        $.ajax({
+            url: '../ajax/qualifications.php?action=delete',
+            method: 'POST',
+            data: { id: id },
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    appAlert('Başarılı', response.message || 'Başarıyla silindi!', 'success');
+                    setTimeout(() => location.reload(), 350);
+                } else {
+                    appAlert('Hata', response.message || 'Silme başarısız', 'error');
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('Delete AJAX Error:', {xhr, status, error});
+                appAlert('Hata', 'Silme hatası: ' + error, 'error');
+            }
+        });
+    });
 });
 </script>
 JAVASCRIPT;

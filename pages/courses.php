@@ -222,18 +222,17 @@ include '../includes/sidebar.php';
 $extra_js = <<<'JAVASCRIPT'
 <script>
 $(document).ready(function() {
-    console.log('Courses page - jQuery ready!');
-
     const appAlert = (title, message, type = 'info') => {
         if (typeof window.showAppAlert === 'function') {
             window.showAppAlert(title, message, type);
         }
     };
 
-    const appConfirm = (title, message, onConfirm, options = {}) => {
+    const appConfirm = (title, message, options = {}) => {
         if (typeof window.showAppConfirm === 'function') {
-            window.showAppConfirm(title, message, onConfirm, options);
+            return window.showAppConfirm({ title, message, ...options });
         }
+        return Promise.resolve(false);
     };
 
     // DataTable (sadece desktop)
@@ -350,31 +349,32 @@ $(document).ready(function() {
     });
 
     // Delete Button
-    $('.delete-btn').on('click', function() {
+    $('.delete-btn').on('click', async function() {
         const id = $(this).data('id');
-        appConfirm('Silme Onayı', 'Bu dersi silmek istediğinizden emin misiniz?', function() {
-            $.ajax({
-                url: '../ajax/courses.php?action=delete',
-                method: 'POST',
-                data: { id: id },
-                dataType: 'json',
-                success: function(response) {
-                    if (response.success) {
-                        appAlert('Başarılı', response.message || 'Silindi!', 'success');
-                        setTimeout(() => location.reload(), 350);
-                    } else {
-                        appAlert('Hata', response.message || 'Silme başarısız.', 'error');
-                    }
-                },
-                error: function(xhr) {
-                    console.error('Error:', xhr.responseText);
-                    appAlert('Hata', 'Hata oluştu!', 'error');
-                }
-            });
-        }, {
+        const ok = await appConfirm('Silme Onayı', 'Bu dersi silmek istediğinizden emin misiniz?', {
             type: 'warning',
             confirmText: 'Sil',
             cancelText: 'İptal'
+        });
+        if (!ok) return;
+
+        $.ajax({
+            url: '../ajax/courses.php?action=delete',
+            method: 'POST',
+            data: { id: id },
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    appAlert('Başarılı', response.message || 'Silindi!', 'success');
+                    setTimeout(() => location.reload(), 350);
+                } else {
+                    appAlert('Hata', response.message || 'Silme başarısız.', 'error');
+                }
+            },
+            error: function(xhr) {
+                console.error('Error:', xhr.responseText);
+                appAlert('Hata', 'Hata oluştu!', 'error');
+            }
         });
     });
 });

@@ -562,10 +562,11 @@ $(document).ready(function() {
         }
     };
 
-    const appConfirm = (title, message, onConfirm, options = {}) => {
+    const appConfirm = (title, message, options = {}) => {
         if (typeof window.showAppConfirm === 'function') {
-            window.showAppConfirm(title, message, onConfirm, options);
+            return window.showAppConfirm({ title, message, ...options });
         }
+        return Promise.resolve(false);
     };
 
     $('#questionsTable').DataTable({
@@ -674,23 +675,23 @@ $(document).ready(function() {
         $('#bulkDeleteBtn').toggle(n > 0);
     }
 
-    $('#bulkDeleteBtn').on('click', function() {
+    $('#bulkDeleteBtn').on('click', async function() {
         const ids = $('.question-checkbox:checked').map(function(){ return $(this).val(); }).get();
-        appConfirm(
-            'Toplu Silme Onayı',
-            ids.length + ' soruyu silmek istediğinizden emin misiniz?',
-            function() {
-                $.post('../ajax/questions.php?action=bulk_delete', { ids }, function(r){
-                    if(r.success){
-                        appAlert('Başarılı', r.message, 'success');
-                        setTimeout(() => location.reload(), 350);
-                    } else {
-                        appAlert('Hata', r.message, 'error');
-                    }
-                }, 'json');
-            },
-            { type: 'warning', confirmText: 'Sil', cancelText: 'İptal' }
-        );
+        const ok = await appConfirm('Toplu Silme Onayı', ids.length + ' soruyu silmek istediğinizden emin misiniz?', {
+            type: 'warning',
+            confirmText: 'Sil',
+            cancelText: 'İptal'
+        });
+        if (!ok) return;
+
+        $.post('../ajax/questions.php?action=bulk_delete', { ids }, function(r){
+            if(r.success){
+                appAlert('Başarılı', r.message, 'success');
+                setTimeout(() => location.reload(), 350);
+            } else {
+                appAlert('Hata', r.message, 'error');
+            }
+        }, 'json');
     });
 
     $('#addForm').on('submit', function(e){
@@ -726,23 +727,23 @@ $(document).ready(function() {
             }
         }, 'json');
     });
-    $('.delete-btn').on('click', function(){
+    $('.delete-btn').on('click', async function(){
         const id=$(this).data('id');
-        appConfirm(
-            'Silme Onayı',
-            'Bu soruyu silmek istediğinizden emin misiniz?',
-            function() {
-                $.post('../ajax/questions.php?action=delete', {id}, function(r){
-                    if (r.success) {
-                        appAlert('Başarılı', r.message, 'success');
-                        setTimeout(() => location.reload(), 350);
-                    } else {
-                        appAlert('Hata', r.message, 'error');
-                    }
-                }, 'json');
-            },
-            { type: 'warning', confirmText: 'Sil', cancelText: 'İptal' }
-        );
+        const ok = await appConfirm('Silme Onayı', 'Bu soruyu silmek istediğinizden emin misiniz?', {
+            type: 'warning',
+            confirmText: 'Sil',
+            cancelText: 'İptal'
+        });
+        if (!ok) return;
+
+        $.post('../ajax/questions.php?action=delete', {id}, function(r){
+            if (r.success) {
+                appAlert('Başarılı', r.message, 'success');
+                setTimeout(() => location.reload(), 350);
+            } else {
+                appAlert('Hata', r.message, 'error');
+            }
+        }, 'json');
     });
 
     $('#aiForm').on('submit', function(e){
@@ -795,28 +796,28 @@ $(document).ready(function() {
         generatedQuestions[i]._editing=false; delete generatedQuestions[i]._draft; renderAiPreview();
     });
 
-    $('#saveAiQuestionsBtn').on('click', function(){
+    $('#saveAiQuestionsBtn').on('click', async function(){
         const approved = generatedQuestions.filter(q => q.status === 'approved');
         if(!approved.length) return appAlert('Uyarı', 'Kaydedilecek onaylı soru yok!', 'warning');
 
-        appConfirm(
+        const ok = await appConfirm(
             'Kaydetme Onayı',
             'Bu işlem geri alınamaz.<br><br>Onaylanan <strong>' + approved.length + '</strong> soru veritabanına kaydedilecek.<br><br>Devam etmek istiyor musunuz?',
-            function() {
-                $('#saveAiQuestionsBtn').prop('disabled', true).text('Kaydediliyor...');
-                $.post('../ajax/save-ai-questions.php', { questions: JSON.stringify(approved) }, function(r){
-                    if(r.success){
-                        appAlert('Başarılı', r.message, 'success');
-                        setTimeout(() => location.reload(), 350);
-                    }
-                    else {
-                        appAlert('Hata', r.message, 'error');
-                        $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
-                    }
-                }, 'json');
-            },
             { type: 'warning', confirmText: 'Kaydet', cancelText: 'İptal' }
         );
+        if (!ok) return;
+
+        $('#saveAiQuestionsBtn').prop('disabled', true).text('Kaydediliyor...');
+        $.post('../ajax/save-ai-questions.php', { questions: JSON.stringify(approved) }, function(r){
+            if(r.success){
+                appAlert('Başarılı', r.message, 'success');
+                setTimeout(() => location.reload(), 350);
+            }
+            else {
+                appAlert('Hata', r.message, 'error');
+                $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
+            }
+        }, 'json');
     });
 });
 </script>
