@@ -26,7 +26,7 @@ include '../includes/sidebar.php';
         </div>
     </div>
 
-    <div class="card">
+    <div class="card d-none d-md-block">
         <div class="card-body">
             <div class="table-responsive">
                 <table id="qualificationsTable" class="table table-hover align-middle mobile-card-table">
@@ -72,6 +72,54 @@ include '../includes/sidebar.php';
                 </table>
             </div>
         </div>
+    </div>
+
+    <div class="d-md-none qualifications-mobile-tools mb-3">
+        <div class="row g-2">
+            <div class="col-5">
+                <select id="mobileQualificationPageSize" class="form-select form-select-sm">
+                    <option value="10">10 kayıt</option>
+                    <option value="25" selected>25 kayıt</option>
+                    <option value="50">50 kayıt</option>
+                    <option value="all">Tümü</option>
+                </select>
+            </div>
+            <div class="col-7">
+                <input type="search" id="mobileQualificationSearch" class="form-control form-control-sm" placeholder="Yeterlilik ara...">
+            </div>
+        </div>
+    </div>
+
+    <div id="qualificationsMobileList" class="d-md-none">
+        <?php foreach ($qualifications as $q): ?>
+            <?php
+                $searchText = mb_strtolower(trim(($q['name'] ?? '') . ' ' . ($q['description'] ?? '')), 'UTF-8');
+            ?>
+            <div class="card qualification-mobile-card mb-3" data-search="<?= htmlspecialchars($searchText) ?>">
+                <div class="card-body">
+                    <div class="qualification-mobile-head">
+                        <h6 class="qualification-mobile-title mb-0"><?= htmlspecialchars($q['name']) ?></h6>
+                        <span class="badge bg-secondary">#<?= (int)$q['order_index'] ?></span>
+                    </div>
+
+                    <div class="qualification-mobile-meta mt-2">
+                        <?php if (!empty($q['description'])): ?>
+                            <div><strong>Açıklama:</strong> <?= htmlspecialchars($q['description']) ?></div>
+                        <?php endif; ?>
+                        <div><strong>Oluşturulma:</strong> <?= format_date($q['created_at']) ?></div>
+                    </div>
+
+                    <div class="qualification-mobile-actions mt-3">
+                        <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>">
+                            <i class="bi bi-pencil"></i> Düzenle
+                        </button>
+                        <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($q['id']) ?>">
+                            <i class="bi bi-trash"></i> Sil
+                        </button>
+                    </div>
+                </div>
+            </div>
+        <?php endforeach; ?>
     </div>
 </div>
 
@@ -145,17 +193,49 @@ $extra_js = <<<'JAVASCRIPT'
 $(document).ready(function() {
     console.log('Qualifications page - jQuery ready!');
 
-    // DataTable başlat
-    const table = $('#qualificationsTable').DataTable({
-        language: {
-            url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/tr.json'
-        },
-        order: [[0, 'asc']],
-        pageLength: 25,
-        responsive: true
-    });
+    // DataTable başlat (sadece desktop)
+    if (window.matchMedia('(min-width: 768px)').matches) {
+        $('#qualificationsTable').DataTable({
+            language: {
+                url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/tr.json'
+            },
+            order: [[0, 'asc']],
+            pageLength: 25,
+            responsive: true
+        });
+        console.log('DataTable initialized');
+    }
 
-    console.log('DataTable initialized');
+    // Mobil kart filtre + sayfa boyutu
+    function applyMobileQualificationFilter() {
+        if (window.matchMedia('(min-width: 768px)').matches) return;
+
+        const query = ($('#mobileQualificationSearch').val() || '').toLowerCase().trim();
+        const pageSize = $('#mobileQualificationPageSize').val();
+        let shown = 0;
+
+        $('#qualificationsMobileList .qualification-mobile-card').each(function() {
+            const text = ($(this).data('search') || '').toString().toLowerCase();
+            const matches = !query || text.includes(query);
+
+            if (!matches) {
+                $(this).hide();
+                return;
+            }
+
+            if (pageSize !== 'all' && shown >= parseInt(pageSize, 10)) {
+                $(this).hide();
+                return;
+            }
+
+            $(this).show();
+            shown++;
+        });
+    }
+
+    $('#mobileQualificationSearch').on('input', applyMobileQualificationFilter);
+    $('#mobileQualificationPageSize').on('change', applyMobileQualificationFilter);
+    applyMobileQualificationFilter();
 
     // Yeni Ekle Form
     $('#addForm').on('submit', function(e) {
