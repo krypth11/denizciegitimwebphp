@@ -25,5 +25,22 @@
         <?= $extra_js ?>
     <?php endif; ?>
 
+    <!-- Ortak Uyarı/Onay Modalı -->
+    <div class="modal fade" id="appDialogModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title" id="appDialogTitle">Bilgi</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="appDialogBody"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="appDialogCancelBtn" data-bs-dismiss="modal">İptal</button>
+                    <button type="button" class="btn btn-primary" id="appDialogConfirmBtn">Tamam</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </body>
 </html>

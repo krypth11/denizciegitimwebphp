@@ -556,6 +556,18 @@ function renderAiPreview() {
 }
 
 $(document).ready(function() {
+    const appAlert = (title, message, type = 'info') => {
+        if (typeof window.showAppAlert === 'function') {
+            window.showAppAlert(title, message, type);
+        }
+    };
+
+    const appConfirm = (title, message, onConfirm, options = {}) => {
+        if (typeof window.showAppConfirm === 'function') {
+            window.showAppConfirm(title, message, onConfirm, options);
+        }
+    };
+
     $('#questionsTable').DataTable({
         language: { url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/tr.json' },
         order: [],
@@ -604,14 +616,14 @@ $(document).ready(function() {
         const questionType = $('#bulk_question_type').val();
         const rawText = $('#bulk_questions_text').val();
 
-        if (!qualificationId) return alert('Lütfen yeterlilik seçiniz.');
-        if (!courseId) return alert('Lütfen ders seçiniz.');
-        if (!questionType) return alert('Lütfen soru türü seçiniz.');
-        if (!rawText || !rawText.trim()) return alert('Lütfen soru metnini yapıştırınız.');
+        if (!qualificationId) return appAlert('Uyarı', 'Lütfen yeterlilik seçiniz.', 'warning');
+        if (!courseId) return appAlert('Uyarı', 'Lütfen ders seçiniz.', 'warning');
+        if (!questionType) return appAlert('Uyarı', 'Lütfen soru türü seçiniz.', 'warning');
+        if (!rawText || !rawText.trim()) return appAlert('Uyarı', 'Lütfen soru metnini yapıştırınız.', 'warning');
 
         const parsedResult = parseBulkQuestions(rawText, questionType, courseId);
         if (!parsedResult.parsed_count) {
-            return alert('Hiç soru ayrıştırılamadı. Format hatalı olabilir.');
+            return appAlert('Hata', 'Hiç soru ayrıştırılamadı. Format hatalı olabilir.', 'error');
         }
 
         generatedQuestions = parsedResult.parsed;
@@ -622,11 +634,18 @@ $(document).ready(function() {
             total_blocks: parsedResult.total_blocks
         };
 
-        alert(`${parsedResult.parsed_count} soru işlendi, ${parsedResult.skipped_count} soru atlandı.`);
-
         bootstrap.Modal.getOrCreateInstance(document.getElementById('bulkUploadModal')).hide();
+        $('#bulk_questions_text').val('');
         renderAiPreview();
         bootstrap.Modal.getOrCreateInstance(document.getElementById('aiPreviewModal')).show();
+    });
+
+    $('#bulkUploadModal').on('show.bs.modal', function() {
+        $('#bulk_questions_text').val('');
+    });
+
+    $('#bulkUploadModal').on('hidden.bs.modal', function() {
+        $('#bulk_questions_text').val('');
     });
 
     $('.ai-count-btn').on('click', function() {
@@ -657,15 +676,38 @@ $(document).ready(function() {
 
     $('#bulkDeleteBtn').on('click', function() {
         const ids = $('.question-checkbox:checked').map(function(){ return $(this).val(); }).get();
-        if (!confirm(ids.length + ' soruyu silmek istediğinizden emin misiniz?')) return;
-        $.post('../ajax/questions.php?action=bulk_delete', { ids }, function(r){ if(r.success){alert(r.message);location.reload();} else alert('Hata: '+r.message); }, 'json');
+        appConfirm(
+            'Toplu Silme Onayı',
+            ids.length + ' soruyu silmek istediğinizden emin misiniz?',
+            function() {
+                $.post('../ajax/questions.php?action=bulk_delete', { ids }, function(r){
+                    if(r.success){
+                        appAlert('Başarılı', r.message, 'success');
+                        setTimeout(() => location.reload(), 350);
+                    } else {
+                        appAlert('Hata', r.message, 'error');
+                    }
+                }, 'json');
+            },
+            { type: 'warning', confirmText: 'Sil', cancelText: 'İptal' }
+        );
     });
 
-    $('#addForm').on('submit', function(e){ e.preventDefault(); $.post('../ajax/questions.php?action=add', $(this).serialize(), r => r.success ? (alert(r.message), location.reload()) : alert('Hata: '+r.message), 'json'); });
+    $('#addForm').on('submit', function(e){
+        e.preventDefault();
+        $.post('../ajax/questions.php?action=add', $(this).serialize(), function(r){
+            if (r.success) {
+                appAlert('Başarılı', r.message, 'success');
+                setTimeout(() => location.reload(), 350);
+            } else {
+                appAlert('Hata', r.message, 'error');
+            }
+        }, 'json');
+    });
     $('.edit-btn').on('click', function(){
         const id=$(this).data('id');
         $.getJSON('../ajax/questions.php?action=get&id='+id, function(r){
-            if(!r.success) return alert('Hata: '+r.message);
+            if(!r.success) return appAlert('Hata', r.message, 'error');
             const q=r.data;
             $('#edit_id').val(q.id); $('#edit_course_id').val(q.course_id); $('#edit_question_type').val(q.question_type);
             $('#edit_question_text').val(q.question_text); $('#edit_option_a').val(q.option_a); $('#edit_option_b').val(q.option_b);
@@ -673,13 +715,40 @@ $(document).ready(function() {
             bootstrap.Modal.getOrCreateInstance(document.getElementById('editModal')).show();
         });
     });
-    $('#editForm').on('submit', function(e){ e.preventDefault(); $.post('../ajax/questions.php?action=update', $(this).serialize(), r => r.success ? (alert(r.message), location.reload()) : alert('Hata: '+r.message), 'json'); });
-    $('.delete-btn').on('click', function(){ if(!confirm('Bu soruyu silmek istediğinizden emin misiniz?')) return; const id=$(this).data('id'); $.post('../ajax/questions.php?action=delete',{id}, r=> r.success ? (alert(r.message),location.reload()) : alert('Hata: '+r.message),'json'); });
+    $('#editForm').on('submit', function(e){
+        e.preventDefault();
+        $.post('../ajax/questions.php?action=update', $(this).serialize(), function(r){
+            if (r.success) {
+                appAlert('Başarılı', r.message, 'success');
+                setTimeout(() => location.reload(), 350);
+            } else {
+                appAlert('Hata', r.message, 'error');
+            }
+        }, 'json');
+    });
+    $('.delete-btn').on('click', function(){
+        const id=$(this).data('id');
+        appConfirm(
+            'Silme Onayı',
+            'Bu soruyu silmek istediğinizden emin misiniz?',
+            function() {
+                $.post('../ajax/questions.php?action=delete', {id}, function(r){
+                    if (r.success) {
+                        appAlert('Başarılı', r.message, 'success');
+                        setTimeout(() => location.reload(), 350);
+                    } else {
+                        appAlert('Hata', r.message, 'error');
+                    }
+                }, 'json');
+            },
+            { type: 'warning', confirmText: 'Sil', cancelText: 'İptal' }
+        );
+    });
 
     $('#aiForm').on('submit', function(e){
         e.preventDefault();
         const count = normalizeCount($('#ai_question_count').val());
-        if (count === null) return alert('Soru sayısı 1-100 arasında olmalıdır!');
+        if (count === null) return appAlert('Uyarı', 'Soru sayısı 1-100 arasında olmalıdır!', 'warning');
 
         $('#aiProgress').removeClass('d-none');
         $('#aiGenerateBtn').prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Üretiliyor...');
@@ -688,7 +757,7 @@ $(document).ready(function() {
             success:function(r){
                 $('#aiProgress').addClass('d-none');
                 $('#aiGenerateBtn').prop('disabled', false).html('<i class="bi bi-stars"></i> Üret');
-                if(!(r.success && Array.isArray(r.questions))) return alert('Hata: '+(r.message||'Bilinmeyen hata'));
+                if(!(r.success && Array.isArray(r.questions))) return appAlert('Hata', (r.message||'Bilinmeyen hata'), 'error');
                 generatedQuestions = r.questions.map(q => ({ ...q, status:'pending' }));
                 generationMeta = {
                     requested_count: r.requested_count ?? count,
@@ -703,7 +772,7 @@ $(document).ready(function() {
             error:function(xhr){
                 $('#aiProgress').addClass('d-none');
                 $('#aiGenerateBtn').prop('disabled', false).html('<i class="bi bi-stars"></i> Üret');
-                console.error(xhr.responseText); alert('AI hatası!');
+                console.error(xhr.responseText); appAlert('Hata', 'AI hatası!', 'error');
             }
         });
     });
@@ -717,7 +786,7 @@ $(document).ready(function() {
     $(document).on('click', '.ai-edit-save', function(){
         const i=$(this).data('index'); const d=generatedQuestions[i]._draft;
         if(!d.question_text||!d.option_a||!d.option_b||!d.option_c||!d.option_d||!['A','B','C','D'].includes(d.correct_answer)){
-            return alert('Düzenleme geçersiz. Zorunlu alanları kontrol edin.');
+            return appAlert('Uyarı', 'Düzenleme geçersiz. Zorunlu alanları kontrol edin.', 'warning');
         }
         Object.assign(generatedQuestions[i], {
             question_text:d.question_text, option_a:d.option_a, option_b:d.option_b, option_c:d.option_c, option_d:d.option_d,
@@ -728,23 +797,26 @@ $(document).ready(function() {
 
     $('#saveAiQuestionsBtn').on('click', function(){
         const approved = generatedQuestions.filter(q => q.status === 'approved');
-        if(!approved.length) return alert('Kaydedilecek onaylı soru yok!');
+        if(!approved.length) return appAlert('Uyarı', 'Kaydedilecek onaylı soru yok!', 'warning');
 
-        const ok = confirm(
-            'Bu işlem geri alınamaz.\n\n' +
-            'Onaylanan ' + approved.length + ' soru veritabanına kaydedilecek.\n\n' +
-            'Devam etmek istiyor musunuz?'
+        appConfirm(
+            'Kaydetme Onayı',
+            'Bu işlem geri alınamaz.<br><br>Onaylanan <strong>' + approved.length + '</strong> soru veritabanına kaydedilecek.<br><br>Devam etmek istiyor musunuz?',
+            function() {
+                $('#saveAiQuestionsBtn').prop('disabled', true).text('Kaydediliyor...');
+                $.post('../ajax/save-ai-questions.php', { questions: JSON.stringify(approved) }, function(r){
+                    if(r.success){
+                        appAlert('Başarılı', r.message, 'success');
+                        setTimeout(() => location.reload(), 350);
+                    }
+                    else {
+                        appAlert('Hata', r.message, 'error');
+                        $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
+                    }
+                }, 'json');
+            },
+            { type: 'warning', confirmText: 'Kaydet', cancelText: 'İptal' }
         );
-
-        if (!ok) {
-            return;
-        }
-
-        $(this).prop('disabled', true).text('Kaydediliyor...');
-        $.post('../ajax/save-ai-questions.php', { questions: JSON.stringify(approved) }, function(r){
-            if(r.success){ alert(r.message); location.reload(); }
-            else { alert('Hata: '+r.message); $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet'); }
-        }, 'json');
     });
 });
 </script>
