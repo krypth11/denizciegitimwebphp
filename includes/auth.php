@@ -116,24 +116,24 @@ function logout_user()
 
 function is_authenticated_session()
 {
-    if (empty($_SESSION['auth_user_id']) || empty($_SESSION['auth_email']) || !isset($_SESSION['auth_is_admin'])) {
+    if (empty($_SESSION['user_id']) || empty($_SESSION['email']) || !isset($_SESSION['is_admin'])) {
         return false;
     }
 
-    $lastActivity = (int)($_SESSION['auth_last_activity'] ?? 0);
+    $lastActivity = (int)($_SESSION['last_activity'] ?? 0);
     if ($lastActivity > 0 && (time() - $lastActivity) > SESSION_TIMEOUT) {
         logout_user();
         return false;
     }
 
-    $sessionUa = $_SESSION['auth_user_agent'] ?? '';
+    $sessionUa = $_SESSION['user_agent'] ?? '';
     $currentUa = hash('sha256', $_SERVER['HTTP_USER_AGENT'] ?? 'unknown');
     if (!empty($sessionUa) && !hash_equals($sessionUa, $currentUa)) {
         logout_user();
         return false;
     }
 
-    $_SESSION['auth_last_activity'] = time();
+    $_SESSION['last_activity'] = time();
     return true;
 }
 
@@ -142,9 +142,9 @@ function verify_token()
     // Eski akışla uyumluluk: artık session bazlı doğrulama esas
     if (is_authenticated_session()) {
         return [
-            'user_id' => $_SESSION['auth_user_id'],
-            'email' => $_SESSION['auth_email'],
-            'is_admin' => (bool)$_SESSION['auth_is_admin'],
+            'user_id' => $_SESSION['user_id'],
+            'email' => $_SESSION['email'],
+            'is_admin' => (bool)$_SESSION['is_admin'],
         ];
     }
 
@@ -165,13 +165,25 @@ function require_auth()
         exit;
     }
 
+    if (empty($_SESSION['is_admin'])) {
+        logout_user();
+        if (is_ajax_request()) {
+            json_response([
+                'success' => false,
+                'message' => 'Admin yetkisi gerekli!',
+            ], 403);
+        }
+        header('Location: /index.php');
+        exit;
+    }
+
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');
 
     return [
-        'user_id' => $_SESSION['auth_user_id'],
-        'email' => $_SESSION['auth_email'],
-        'is_admin' => (bool)$_SESSION['auth_is_admin'],
+        'user_id' => $_SESSION['user_id'],
+        'email' => $_SESSION['email'],
+        'is_admin' => (bool)$_SESSION['is_admin'],
     ];
 }
 

@@ -25,54 +25,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $error = 'Geçerli bir email adresi girin.';
         } else {
-            $upCols = get_table_columns($pdo, 'user_profiles');
-            $auCols = get_table_columns($pdo, 'admin_users');
-
-            $select = ['up.id', 'up.email'];
-            $where = ['up.email = ?'];
-
-            if (in_array('is_admin', $upCols, true)) {
-                $select[] = 'up.is_admin';
-            } else {
-                $select[] = '0 as is_admin';
-            }
-
-            if (in_array('is_deleted', $upCols, true)) {
-                $where[] = 'up.is_deleted = 0';
-            }
-
-            $passwordCandidates = ['password_hash', 'password', 'hashed_password', 'pass_hash', 'passwd'];
-            foreach ($passwordCandidates as $col) {
-                if (in_array($col, $upCols, true)) {
-                    $select[] = 'up.' . $col . ' as up_' . $col;
-                }
-            }
-
-            $adminSelect = ['au.user_id as admin_check'];
-            foreach ($passwordCandidates as $col) {
-                if (in_array($col, $auCols, true)) {
-                    $adminSelect[] = 'au.' . $col . ' as au_' . $col;
-                }
-            }
-
-            $sql = 'SELECT ' . implode(', ', array_merge($select, $adminSelect))
-                . ' FROM user_profiles up'
-                . ' LEFT JOIN admin_users au ON up.id = au.user_id'
-                . ' WHERE ' . implode(' AND ', $where)
-                . ' LIMIT 1';
-
-            $stmt = $pdo->prepare($sql);
+            $stmt = $pdo->prepare(
+                'SELECT id, email, is_admin, password_hash
+                 FROM user_profiles
+                 WHERE email = ? AND is_deleted = 0
+                 LIMIT 1'
+            );
             $stmt->execute([$email]);
             $user = $stmt->fetch();
 
             $isValidLogin = false;
             $isAdmin = false;
-
             if ($user) {
-                $hash = extract_password_hash_from_row($user);
-                if ($hash && verify_password($password, $hash)) {
+                $hash = $user['password_hash'] ?? '';
+                $isAdmin = ((int)($user['is_admin'] ?? 0) === 1);
+
+                if ($isAdmin && verify_password($password, $hash)) {
                     $isValidLogin = true;
-                    $isAdmin = ((int)($user['is_admin'] ?? 0) === 1 || !empty($user['admin_check']));
                 }
             }
 
@@ -86,16 +55,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $error = 'Email veya şifre hatalı.';
-            } elseif (!$isAdmin) {
-                $error = 'Bu panele erişim için admin yetkisi gereklidir.';
             } else {
                 session_regenerate_id(true);
 
-                $_SESSION['auth_user_id'] = $user['id'];
-                $_SESSION['auth_email'] = $user['email'];
-                $_SESSION['auth_is_admin'] = 1;
-                $_SESSION['auth_last_activity'] = $now;
-                $_SESSION['auth_user_agent'] = hash('sha256', $_SERVER['HTTP_USER_AGENT'] ?? 'unknown');
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['email'] = $user['email'];
+                $_SESSION['is_admin'] = 1;
+                $_SESSION['last_activity'] = $now;
+                $_SESSION['user_agent'] = hash('sha256', $_SERVER['HTTP_USER_AGENT'] ?? 'unknown');
 
                 unset($_SESSION['login_attempt_count'], $_SESSION['login_last_attempt'], $_SESSION['login_locked_until']);
 
