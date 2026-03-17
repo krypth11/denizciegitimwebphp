@@ -24,7 +24,7 @@ if (!isset($user)) {
 </head>
 <body>
     <div class="app-shell">
-        <nav class="navbar topbar">
+        <nav class="topbar">
             <div class="container-fluid px-3 px-lg-4 topbar-inner">
                 <div class="d-flex align-items-center gap-2">
                     <button class="btn btn-secondary btn-sm d-lg-none" type="button" data-bs-toggle="offcanvas" data-bs-target="#adminSidebar" aria-controls="adminSidebar">
@@ -41,4 +41,4 @@ if (!isset($user)) {
                 </div>
             </div>
         </nav>
-        <div class="d-flex app-main">
+        <div class="app-main">
