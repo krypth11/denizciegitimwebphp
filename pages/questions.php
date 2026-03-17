@@ -121,25 +121,37 @@ include '../includes/sidebar.php';
             <table id="questionsTable" class="table table-hover align-middle">
                 <thead>
                     <tr>
-                        <th style="width:40px;"><input type="checkbox" id="selectAll"></th>
-                        <th style="width:70px;">Tip</th>
-                        <th>Soru / Şıklar</th>
-                        <th>Yeterlilik</th>
-                        <th>Ders</th>
+                        <th class="questions-col-select" style="width:40px;"><input type="checkbox" id="selectAll"></th>
+                        <th class="questions-col-type" style="width:70px;">Tip</th>
+                        <th class="questions-col-question">Soru / Şıklar</th>
+                        <th class="questions-col-qualification">Yeterlilik</th>
+                        <th class="questions-col-course">Ders</th>
                         <th class="questions-actions-col" style="width:80px;">İşlemler</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($questions as $q): ?>
-                    <tr>
-                        <td onclick="event.stopPropagation()"><input type="checkbox" class="question-checkbox" value="<?= htmlspecialchars($q['id']) ?>"></td>
-                        <td>
+                    <tr class="question-row-card">
+                        <td class="questions-col-select" onclick="event.stopPropagation()"><input type="checkbox" class="question-checkbox" value="<?= htmlspecialchars($q['id']) ?>"></td>
+                        <td class="questions-col-type">
                             <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
                             <?php elseif ($q['question_type'] === 'karışık'): ?><span class="badge bg-warning text-dark">Karışık</span>
                             <?php else: ?><span class="badge bg-info">Sözel</span><?php endif; ?>
                         </td>
-                        <td>
-                            <strong><?= htmlspecialchars(mb_substr($q['question_text'], 0, 80)) ?>...</strong>
+                        <td class="questions-col-question">
+                            <div class="question-mobile-head">
+                                <strong class="question-title-mobile"><?= htmlspecialchars(mb_substr($q['question_text'], 0, 200)) ?>...</strong>
+                                <span class="question-mobile-type">
+                                    <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
+                                    <?php elseif ($q['question_type'] === 'karışık'): ?><span class="badge bg-warning text-dark">Karışık</span>
+                                    <?php else: ?><span class="badge bg-info">Sözel</span><?php endif; ?>
+                                </span>
+                            </div>
+                            <div class="question-mobile-meta d-none">
+                                <span><?= htmlspecialchars($q['qualification_name']) ?></span>
+                                <span>/</span>
+                                <span><?= htmlspecialchars($q['course_name']) ?></span>
+                            </div>
                             <div class="questions-option-grid mt-2">
                                 <div class="questions-option-item <?= $q['correct_answer'] === 'A' ? 'correct' : '' ?>">A) <?= htmlspecialchars(mb_substr($q['option_a'], 0, 28)) ?></div>
                                 <div class="questions-option-item <?= $q['correct_answer'] === 'B' ? 'correct' : '' ?>">B) <?= htmlspecialchars(mb_substr($q['option_b'], 0, 28)) ?></div>
@@ -147,8 +159,8 @@ include '../includes/sidebar.php';
                                 <div class="questions-option-item <?= $q['correct_answer'] === 'D' ? 'correct' : '' ?>">D) <?= htmlspecialchars(mb_substr($q['option_d'], 0, 28)) ?></div>
                             </div>
                         </td>
-                        <td><small class="text-muted"><?= htmlspecialchars($q['qualification_name']) ?></small></td>
-                        <td><strong><?= htmlspecialchars($q['course_name']) ?></strong></td>
+                        <td class="questions-col-qualification"><small class="text-muted"><?= htmlspecialchars($q['qualification_name']) ?></small></td>
+                        <td class="questions-col-course"><strong><?= htmlspecialchars($q['course_name']) ?></strong></td>
                         <td class="questions-actions-cell" onclick="event.stopPropagation()">
                             <div class="table-actions questions-actions-wrap">
                                 <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Düzenle"><i class="bi bi-pencil"></i></button>
