@@ -1,16 +1,271 @@
 <?php
 require_once '../includes/config.php';
 require_once '../includes/auth.php';
+require_once '../includes/functions.php';
 
 $user = require_auth();
 $current_page = 'courses';
 $page_title = 'Dersler';
 
+// Dersleri çek (qualification bilgisiyle birlikte)
+$courses = $pdo->query(
+    "SELECT c.*, q.name as qualification_name
+     FROM courses c
+     LEFT JOIN qualifications q ON c.qualification_id = q.id
+     ORDER BY q.order_index, c.order_index, c.name"
+)->fetchAll();
+
+// Yeterlilikleri çek (dropdown için)
+$qualifications = $pdo->query("SELECT * FROM qualifications ORDER BY order_index, name")->fetchAll();
+
 include '../includes/header.php';
 include '../includes/sidebar.php';
 ?>
+
 <div class="container-fluid">
-    <h2>Dersler</h2>
-    <div class="alert alert-info mt-3">Bu sayfa kurulumun sonraki adımında tamamlanacak.</div>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Dersler</h2>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal">
+            <i class="bi bi-plus-lg"></i> Yeni Ders Ekle
+        </button>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <table id="coursesTable" class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Sıra</th>
+                        <th>Ders Adı</th>
+                        <th>Yeterlilik</th>
+                        <th>Açıklama</th>
+                        <th>Oluşturulma</th>
+                        <th>İşlemler</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($courses as $c): ?>
+                    <tr>
+                        <td><?= (int)$c['order_index'] ?></td>
+                        <td><strong><?= htmlspecialchars($c['name']) ?></strong></td>
+                        <td>
+                            <span class="badge bg-primary"><?= htmlspecialchars($c['qualification_name'] ?? 'N/A') ?></span>
+                        </td>
+                        <td><?= htmlspecialchars($c['description'] ?? '-') ?></td>
+                        <td><?= format_date($c['created_at']) ?></td>
+                        <td>
+                            <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($c['id']) ?>">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($c['id']) ?>">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
+
+<!-- Add Modal -->
+<div class="modal fade" id="addModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Yeni Ders Ekle</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="addForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Yeterlilik *</label>
+                        <select class="form-select" name="qualification_id" required>
+                            <option value="">Seçiniz...</option>
+                            <?php foreach ($qualifications as $q): ?>
+                                <option value="<?= htmlspecialchars($q['id']) ?>"><?= htmlspecialchars($q['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ders Adı *</label>
+                        <input type="text" class="form-control" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Açıklama</label>
+                        <textarea class="form-control" name="description" rows="3"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Sıra</label>
+                        <input type="number" class="form-control" name="order_index" value="0">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary">Kaydet</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Ders Düzenle</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editForm">
+                <input type="hidden" name="id" id="edit_id">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Yeterlilik *</label>
+                        <select class="form-select" name="qualification_id" id="edit_qualification_id" required>
+                            <option value="">Seçiniz...</option>
+                            <?php foreach ($qualifications as $q): ?>
+                                <option value="<?= htmlspecialchars($q['id']) ?>"><?= htmlspecialchars($q['name']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ders Adı *</label>
+                        <input type="text" class="form-control" name="name" id="edit_name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Açıklama</label>
+                        <textarea class="form-control" name="description" id="edit_description" rows="3"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Sıra</label>
+                        <input type="number" class="form-control" name="order_index" id="edit_order_index">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary">Güncelle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<?php
+$extra_js = <<<'JAVASCRIPT'
+<script>
+$(document).ready(function() {
+    console.log('Courses page - jQuery ready!');
+
+    // DataTable
+    $('#coursesTable').DataTable({
+        language: {
+            url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/tr.json'
+        },
+        order: [[0, 'asc']],
+        pageLength: 25
+    });
+
+    // Add Form
+    $('#addForm').on('submit', function(e) {
+        e.preventDefault();
+
+        $.ajax({
+            url: '../ajax/courses.php?action=add',
+            method: 'POST',
+            data: $(this).serialize(),
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    alert(response.message || 'Ders eklendi!');
+                    location.reload();
+                } else {
+                    alert('Hata: ' + response.message);
+                }
+            },
+            error: function(xhr) {
+                console.error('Error:', xhr.responseText);
+                alert('Hata oluştu!');
+            }
+        });
+    });
+
+    // Edit Button
+    $('.edit-btn').on('click', function() {
+        const id = $(this).data('id');
+
+        $.ajax({
+            url: '../ajax/courses.php?action=get&id=' + id,
+            method: 'GET',
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    $('#edit_id').val(response.data.id);
+                    $('#edit_name').val(response.data.name);
+                    $('#edit_description').val(response.data.description || '');
+                    $('#edit_order_index').val(response.data.order_index || 0);
+                    $('#edit_qualification_id').val(response.data.qualification_id);
+
+                    const editModal = new bootstrap.Modal(document.getElementById('editModal'));
+                    editModal.show();
+                }
+            }
+        });
+    });
+
+    // Edit Form
+    $('#editForm').on('submit', function(e) {
+        e.preventDefault();
+
+        $.ajax({
+            url: '../ajax/courses.php?action=update',
+            method: 'POST',
+            data: $(this).serialize(),
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    alert(response.message || 'Güncellendi!');
+                    location.reload();
+                } else {
+                    alert('Hata: ' + response.message);
+                }
+            },
+            error: function(xhr) {
+                console.error('Error:', xhr.responseText);
+                alert('Hata oluştu!');
+            }
+        });
+    });
+
+    // Delete Button
+    $('.delete-btn').on('click', function() {
+        if (!confirm('Bu dersi silmek istediğinizden emin misiniz?')) return;
+
+        const id = $(this).data('id');
+
+        $.ajax({
+            url: '../ajax/courses.php?action=delete',
+            method: 'POST',
+            data: { id: id },
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    alert(response.message || 'Silindi!');
+                    location.reload();
+                } else {
+                    alert('Hata: ' + response.message);
+                }
+            },
+            error: function(xhr) {
+                console.error('Error:', xhr.responseText);
+                alert('Hata oluştu!');
+            }
+        });
+    });
+});
+</script>
+JAVASCRIPT;
+?>
+
 <?php include '../includes/footer.php'; ?>

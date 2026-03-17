@@ -1,5 +1,12 @@
+    <!-- Sidebar -->
     <div class="sidebar">
-        <nav class="nav flex-column mt-3">
+        <!-- Sidebar Header -->
+        <div class="sidebar-header">
+            <h4><i class="bi bi-mortarboard-fill"></i> Denizci Eğitim</h4>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="nav flex-column mt-3" style="padding-bottom: 180px;">
             <a class="nav-link <?= ($current_page ?? '') === 'dashboard' ? 'active' : '' ?>" href="/dashboard.php">
                 <i class="bi bi-speedometer2"></i> Dashboard
             </a>
@@ -42,8 +49,21 @@
                 <i class="bi bi-gear"></i> Ayarlar
             </a>
         </nav>
+
+        <!-- Sidebar Footer -->
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <i class="bi bi-person-circle"></i>
+                <small class="d-block"><?= htmlspecialchars($user['email']) ?></small>
+            </div>
+            <a href="/logout.php" class="btn btn-danger w-100 btn-sm">
+                <i class="bi bi-box-arrow-left"></i> Çıkış Yap
+            </a>
+        </div>
     </div>
 
+    <!-- Main Content -->
     <div class="main-content">
+
 
 
