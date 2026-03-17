@@ -1,0 +1,52 @@
+:root {
+    --primary: #5B9BD5;
+    --primary-light: #EAF2FB;
+    --secondary: #9EB6CB;
+    --background: #F5F7FA;
+}
+
+.card {
+    border-radius: 12px;
+    transition: transform 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+}
+
+.btn-primary {
+    background-color: var(--primary);
+    border-color: var(--primary);
+}
+
+.btn-primary:hover {
+    background-color: #4a8ac4;
+    border-color: #4a8ac4;
+}
+
+.dataTables_wrapper .dataTables_length select,
+.dataTables_wrapper .dataTables_filter input {
+    border-radius: 8px;
+    padding: 6px 12px;
+}
+
+.modal-content {
+    border-radius: 12px;
+    border: none;
+}
+
+.modal-header {
+    border-bottom: 1px solid #eee;
+    background: var(--primary-light);
+}
+
+@media (max-width: 768px) {
+    .sidebar {
+        width: 0;
+        overflow: hidden;
+    }
+
+    .main-content {
+        margin-left: 0;
+    }
+}

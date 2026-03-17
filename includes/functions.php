@@ -1,0 +1,47 @@
+<?php
+// includes/functions.php
+
+function sanitize_input($data)
+{
+    return htmlspecialchars(strip_tags(trim((string)$data)), ENT_QUOTES, 'UTF-8');
+}
+
+function generate_uuid()
+{
+    return sprintf(
+        '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0x0fff) | 0x4000,
+        mt_rand(0, 0x3fff) | 0x8000,
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff)
+    );
+}
+
+function format_date($date)
+{
+    if (!$date) {
+        return '-';
+    }
+    return date('d.m.Y H:i', strtotime($date));
+}
+
+function success_response($message, $data = [])
+{
+    return json_response([
+        'success' => true,
+        'message' => $message,
+        'data' => $data,
+    ]);
+}
+
+function error_response($message, $status = 400)
+{
+    return json_response([
+        'success' => false,
+        'message' => $message,
+    ], $status);
+}
