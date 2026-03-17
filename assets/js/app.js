@@ -1,7 +1,11 @@
 $(document).ajaxError(function (event, jqxhr, settings, thrownError) {
     console.error('AJAX Error:', thrownError);
     if (typeof window.showAppAlert === 'function') {
-        window.showAppAlert('Hata', 'Bir hata oluştu: ' + thrownError, 'error');
+        window.showAppAlert({
+            title: 'Hata',
+            message: 'Bir hata oluştu: ' + thrownError,
+            type: 'error',
+        });
     }
 });
 
@@ -26,7 +30,11 @@ function showToast(message, type = 'success') {
 
 function confirmAction(message, callback) {
     if (typeof window.showAppConfirm === 'function') {
-        window.showAppConfirm('Onay', message, callback);
+        window.showAppConfirm({
+            title: 'Onay',
+            message: message,
+            onConfirm: callback,
+        });
         return;
     }
 }
@@ -43,27 +51,31 @@ function formatDate(dateString) {
 }
 
 (function initAppDialogs() {
-    const state = {
-        onConfirm: null,
-        onCancel: null,
-        currentMode: 'alert',
-    };
+    let activeResolver = null;
+    let activeOnConfirm = null;
+    let activeOnCancel = null;
+    let activeMode = 'alert';
+    let actionTaken = false;
 
-    function getDialogElements() {
+    function getEls() {
         return {
             modal: document.getElementById('appDialogModal'),
             title: document.getElementById('appDialogTitle'),
             body: document.getElementById('appDialogBody'),
             cancel: document.getElementById('appDialogCancelBtn'),
-            confirm: document.getElementById('appDialogConfirmBtn')
+            confirm: document.getElementById('appDialogConfirmBtn'),
         };
+    }
+
+    function safeHtml(text) {
+        return (text || '').toString().replace(/\n/g, '<br>');
     }
 
     function setType(modalEl, type) {
         const header = modalEl.querySelector('.modal-header');
         const confirmBtn = modalEl.querySelector('#appDialogConfirmBtn');
         header.classList.remove('bg-danger', 'bg-success', 'bg-warning', 'bg-info', 'text-white', 'text-dark');
-        confirmBtn.classList.remove('btn-danger', 'btn-success', 'btn-warning', 'btn-primary', 'btn-info');
+        confirmBtn.classList.remove('btn-danger', 'btn-success', 'btn-warning', 'btn-primary');
 
         if (type === 'error') {
             header.classList.add('bg-danger', 'text-white');
@@ -71,7 +83,7 @@ function formatDate(dateString) {
         } else if (type === 'success') {
             header.classList.add('bg-success', 'text-white');
             confirmBtn.classList.add('btn-success');
-        } else if (type === 'warning') {
+        } else if (type === 'warning' || type === 'confirm') {
             header.classList.add('bg-warning', 'text-dark');
             confirmBtn.classList.add('btn-warning');
         } else {
@@ -80,70 +92,157 @@ function formatDate(dateString) {
         }
     }
 
-    function resetState() {
-        state.onConfirm = null;
-        state.onCancel = null;
-        state.currentMode = 'alert';
+    function resetDialogState() {
+        activeResolver = null;
+        activeOnConfirm = null;
+        activeOnCancel = null;
+        activeMode = 'alert';
+        actionTaken = false;
     }
 
-    window.showAppAlert = function (title, message, type = 'info') {
-        const els = getDialogElements();
-        if (!els.modal || typeof bootstrap === 'undefined') return;
+    function normalizeAlertArgs(arg1, arg2, arg3) {
+        if (typeof arg1 === 'object' && arg1 !== null) {
+            return {
+                title: arg1.title || 'Bilgi',
+                message: arg1.message || '',
+                type: arg1.type || 'info',
+                buttonText: arg1.buttonText || 'Tamam',
+            };
+        }
 
-        els.title.textContent = title || 'Bilgi';
-        els.body.innerHTML = (message || '').toString().replace(/\n/g, '<br>');
-        els.cancel.classList.add('d-none');
-        els.confirm.textContent = 'Tamam';
-        state.currentMode = 'alert';
-
-        setType(els.modal, type);
-
-        const modal = bootstrap.Modal.getOrCreateInstance(els.modal);
-        els.confirm.onclick = () => {
-            modal.hide();
+        return {
+            title: arg1 || 'Bilgi',
+            message: arg2 || '',
+            type: arg3 || 'info',
+            buttonText: 'Tamam',
         };
-        els.cancel.onclick = null;
-        modal.show();
+    }
+
+    function normalizeConfirmArgs(arg1, arg2, arg3, arg4) {
+        if (typeof arg1 === 'object' && arg1 !== null) {
+            return {
+                title: arg1.title || 'Onay',
+                message: arg1.message || '',
+                onConfirm: typeof arg1.onConfirm === 'function' ? arg1.onConfirm : null,
+                onCancel: typeof arg1.onCancel === 'function' ? arg1.onCancel : null,
+                type: arg1.type || 'warning',
+                confirmText: arg1.confirmText || 'Onayla',
+                cancelText: arg1.cancelText || 'İptal',
+            };
+        }
+
+        const options = (arg4 && typeof arg4 === 'object') ? arg4 : {};
+        return {
+            title: arg1 || 'Onay',
+            message: arg2 || '',
+            onConfirm: typeof arg3 === 'function' ? arg3 : null,
+            onCancel: typeof options.onCancel === 'function' ? options.onCancel : null,
+            type: options.type || 'warning',
+            confirmText: options.confirmText || 'Onayla',
+            cancelText: options.cancelText || 'İptal',
+        };
+    }
+
+    window.showAppAlert = function (arg1, arg2, arg3) {
+        const els = getEls();
+        if (!els.modal || typeof bootstrap === 'undefined') {
+            return Promise.resolve();
+        }
+
+        const config = normalizeAlertArgs(arg1, arg2, arg3);
+        const modal = bootstrap.Modal.getOrCreateInstance(els.modal);
+
+        resetDialogState();
+        activeMode = 'alert';
+
+        els.title.textContent = config.title;
+        els.body.innerHTML = safeHtml(config.message);
+        els.cancel.classList.add('d-none');
+        els.confirm.textContent = config.buttonText;
+        setType(els.modal, config.type);
+
+        return new Promise((resolve) => {
+            activeResolver = resolve;
+
+            els.confirm.onclick = function () {
+                actionTaken = true;
+                modal.hide();
+            };
+
+            els.cancel.onclick = null;
+
+            els.modal.addEventListener('hidden.bs.modal', function onHidden() {
+                els.modal.removeEventListener('hidden.bs.modal', onHidden);
+                if (activeResolver) {
+                    activeResolver();
+                }
+                resetDialogState();
+                els.confirm.onclick = null;
+                els.cancel.onclick = null;
+            });
+
+            modal.show();
+        });
     };
 
-    window.showAppConfirm = function (title, message, onConfirm, options = {}) {
-        const els = getDialogElements();
-        if (!els.modal || typeof bootstrap === 'undefined') return;
+    window.showAppConfirm = function (arg1, arg2, arg3, arg4) {
+        const els = getEls();
+        if (!els.modal || typeof bootstrap === 'undefined') {
+            return Promise.resolve(false);
+        }
 
-        els.title.textContent = title || 'Onay';
-        els.body.innerHTML = (message || '').toString().replace(/\n/g, '<br>');
-        els.cancel.classList.remove('d-none');
-        els.cancel.textContent = options.cancelText || 'İptal';
-        els.confirm.textContent = options.confirmText || 'Onayla';
-        state.currentMode = 'confirm';
-
-        setType(els.modal, options.type || 'warning');
-
+        const config = normalizeConfirmArgs(arg1, arg2, arg3, arg4);
         const modal = bootstrap.Modal.getOrCreateInstance(els.modal);
-        state.onConfirm = typeof onConfirm === 'function' ? onConfirm : null;
-        state.onCancel = typeof options.onCancel === 'function' ? options.onCancel : null;
 
-        els.confirm.onclick = () => {
-            const callback = state.onConfirm;
-            resetState();
-            modal.hide();
-            if (typeof callback === 'function') callback();
-        };
+        resetDialogState();
+        activeMode = 'confirm';
+        activeOnConfirm = config.onConfirm;
+        activeOnCancel = config.onCancel;
 
-        els.cancel.onclick = () => {
-            const onCancelCb = state.onCancel;
-            resetState();
-            modal.hide();
-            if (typeof onCancelCb === 'function') onCancelCb();
-        };
+        els.title.textContent = config.title;
+        els.body.innerHTML = safeHtml(config.message);
+        els.cancel.classList.remove('d-none');
+        els.cancel.textContent = config.cancelText;
+        els.confirm.textContent = config.confirmText;
+        setType(els.modal, config.type || 'confirm');
 
-        els.modal.addEventListener('hidden.bs.modal', function handleHidden() {
-            els.modal.removeEventListener('hidden.bs.modal', handleHidden);
-            resetState();
-            els.confirm.onclick = null;
-            els.cancel.onclick = null;
+        return new Promise((resolve) => {
+            activeResolver = resolve;
+
+            els.confirm.onclick = function () {
+                actionTaken = true;
+                modal.hide();
+            };
+
+            els.cancel.onclick = function () {
+                actionTaken = false;
+                modal.hide();
+            };
+
+            els.modal.addEventListener('hidden.bs.modal', function onHidden() {
+                els.modal.removeEventListener('hidden.bs.modal', onHidden);
+
+                const confirmed = !!actionTaken;
+                const onConfirmCb = activeOnConfirm;
+                const onCancelCb = activeOnCancel;
+                const resolver = activeResolver;
+
+                resetDialogState();
+                els.confirm.onclick = null;
+                els.cancel.onclick = null;
+
+                if (confirmed && typeof onConfirmCb === 'function') {
+                    onConfirmCb();
+                }
+                if (!confirmed && typeof onCancelCb === 'function') {
+                    onCancelCb();
+                }
+                if (resolver) {
+                    resolver(confirmed);
+                }
+            });
+
+            modal.show();
         });
-
-        modal.show();
     };
 })();
