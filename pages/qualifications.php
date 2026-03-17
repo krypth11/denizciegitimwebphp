@@ -193,6 +193,18 @@ $extra_js = <<<'JAVASCRIPT'
 $(document).ready(function() {
     console.log('Qualifications page - jQuery ready!');
 
+    const appAlert = (title, message, type = 'info') => {
+        if (typeof window.showAppAlert === 'function') {
+            window.showAppAlert(title, message, type);
+        }
+    };
+
+    const appConfirm = (title, message, onConfirm, options = {}) => {
+        if (typeof window.showAppConfirm === 'function') {
+            window.showAppConfirm(title, message, onConfirm, options);
+        }
+    };
+
     // DataTable başlat (sadece desktop)
     if (window.matchMedia('(min-width: 768px)').matches) {
         $('#qualificationsTable').DataTable({
@@ -257,10 +269,10 @@ $(document).ready(function() {
                 console.log('AJAX Success:', response);
 
                 if (response.success) {
-                    alert(response.message || 'Başarıyla eklendi!');
-                    location.reload();
+                    appAlert('Başarılı', response.message || 'Başarıyla eklendi!', 'success');
+                    setTimeout(() => location.reload(), 350);
                 } else {
-                    alert('Hata: ' + (response.message || 'Bilinmeyen hata'));
+                    appAlert('Hata', response.message || 'Bilinmeyen hata', 'error');
                 }
             },
             error: function(xhr, status, error) {
@@ -269,7 +281,7 @@ $(document).ready(function() {
                     error: error,
                     responseText: xhr.responseText
                 });
-                alert('AJAX Hatası!\nStatus: ' + status + '\nHata: ' + error + '\n\nDetay için Console\'a bakın (F12)');
+                appAlert('Hata', 'AJAX Hatası!<br>Status: ' + status + '<br>Hata: ' + error + '<br><br>Detay için Console\'a bakın (F12)', 'error');
             }
         });
     });
@@ -295,12 +307,12 @@ $(document).ready(function() {
                     const editModal = new bootstrap.Modal(document.getElementById('editModal'));
                     editModal.show();
                 } else {
-                    alert('Hata: ' + (response.message || 'Veri yüklenemedi'));
+                    appAlert('Hata', response.message || 'Veri yüklenemedi', 'error');
                 }
             },
             error: function(xhr, status, error) {
                 console.error('Get AJAX Error:', {xhr, status, error});
-                alert('Veri yüklenemedi: ' + error);
+                appAlert('Hata', 'Veri yüklenemedi: ' + error, 'error');
             }
         });
     });
@@ -322,47 +334,49 @@ $(document).ready(function() {
                 console.log('Update response:', response);
 
                 if (response.success) {
-                    alert(response.message || 'Başarıyla güncellendi!');
-                    location.reload();
+                    appAlert('Başarılı', response.message || 'Başarıyla güncellendi!', 'success');
+                    setTimeout(() => location.reload(), 350);
                 } else {
-                    alert('Hata: ' + (response.message || 'Güncelleme başarısız'));
+                    appAlert('Hata', response.message || 'Güncelleme başarısız', 'error');
                 }
             },
             error: function(xhr, status, error) {
                 console.error('Update AJAX Error:', {xhr, status, error});
-                alert('Güncelleme hatası: ' + error);
+                appAlert('Hata', 'Güncelleme hatası: ' + error, 'error');
             }
         });
     });
 
     // Sil Butonu
     $('.delete-btn').on('click', function() {
-        if (!confirm('Bu kaydı silmek istediğinizden emin misiniz?')) {
-            return;
-        }
-
         const id = $(this).data('id');
         console.log('Delete button clicked, ID:', id);
 
-        $.ajax({
-            url: '../ajax/qualifications.php?action=delete',
-            method: 'POST',
-            data: { id: id },
-            dataType: 'json',
-            success: function(response) {
-                console.log('Delete response:', response);
+        appConfirm('Silme Onayı', 'Bu kaydı silmek istediğinizden emin misiniz?', function() {
+            $.ajax({
+                url: '../ajax/qualifications.php?action=delete',
+                method: 'POST',
+                data: { id: id },
+                dataType: 'json',
+                success: function(response) {
+                    console.log('Delete response:', response);
 
-                if (response.success) {
-                    alert(response.message || 'Başarıyla silindi!');
-                    location.reload();
-                } else {
-                    alert('Hata: ' + (response.message || 'Silme başarısız'));
+                    if (response.success) {
+                        appAlert('Başarılı', response.message || 'Başarıyla silindi!', 'success');
+                        setTimeout(() => location.reload(), 350);
+                    } else {
+                        appAlert('Hata', response.message || 'Silme başarısız', 'error');
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('Delete AJAX Error:', {xhr, status, error});
+                    appAlert('Hata', 'Silme hatası: ' + error, 'error');
                 }
-            },
-            error: function(xhr, status, error) {
-                console.error('Delete AJAX Error:', {xhr, status, error});
-                alert('Silme hatası: ' + error);
-            }
+            });
+        }, {
+            type: 'warning',
+            confirmText: 'Sil',
+            cancelText: 'İptal'
         });
     });
 

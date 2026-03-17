@@ -224,6 +224,18 @@ $extra_js = <<<'JAVASCRIPT'
 $(document).ready(function() {
     console.log('Courses page - jQuery ready!');
 
+    const appAlert = (title, message, type = 'info') => {
+        if (typeof window.showAppAlert === 'function') {
+            window.showAppAlert(title, message, type);
+        }
+    };
+
+    const appConfirm = (title, message, onConfirm, options = {}) => {
+        if (typeof window.showAppConfirm === 'function') {
+            window.showAppConfirm(title, message, onConfirm, options);
+        }
+    };
+
     // DataTable (sadece desktop)
     if (window.matchMedia('(min-width: 768px)').matches) {
         $('#coursesTable').DataTable({
@@ -277,15 +289,15 @@ $(document).ready(function() {
             dataType: 'json',
             success: function(response) {
                 if (response.success) {
-                    alert(response.message || 'Ders eklendi!');
-                    location.reload();
+                    appAlert('Başarılı', response.message || 'Ders eklendi!', 'success');
+                    setTimeout(() => location.reload(), 350);
                 } else {
-                    alert('Hata: ' + response.message);
+                    appAlert('Hata', response.message || 'İşlem başarısız.', 'error');
                 }
             },
             error: function(xhr) {
                 console.error('Error:', xhr.responseText);
-                alert('Hata oluştu!');
+                appAlert('Hata', 'Hata oluştu!', 'error');
             }
         });
     });
@@ -324,42 +336,45 @@ $(document).ready(function() {
             dataType: 'json',
             success: function(response) {
                 if (response.success) {
-                    alert(response.message || 'Güncellendi!');
-                    location.reload();
+                    appAlert('Başarılı', response.message || 'Güncellendi!', 'success');
+                    setTimeout(() => location.reload(), 350);
                 } else {
-                    alert('Hata: ' + response.message);
+                    appAlert('Hata', response.message || 'Güncelleme başarısız.', 'error');
                 }
             },
             error: function(xhr) {
                 console.error('Error:', xhr.responseText);
-                alert('Hata oluştu!');
+                appAlert('Hata', 'Hata oluştu!', 'error');
             }
         });
     });
 
     // Delete Button
     $('.delete-btn').on('click', function() {
-        if (!confirm('Bu dersi silmek istediğinizden emin misiniz?')) return;
-
         const id = $(this).data('id');
-
-        $.ajax({
-            url: '../ajax/courses.php?action=delete',
-            method: 'POST',
-            data: { id: id },
-            dataType: 'json',
-            success: function(response) {
-                if (response.success) {
-                    alert(response.message || 'Silindi!');
-                    location.reload();
-                } else {
-                    alert('Hata: ' + response.message);
+        appConfirm('Silme Onayı', 'Bu dersi silmek istediğinizden emin misiniz?', function() {
+            $.ajax({
+                url: '../ajax/courses.php?action=delete',
+                method: 'POST',
+                data: { id: id },
+                dataType: 'json',
+                success: function(response) {
+                    if (response.success) {
+                        appAlert('Başarılı', response.message || 'Silindi!', 'success');
+                        setTimeout(() => location.reload(), 350);
+                    } else {
+                        appAlert('Hata', response.message || 'Silme başarısız.', 'error');
+                    }
+                },
+                error: function(xhr) {
+                    console.error('Error:', xhr.responseText);
+                    appAlert('Hata', 'Hata oluştu!', 'error');
                 }
-            },
-            error: function(xhr) {
-                console.error('Error:', xhr.responseText);
-                alert('Hata oluştu!');
-            }
+            });
+        }, {
+            type: 'warning',
+            confirmText: 'Sil',
+            cancelText: 'İptal'
         });
     });
 });
