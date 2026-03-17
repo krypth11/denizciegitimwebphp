@@ -1,0 +1,19 @@
+php_flag display_errors off
+php_flag log_errors on
+
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set X-XSS-Protection "1; mode=block"
+</IfModule>
+
+<FilesMatch "\.(php)$">
+    Header set Access-Control-Allow-Origin "*"
+</FilesMatch>

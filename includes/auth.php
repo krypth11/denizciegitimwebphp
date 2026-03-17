@@ -1,6 +1,17 @@
 <?php
 // includes/auth.php
 
+function is_ajax_request()
+{
+    $requestedWith = $_SERVER['HTTP_X_REQUESTED_WITH'] ?? '';
+    $accept = $_SERVER['HTTP_ACCEPT'] ?? '';
+    $requestUri = $_SERVER['REQUEST_URI'] ?? '';
+
+    return strtolower($requestedWith) === 'xmlhttprequest'
+        || str_contains(strtolower($accept), 'application/json')
+        || str_contains($requestUri, '/ajax/');
+}
+
 function base64url_encode($data)
 {
     return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
@@ -90,6 +101,13 @@ function require_auth()
 {
     $user = verify_token();
     if (!$user) {
+        if (is_ajax_request()) {
+            json_response([
+                'success' => false,
+                'message' => 'Oturum süresi dolmuş. Lütfen tekrar giriş yapın.',
+            ], 401);
+        }
+
         header('Location: /index.php');
         exit;
     }
@@ -101,6 +119,13 @@ function require_admin()
 {
     $user = require_auth();
     if (empty($user['is_admin'])) {
+        if (is_ajax_request()) {
+            json_response([
+                'success' => false,
+                'message' => 'Admin yetkisi gerekli!',
+            ], 403);
+        }
+
         die('Admin yetkisi gerekli!');
     }
 

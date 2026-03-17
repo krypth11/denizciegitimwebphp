@@ -1,4 +1,4 @@
 deployment:
   tasks:
     - export DEPLOYPATH=/home/u2621168/admin.denizciegitim.com
-    - /bin/cp -R * $DEPLOYPATH
+    - /bin/rsync -av --delete --exclude=".git" ./ $DEPLOYPATH

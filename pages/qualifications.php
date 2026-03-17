@@ -120,71 +120,126 @@ include '../includes/sidebar.php';
 </div>
 
 <script>
-$(function () {
+$(document).ready(function() {
     $('#qualificationsTable').DataTable({
-        language: { url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/tr.json' },
+        language: {
+            url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/tr.json'
+        },
         order: [[0, 'asc']]
     });
 
-    $('#addForm').on('submit', function (e) {
+    $('#addForm').on('submit', function(e) {
         e.preventDefault();
+        console.log('Add form submitted');
+
+        const formData = $(this).serialize();
+        console.log('Form data:', formData);
+
         $.ajax({
-            url: '/ajax/qualifications.php?action=add',
+            url: '../ajax/qualifications.php?action=add',
             method: 'POST',
-            data: $(this).serialize(),
+            data: formData,
             dataType: 'json',
-            success: function (response) {
-                if (response.success) location.reload();
-                else alert(response.message);
+            success: function(response) {
+                console.log('Response:', response);
+                if (response.success) {
+                    alert(response.message || 'Başarıyla eklendi!');
+                    location.reload();
+                } else {
+                    alert('Hata: ' + (response.message || 'Bilinmeyen hata'));
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX Error:', error);
+                console.error('Status:', status);
+                console.error('Response:', xhr.responseText);
+                alert('AJAX Hatası: ' + error + '\nDetay: ' + xhr.responseText);
             }
         });
     });
 
-    $('.edit-btn').on('click', function () {
+    $('.edit-btn').on('click', function() {
         const id = $(this).data('id');
+        console.log('Edit clicked for ID:', id);
+
         $.ajax({
-            url: '/ajax/qualifications.php?action=get&id=' + encodeURIComponent(id),
+            url: '../ajax/qualifications.php?action=get&id=' + encodeURIComponent(id),
             method: 'GET',
             dataType: 'json',
-            success: function (response) {
+            success: function(response) {
+                console.log('Get response:', response);
+
                 if (response.success) {
                     $('#edit_id').val(response.data.id);
                     $('#edit_name').val(response.data.name);
-                    $('#edit_description').val(response.data.description);
-                    $('#edit_order_index').val(response.data.order_index);
+                    $('#edit_description').val(response.data.description || '');
+                    $('#edit_order_index').val(response.data.order_index || 0);
                     new bootstrap.Modal(document.getElementById('editModal')).show();
                 } else {
-                    alert(response.message || 'Kayıt alınamadı');
+                    alert('Hata: ' + (response.message || 'Veri yüklenemedi'));
                 }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX Error:', error);
+                console.error('Response:', xhr.responseText);
+                alert('Veri yüklenemedi: ' + error);
             }
         });
     });
 
-    $('#editForm').on('submit', function (e) {
+    $('#editForm').on('submit', function(e) {
         e.preventDefault();
+
+        console.log('Edit form submitted');
+        const formData = $(this).serialize();
+        console.log('Form data:', formData);
+
         $.ajax({
-            url: '/ajax/qualifications.php?action=update',
+            url: '../ajax/qualifications.php?action=update',
             method: 'POST',
-            data: $(this).serialize(),
+            data: formData,
             dataType: 'json',
-            success: function (response) {
-                if (response.success) location.reload();
-                else alert(response.message);
+            success: function(response) {
+                console.log('Update response:', response);
+                if (response.success) {
+                    alert(response.message || 'Başarıyla güncellendi!');
+                    location.reload();
+                } else {
+                    alert('Hata: ' + (response.message || 'Güncelleme başarısız'));
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX Error:', error);
+                console.error('Response:', xhr.responseText);
+                alert('Güncelleme hatası: ' + error);
             }
         });
     });
 
-    $('.delete-btn').on('click', function () {
+    $('.delete-btn').on('click', function() {
         if (!confirm('Silmek istediğinizden emin misiniz?')) return;
+
         const id = $(this).data('id');
+        console.log('Delete clicked for ID:', id);
+
         $.ajax({
-            url: '/ajax/qualifications.php?action=delete',
+            url: '../ajax/qualifications.php?action=delete',
             method: 'POST',
             data: { id: id },
             dataType: 'json',
-            success: function (response) {
-                if (response.success) location.reload();
-                else alert(response.message);
+            success: function(response) {
+                console.log('Delete response:', response);
+                if (response.success) {
+                    alert(response.message || 'Başarıyla silindi!');
+                    location.reload();
+                } else {
+                    alert('Hata: ' + (response.message || 'Silme başarısız'));
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX Error:', error);
+                console.error('Response:', xhr.responseText);
+                alert('Silme hatası: ' + error);
             }
         });
     });
