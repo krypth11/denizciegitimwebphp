@@ -4,5 +4,4 @@ require_once 'includes/auth.php';
 
 logout_user();
 
-header('Location: index.php');
-exit;
+redirect_to('/index.php');

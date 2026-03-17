@@ -1,6 +1,33 @@
 <?php
 // includes/auth.php
 
+function auth_runtime_log($message, array $context = [])
+{
+    if (!empty($context)) {
+        error_log('[AUTH][SESSION] ' . $message . ' | ' . json_encode($context, JSON_UNESCAPED_UNICODE));
+        return;
+    }
+    error_log('[AUTH][SESSION] ' . $message);
+}
+
+function redirect_to($url)
+{
+    if (!headers_sent($file, $line)) {
+        header('Location: ' . $url);
+        exit;
+    }
+
+    auth_runtime_log('Header zaten gönderilmiş, fallback redirect uygulanıyor', [
+        'file' => $file,
+        'line' => $line,
+        'url' => $url,
+    ]);
+
+    echo '<script>window.location.href=' . json_encode($url) . ';</script>';
+    echo '<noscript><meta http-equiv="refresh" content="0;url=' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '"></noscript>';
+    exit;
+}
+
 function is_ajax_request()
 {
     $requestedWith = $_SERVER['HTTP_X_REQUESTED_WITH'] ?? '';
@@ -116,12 +143,25 @@ function logout_user()
 
 function is_authenticated_session()
 {
+    auth_runtime_log('Session doğrulama başladı', [
+        'session_status' => session_status(),
+        'session_id_exists' => session_id() !== '',
+        'has_user_id' => isset($_SESSION['user_id']),
+        'has_email' => isset($_SESSION['email']),
+        'has_is_admin' => isset($_SESSION['is_admin']),
+    ]);
+
     if (empty($_SESSION['user_id']) || empty($_SESSION['email']) || !isset($_SESSION['is_admin'])) {
+        auth_runtime_log('Session doğrulama başarısız: gerekli anahtarlar eksik');
         return false;
     }
 
     $lastActivity = (int)($_SESSION['last_activity'] ?? 0);
     if ($lastActivity > 0 && (time() - $lastActivity) > SESSION_TIMEOUT) {
+        auth_runtime_log('Session doğrulama başarısız: timeout', [
+            'last_activity' => $lastActivity,
+            'timeout' => SESSION_TIMEOUT,
+        ]);
         logout_user();
         return false;
     }
@@ -129,11 +169,13 @@ function is_authenticated_session()
     $sessionUa = $_SESSION['user_agent'] ?? '';
     $currentUa = hash('sha256', $_SERVER['HTTP_USER_AGENT'] ?? 'unknown');
     if (!empty($sessionUa) && !hash_equals($sessionUa, $currentUa)) {
+        auth_runtime_log('Session doğrulama başarısız: user-agent mismatch');
         logout_user();
         return false;
     }
 
     $_SESSION['last_activity'] = time();
+    auth_runtime_log('Session doğrulama başarılı');
     return true;
 }
 
@@ -154,18 +196,18 @@ function verify_token()
 function require_auth()
 {
     if (!is_authenticated_session()) {
+        auth_runtime_log('require_auth: oturum yok, login sayfasına yönlendiriliyor');
         if (is_ajax_request()) {
             json_response([
                 'success' => false,
                 'message' => 'Oturum süresi dolmuş. Lütfen tekrar giriş yapın.',
             ], 401);
         }
-
-        header('Location: /index.php');
-        exit;
+        redirect_to('/index.php');
     }
 
     if (empty($_SESSION['is_admin'])) {
+        auth_runtime_log('require_auth: oturum var ama admin değil, logout uygulanıyor');
         logout_user();
         if (is_ajax_request()) {
             json_response([
@@ -173,8 +215,7 @@ function require_auth()
                 'message' => 'Admin yetkisi gerekli!',
             ], 403);
         }
-        header('Location: /index.php');
-        exit;
+        redirect_to('/index.php');
     }
 
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -198,9 +239,7 @@ function require_admin()
                 'message' => 'Admin yetkisi gerekli!',
             ], 403);
         }
-
-        header('Location: /index.php');
-        exit;
+        redirect_to('/index.php');
     }
 
     return $user;

@@ -25,8 +25,7 @@ function mask_email_for_log($email)
 }
 
 if (is_authenticated_session()) {
-    header('Location: dashboard.php');
-    exit;
+    redirect_to('/dashboard.php');
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -195,9 +194,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 set_auth_cookie($token);
 
                 $pdo->prepare('UPDATE user_profiles SET last_sign_in_at = NOW() WHERE id = ?')->execute([$user['id']]);
-
-                header('Location: dashboard.php');
-                exit;
+                auth_log('Redirect öncesi session kontrol', [
+                    'session_id_exists' => session_id() !== '',
+                    'has_user_id' => isset($_SESSION['user_id']),
+                    'has_email' => isset($_SESSION['email']),
+                    'has_is_admin' => isset($_SESSION['is_admin']),
+                ]);
+                redirect_to('/dashboard.php');
             }
         }
     }
