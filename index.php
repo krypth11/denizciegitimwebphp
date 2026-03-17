@@ -3,46 +3,161 @@ require_once 'includes/config.php';
 require_once 'includes/auth.php';
 require_once 'includes/functions.php';
 
+function auth_log($message, array $context = [])
+{
+    if (!empty($context)) {
+        error_log('[AUTH][LOGIN] ' . $message . ' | ' . json_encode($context, JSON_UNESCAPED_UNICODE));
+        return;
+    }
+    error_log('[AUTH][LOGIN] ' . $message);
+}
+
+function mask_email_for_log($email)
+{
+    $email = (string)$email;
+    if (!str_contains($email, '@')) {
+        return 'invalid-email-format';
+    }
+
+    [$local, $domain] = explode('@', $email, 2);
+    $localMasked = substr($local, 0, 2) . str_repeat('*', max(1, strlen($local) - 2));
+    return $localMasked . '@' . $domain;
+}
+
 if (is_authenticated_session()) {
     header('Location: dashboard.php');
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email = sanitize_input($_POST['email'] ?? '');
-    $password = $_POST['password'] ?? '';
+    auth_log('Form submit alındı', [
+        'session_status' => session_status(),
+        'has_email_field' => array_key_exists('email', $_POST),
+        'has_password_field' => array_key_exists('password', $_POST),
+    ]);
+
+    $emailRaw = $_POST['email'] ?? '';
+    $passwordRaw = $_POST['password'] ?? '';
+    $email = trim((string)$emailRaw);
+    $password = (string)$passwordRaw;
+
+    auth_log('POST alanları okundu', [
+        'email_length_raw' => strlen((string)$emailRaw),
+        'email_length_trimmed' => strlen($email),
+        'email_masked' => mask_email_for_log($email),
+        'password_length' => strlen($password),
+    ]);
 
     $now = time();
     $lockedUntil = (int)($_SESSION['login_locked_until'] ?? 0);
     if ($lockedUntil > $now) {
         $wait = $lockedUntil - $now;
-        $error = 'Çok fazla başarısız deneme. Lütfen ' . $wait . ' saniye sonra tekrar deneyin.';
+        auth_log('Rate limit aktif, login geçici kilitli', ['wait_seconds' => $wait]);
+        $error = 'Email veya şifre hatalı.';
     }
 
     if (!isset($error)) {
         if (empty($email) || empty($password)) {
-            $error = 'Email ve şifre gerekli!';
+            auth_log('Validasyon başarısız: boş email veya password');
+            $error = 'Email veya şifre hatalı.';
         } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $error = 'Geçerli bir email adresi girin.';
+            auth_log('Validasyon başarısız: email formatı geçersiz', [
+                'email_masked' => mask_email_for_log($email),
+            ]);
+            $error = 'Email veya şifre hatalı.';
         } else {
-            $stmt = $pdo->prepare(
-                'SELECT id, email, is_admin, password_hash
-                 FROM user_profiles
-                 WHERE email = ? AND is_deleted = 0
-                 LIMIT 1'
-            );
-            $stmt->execute([$email]);
-            $user = $stmt->fetch();
+            $upCols = get_table_columns($pdo, 'user_profiles');
+            $passwordColumn = null;
+            if (in_array('password_hash', $upCols, true)) {
+                $passwordColumn = 'password_hash';
+            } else {
+                foreach (['hashed_password', 'password', 'pass_hash', 'passwd'] as $candidate) {
+                    if (in_array($candidate, $upCols, true)) {
+                        $passwordColumn = $candidate;
+                        break;
+                    }
+                }
+            }
+
+            if (!$passwordColumn) {
+                auth_log('Login kırılma nedeni: user_profiles içinde şifre kolonu bulunamadı', [
+                    'available_columns' => $upCols,
+                ]);
+                $error = 'Email veya şifre hatalı.';
+            } else {
+                $sql = 'SELECT id, email, is_admin, ' . $passwordColumn . ' AS password_hash FROM user_profiles WHERE LOWER(email) = LOWER(?)';
+                if (in_array('is_deleted', $upCols, true)) {
+                    $sql .= ' AND is_deleted = 0';
+                }
+                $sql .= ' LIMIT 1';
+
+                auth_log('Kullanıcı sorgusu hazırlanıyor', [
+                    'email_masked' => mask_email_for_log($email),
+                    'password_column' => $passwordColumn,
+                    'has_is_deleted' => in_array('is_deleted', $upCols, true),
+                ]);
+
+                try {
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute([$email]);
+                    $user = $stmt->fetch();
+                } catch (Throwable $e) {
+                    auth_log('Login kırılma nedeni: user_profiles sorgusu hata verdi', [
+                        'error' => $e->getMessage(),
+                    ]);
+                    $user = false;
+                }
+            }
 
             $isValidLogin = false;
             $isAdmin = false;
             if ($user) {
-                $hash = $user['password_hash'] ?? '';
+                auth_log('Kullanıcı bulundu', [
+                    'user_id' => $user['id'] ?? null,
+                    'email_masked' => mask_email_for_log($user['email'] ?? ''),
+                    'is_admin' => (int)($user['is_admin'] ?? 0),
+                    'has_password_hash' => !empty($user['password_hash']),
+                    'password_hash_length' => strlen((string)($user['password_hash'] ?? '')),
+                ]);
+
+                $hashRaw = (string)($user['password_hash'] ?? '');
+                $hash = trim($hashRaw);
+                if ($hashRaw !== $hash) {
+                    auth_log('password_hash trimlendi', [
+                        'raw_length' => strlen($hashRaw),
+                        'trimmed_length' => strlen($hash),
+                    ]);
+                }
+
                 $isAdmin = ((int)($user['is_admin'] ?? 0) === 1);
 
-                if ($isAdmin && verify_password($password, $hash)) {
-                    $isValidLogin = true;
+                if (!$isAdmin) {
+                    auth_log('Login reddedildi: admin değil', [
+                        'user_id' => $user['id'] ?? null,
+                    ]);
+                } elseif ($hash === '') {
+                    auth_log('Login reddedildi: password_hash boş', [
+                        'user_id' => $user['id'] ?? null,
+                    ]);
+                } else {
+                    $verifyResult = verify_password($password, $hash);
+                    auth_log('password_verify sonucu', [
+                        'user_id' => $user['id'] ?? null,
+                        'result' => $verifyResult,
+                    ]);
+
+                    if ($verifyResult) {
+                        $isValidLogin = true;
+                    } else {
+                        auth_log('Login reddedildi: password_verify false', [
+                            'user_id' => $user['id'] ?? null,
+                        ]);
+                    }
                 }
+            } else {
+                auth_log('Login reddedildi: kullanıcı bulunamadı', [
+                    'email_masked' => mask_email_for_log($email),
+                ]);
             }
 
             if (!$isValidLogin) {
@@ -56,13 +171,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $error = 'Email veya şifre hatalı.';
             } else {
-                session_regenerate_id(true);
+                $sessionRegenerated = session_regenerate_id(true);
+                auth_log('session_regenerate_id çağrıldı', [
+                    'result' => $sessionRegenerated,
+                    'session_status' => session_status(),
+                ]);
 
                 $_SESSION['user_id'] = $user['id'];
                 $_SESSION['email'] = $user['email'];
                 $_SESSION['is_admin'] = 1;
                 $_SESSION['last_activity'] = $now;
                 $_SESSION['user_agent'] = hash('sha256', $_SERVER['HTTP_USER_AGENT'] ?? 'unknown');
+
+                auth_log('Session alanları yazıldı', [
+                    'has_user_id' => isset($_SESSION['user_id']),
+                    'has_email' => isset($_SESSION['email']),
+                    'has_is_admin' => isset($_SESSION['is_admin']),
+                ]);
 
                 unset($_SESSION['login_attempt_count'], $_SESSION['login_last_attempt'], $_SESSION['login_locked_until']);
 
