@@ -571,6 +571,7 @@ textarea::placeholder {
         box-shadow: var(--shadow-soft);
         margin-bottom: 12px;
         padding: 12px;
+        overflow: hidden;
     }
 
     #questionsTable tbody tr.question-row-card td {
@@ -587,27 +588,38 @@ textarea::placeholder {
 
     #questionsTable .questions-col-question {
         display: block;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
     }
 
     .question-mobile-head {
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: flex-start;
-        justify-content: space-between;
         gap: 8px;
+        width: 100%;
     }
 
     .question-title-mobile {
-        flex: 1;
         min-width: 0;
         font-size: 14px;
         line-height: 1.4;
         word-break: normal;
-        overflow-wrap: anywhere;
+        overflow-wrap: break-word;
+        white-space: normal;
     }
 
     .question-mobile-type {
         display: inline-flex;
         flex-shrink: 0;
+        align-self: start;
+        max-width: 100%;
+    }
+
+    .question-mobile-type .badge {
+        white-space: nowrap;
+        max-width: 100%;
     }
 
     .question-mobile-meta {
@@ -618,12 +630,25 @@ textarea::placeholder {
         margin-bottom: 8px;
         font-size: 12px;
         color: var(--text-muted);
+        overflow-wrap: break-word;
+        word-break: normal;
+        white-space: normal;
     }
 
     .questions-option-grid {
         margin-top: 8px !important;
         grid-template-columns: 1fr;
         gap: 6px;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .questions-option-item {
+        width: 100%;
+        max-width: 100%;
+        overflow-wrap: break-word;
+        word-break: normal;
+        white-space: normal;
     }
 
     #questionsTable .questions-actions-cell {
