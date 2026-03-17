@@ -119,18 +119,29 @@ include '../includes/sidebar.php';
     </div>
 </div>
 
+<?php
+$extra_js = <<<'JAVASCRIPT'
 <script>
+// jQuery hazır mı kontrol et
 $(document).ready(function() {
-    $('#qualificationsTable').DataTable({
+    console.log('Qualifications page - jQuery ready!');
+
+    // DataTable başlat
+    const table = $('#qualificationsTable').DataTable({
         language: {
             url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/tr.json'
         },
-        order: [[0, 'asc']]
+        order: [[0, 'asc']],
+        pageLength: 25,
+        responsive: true
     });
 
+    console.log('DataTable initialized');
+
+    // Yeni Ekle Form
     $('#addForm').on('submit', function(e) {
         e.preventDefault();
-        console.log('Add form submitted');
+        console.log('Add form submit triggered');
 
         const formData = $(this).serialize();
         console.log('Form data:', formData);
@@ -140,8 +151,12 @@ $(document).ready(function() {
             method: 'POST',
             data: formData,
             dataType: 'json',
+            beforeSend: function() {
+                console.log('Sending AJAX request...');
+            },
             success: function(response) {
-                console.log('Response:', response);
+                console.log('AJAX Success:', response);
+
                 if (response.success) {
                     alert(response.message || 'Başarıyla eklendi!');
                     location.reload();
@@ -150,20 +165,23 @@ $(document).ready(function() {
                 }
             },
             error: function(xhr, status, error) {
-                console.error('AJAX Error:', error);
-                console.error('Status:', status);
-                console.error('Response:', xhr.responseText);
-                alert('AJAX Hatası: ' + error + '\nDetay: ' + xhr.responseText);
+                console.error('AJAX Error:', {
+                    status: status,
+                    error: error,
+                    responseText: xhr.responseText
+                });
+                alert('AJAX Hatası!\nStatus: ' + status + '\nHata: ' + error + '\n\nDetay için Console\'a bakın (F12)');
             }
         });
     });
 
+    // Düzenle Butonu
     $('.edit-btn').on('click', function() {
         const id = $(this).data('id');
-        console.log('Edit clicked for ID:', id);
+        console.log('Edit button clicked, ID:', id);
 
         $.ajax({
-            url: '../ajax/qualifications.php?action=get&id=' + encodeURIComponent(id),
+            url: '../ajax/qualifications.php?action=get&id=' + id,
             method: 'GET',
             dataType: 'json',
             success: function(response) {
@@ -174,25 +192,27 @@ $(document).ready(function() {
                     $('#edit_name').val(response.data.name);
                     $('#edit_description').val(response.data.description || '');
                     $('#edit_order_index').val(response.data.order_index || 0);
-                    new bootstrap.Modal(document.getElementById('editModal')).show();
+
+                    const editModal = new bootstrap.Modal(document.getElementById('editModal'));
+                    editModal.show();
                 } else {
                     alert('Hata: ' + (response.message || 'Veri yüklenemedi'));
                 }
             },
             error: function(xhr, status, error) {
-                console.error('AJAX Error:', error);
-                console.error('Response:', xhr.responseText);
+                console.error('Get AJAX Error:', {xhr, status, error});
                 alert('Veri yüklenemedi: ' + error);
             }
         });
     });
 
+    // Düzenle Form
     $('#editForm').on('submit', function(e) {
         e.preventDefault();
+        console.log('Edit form submit triggered');
 
-        console.log('Edit form submitted');
         const formData = $(this).serialize();
-        console.log('Form data:', formData);
+        console.log('Edit form data:', formData);
 
         $.ajax({
             url: '../ajax/qualifications.php?action=update',
@@ -201,6 +221,7 @@ $(document).ready(function() {
             dataType: 'json',
             success: function(response) {
                 console.log('Update response:', response);
+
                 if (response.success) {
                     alert(response.message || 'Başarıyla güncellendi!');
                     location.reload();
@@ -209,18 +230,20 @@ $(document).ready(function() {
                 }
             },
             error: function(xhr, status, error) {
-                console.error('AJAX Error:', error);
-                console.error('Response:', xhr.responseText);
+                console.error('Update AJAX Error:', {xhr, status, error});
                 alert('Güncelleme hatası: ' + error);
             }
         });
     });
 
+    // Sil Butonu
     $('.delete-btn').on('click', function() {
-        if (!confirm('Silmek istediğinizden emin misiniz?')) return;
+        if (!confirm('Bu kaydı silmek istediğinizden emin misiniz?')) {
+            return;
+        }
 
         const id = $(this).data('id');
-        console.log('Delete clicked for ID:', id);
+        console.log('Delete button clicked, ID:', id);
 
         $.ajax({
             url: '../ajax/qualifications.php?action=delete',
@@ -229,6 +252,7 @@ $(document).ready(function() {
             dataType: 'json',
             success: function(response) {
                 console.log('Delete response:', response);
+
                 if (response.success) {
                     alert(response.message || 'Başarıyla silindi!');
                     location.reload();
@@ -237,13 +261,16 @@ $(document).ready(function() {
                 }
             },
             error: function(xhr, status, error) {
-                console.error('AJAX Error:', error);
-                console.error('Response:', xhr.responseText);
+                console.error('Delete AJAX Error:', {xhr, status, error});
                 alert('Silme hatası: ' + error);
             }
         });
     });
+
+    console.log('All event handlers attached successfully');
 });
 </script>
+JAVASCRIPT;
+?>
 
 <?php include '../includes/footer.php'; ?>
