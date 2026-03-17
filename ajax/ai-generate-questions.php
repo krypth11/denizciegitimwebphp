@@ -12,6 +12,30 @@ require_once '../includes/functions.php';
 
 $user = require_admin();
 
+function normalize_question_text($text) {
+    $text = mb_strtolower(trim((string)$text), 'UTF-8');
+    $text = preg_replace('/\s+/u', ' ', $text);
+    $text = preg_replace('/[^\p{L}\p{N}\s]/u', '', $text);
+    return trim($text);
+}
+
+function is_similar_question_text($a, $b) {
+    if ($a === '' || $b === '') {
+        return false;
+    }
+
+    if ($a === $b) {
+        return true;
+    }
+
+    if (str_contains($a, $b) || str_contains($b, $a)) {
+        return true;
+    }
+
+    similar_text($a, $b, $percent);
+    return $percent >= 92;
+}
+
 try {
     $course_id = $_POST['course_id'] ?? '';
     $question_type = $_POST['question_type'] ?? '';
@@ -87,6 +111,31 @@ try {
     $qualification = $course_info['qualification_name'];
     $course = $course_info['course_name'];
 
+    // Aynı ders için mevcut soruları prompt'a dahil et (prompt şişmesini önlemek için limitli)
+    $existing_stmt = $pdo->prepare(
+        'SELECT question_text FROM questions
+         WHERE course_id = ?
+         ORDER BY created_at DESC
+         LIMIT 80'
+    );
+    $existing_stmt->execute([$course_id]);
+    $existing_questions_raw = $existing_stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+
+    $existing_questions = array_values(array_filter(array_map(static function ($q) {
+        return trim((string)$q);
+    }, $existing_questions_raw)));
+
+    $existing_questions_prompt = '';
+    if (!empty($existing_questions)) {
+        $lines = [];
+        foreach ($existing_questions as $i => $text) {
+            $lines[] = ($i + 1) . ') ' . $text;
+        }
+        $existing_questions_prompt = "\n\nAYNI DERSE AİT MEVCUT SORULAR (TEKRAR ÜRETME):\n"
+            . implode("\n", $lines)
+            . "\n\nKURAL: Yukarıdaki sorularla aynı veya çok benzer soru üretme.";
+    }
+
     $prompt = "Sen bir denizcilik eğitim uzmanısın. Aşağıdaki bilgilere göre sınavda çıkabilecek kaliteli çoktan seçmeli sorular üret.
 
 Yeterlilik: {$qualification}
@@ -119,7 +168,8 @@ Soru Sayısı: {$count}";
       \"explanation\": \"Kısa açıklama\"
     }
   ]
-}";
+}"
+    . $existing_questions_prompt;
 
     $ch = curl_init('https://api.groq.com/openai/v1/chat/completions');
 
@@ -181,18 +231,78 @@ Soru Sayısı: {$count}";
         exit;
     }
 
-    $questions_with_meta = array_map(static function ($q) use ($course_id, $question_type) {
-        return array_merge($q, [
+    $raw_questions = is_array($ai_response['questions']) ? $ai_response['questions'] : [];
+    $raw_generated_count = count($raw_questions);
+
+    $deduplicated_questions = [];
+    $seen_batch_texts = [];
+    $existing_normalized = array_map('normalize_question_text', $existing_questions);
+    $filtered_duplicates = 0;
+    $filtered_existing = 0;
+
+    foreach ($raw_questions as $q) {
+        $question_text = trim((string)($q['question_text'] ?? ''));
+        $option_a = trim((string)($q['option_a'] ?? ''));
+        $option_b = trim((string)($q['option_b'] ?? ''));
+        $option_c = trim((string)($q['option_c'] ?? ''));
+        $option_d = trim((string)($q['option_d'] ?? ''));
+        $correct_answer = trim((string)($q['correct_answer'] ?? ''));
+
+        if ($question_text === '' || $option_a === '' || $option_b === '' || $option_c === '' || $option_d === '' || !in_array($correct_answer, ['A', 'B', 'C', 'D'], true)) {
+            continue;
+        }
+
+        $normalized = normalize_question_text($question_text);
+        if ($normalized === '') {
+            continue;
+        }
+
+        $is_existing_duplicate = false;
+        foreach ($existing_normalized as $existing_text) {
+            if (is_similar_question_text($normalized, $existing_text)) {
+                $is_existing_duplicate = true;
+                break;
+            }
+        }
+
+        if ($is_existing_duplicate) {
+            $filtered_existing++;
+            continue;
+        }
+
+        $is_batch_duplicate = false;
+        foreach ($seen_batch_texts as $seen_text) {
+            if (is_similar_question_text($normalized, $seen_text)) {
+                $is_batch_duplicate = true;
+                break;
+            }
+        }
+
+        if ($is_batch_duplicate) {
+            $filtered_duplicates++;
+            continue;
+        }
+
+        $seen_batch_texts[] = $normalized;
+        $deduplicated_questions[] = array_merge($q, [
             'course_id' => $course_id,
             'question_type' => $question_type,
             'status' => 'pending',
         ]);
-    }, $ai_response['questions']);
+    }
+
+    $deduplicated_count = count($deduplicated_questions);
 
     echo json_encode([
         'success' => true,
-        'message' => count($questions_with_meta) . ' soru üretildi!',
-        'questions' => $questions_with_meta,
+        'message' => $deduplicated_count . ' soru üretildi!',
+        'requested_count' => $count,
+        'raw_generated_count' => $raw_generated_count,
+        'generated_count' => $deduplicated_count,
+        'deduplicated_count' => $deduplicated_count,
+        'filtered_duplicates' => $filtered_duplicates,
+        'filtered_existing' => $filtered_existing,
+        'questions' => $deduplicated_questions,
     ], JSON_UNESCAPED_UNICODE);
 } catch (Exception $e) {
     echo json_encode([

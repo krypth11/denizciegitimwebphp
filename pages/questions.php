@@ -57,7 +57,6 @@ include '../includes/sidebar.php';
 ?>
 
 <style>
-.question-row { cursor: pointer; }
 .question-row:hover { background-color: #f8f9fa; }
 .option-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
 .option-item { border: 1px solid #e5e7eb; border-radius: 8px; padding: 5px 8px; font-size: 12px; }
@@ -132,13 +131,12 @@ include '../includes/sidebar.php';
                         <th>Soru / Şıklar</th>
                         <th>Yeterlilik</th>
                         <th>Ders</th>
-                        <th>Tarih</th>
-                        <th style="width:110px;">İşlemler</th>
+                        <th style="width:80px;">İşlemler</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($questions as $q): ?>
-                    <tr class="question-row" data-id="<?= htmlspecialchars($q['id']) ?>">
+                    <tr class="question-row">
                         <td onclick="event.stopPropagation()"><input type="checkbox" class="question-checkbox" value="<?= htmlspecialchars($q['id']) ?>"></td>
                         <td>
                             <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
@@ -156,9 +154,7 @@ include '../includes/sidebar.php';
                         </td>
                         <td><small class="text-muted"><?= htmlspecialchars($q['qualification_name']) ?></small></td>
                         <td><strong><?= htmlspecialchars($q['course_name']) ?></strong></td>
-                        <td><?= format_date($q['created_at']) ?></td>
                         <td onclick="event.stopPropagation()">
-                            <button class="btn btn-sm btn-info view-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Görüntüle"><i class="bi bi-eye"></i></button>
                             <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Düzenle"><i class="bi bi-pencil"></i></button>
                             <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Sil"><i class="bi bi-trash"></i></button>
                         </td>
@@ -170,9 +166,7 @@ include '../includes/sidebar.php';
     </div>
 </div>
 
-<!-- View / Add / Edit modalları -->
-<div class="modal fade" id="viewModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Soru Detayı</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body" id="viewModalBody"></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button></div></div></div></div>
-
+<!-- Add / Edit modalları -->
 <div class="modal fade" id="addModal" tabindex="-1">
     <div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Yeni Soru Ekle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <form id="addForm"><div class="modal-body">
@@ -243,6 +237,7 @@ $extra_js = <<<'JAVASCRIPT'
 <script>
 let generatedQuestions = [];
 let coursesData = JSON.parse(document.getElementById('courses-data-json').textContent);
+let generationMeta = null;
 
 function normalizeCount(v) {
     const n = parseInt(v, 10);
@@ -262,7 +257,24 @@ function renderAiPreview() {
     const counts = statusCounts();
     $('#saveAiQuestionsBtn').text(counts.approved + ' Soruyu Kaydet').prop('disabled', counts.approved === 0);
 
-    let html = `
+    let html = '';
+
+    if (generationMeta) {
+        const requested = generationMeta.requested_count ?? generatedQuestions.length;
+        const generated = generationMeta.generated_count ?? generatedQuestions.length;
+        const filteredDup = generationMeta.filtered_duplicates ?? 0;
+        const filteredExisting = generationMeta.filtered_existing ?? 0;
+
+        html += `
+          <div class="alert alert-info">
+            İstenen: <strong>${requested}</strong> • Üretilen: <strong>${generated}</strong>
+            ${filteredDup > 0 || filteredExisting > 0
+                ? `• Batch duplicate filtre: <strong>${filteredDup}</strong> • Mevcut sorularla benzerlik filtre: <strong>${filteredExisting}</strong>`
+                : ''}
+          </div>`;
+    }
+
+    html += `
       <div class="row mb-3">
         <div class="col-md-4"><div class="alert alert-success mb-0">Onaylanan: <strong>${counts.approved}</strong></div></div>
         <div class="col-md-4"><div class="alert alert-warning mb-0">Bekleyen: <strong>${counts.pending}</strong></div></div>
@@ -330,10 +342,10 @@ function renderAiPreview() {
 $(document).ready(function() {
     $('#questionsTable').DataTable({
         language: { url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/tr.json' },
-        order: [[5, 'desc']],
+        order: [],
         pageLength: 50,
         responsive: true,
-        columnDefs: [{ orderable: false, targets: [0, 6] }]
+        columnDefs: [{ orderable: false, targets: [0, 5] }]
     });
 
     $('#filter_qualification').on('change', function() {
@@ -386,30 +398,6 @@ $(document).ready(function() {
         $.post('../ajax/questions.php?action=bulk_delete', { ids }, function(r){ if(r.success){alert(r.message);location.reload();} else alert('Hata: '+r.message); }, 'json');
     });
 
-    $('.question-row').on('click', function() {
-        const id = $(this).data('id');
-        $('.view-btn[data-id="'+id+'"]').trigger('click');
-    });
-
-    $('.view-btn').on('click', function() {
-        const id = $(this).data('id');
-        $.getJSON('../ajax/questions.php?action=get&id='+id, function(r){
-            if(!r.success) return alert('Hata: '+r.message);
-            const q=r.data;
-            $('#viewModalBody').html(`
-              <div class="mb-2"><strong>Soru:</strong><br>${q.question_text}</div>
-              <div class="row g-2">
-                <div class="col-md-6"><div class="p-2 rounded ${q.correct_answer==='A'?'bg-success text-white':'bg-light'}">A) ${q.option_a}</div></div>
-                <div class="col-md-6"><div class="p-2 rounded ${q.correct_answer==='B'?'bg-success text-white':'bg-light'}">B) ${q.option_b}</div></div>
-                <div class="col-md-6"><div class="p-2 rounded ${q.correct_answer==='C'?'bg-success text-white':'bg-light'}">C) ${q.option_c}</div></div>
-                <div class="col-md-6"><div class="p-2 rounded ${q.correct_answer==='D'?'bg-success text-white':'bg-light'}">D) ${q.option_d}</div></div>
-              </div>
-              ${q.explanation ? `<div class="mt-2"><strong>Açıklama:</strong><br>${q.explanation}</div>` : ''}
-            `);
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('viewModal')).show();
-        });
-    });
-
     $('#addForm').on('submit', function(e){ e.preventDefault(); $.post('../ajax/questions.php?action=add', $(this).serialize(), r => r.success ? (alert(r.message), location.reload()) : alert('Hata: '+r.message), 'json'); });
     $('.edit-btn').on('click', function(){
         const id=$(this).data('id');
@@ -439,6 +427,12 @@ $(document).ready(function() {
                 $('#aiGenerateBtn').prop('disabled', false).html('<i class="bi bi-stars"></i> Üret');
                 if(!(r.success && Array.isArray(r.questions))) return alert('Hata: '+(r.message||'Bilinmeyen hata'));
                 generatedQuestions = r.questions.map(q => ({ ...q, status:'pending' }));
+                generationMeta = {
+                    requested_count: r.requested_count ?? count,
+                    generated_count: r.generated_count ?? generatedQuestions.length,
+                    filtered_duplicates: r.filtered_duplicates ?? 0,
+                    filtered_existing: r.filtered_existing ?? 0
+                };
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('aiModal')).hide();
                 renderAiPreview();
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('aiPreviewModal')).show();
@@ -472,6 +466,17 @@ $(document).ready(function() {
     $('#saveAiQuestionsBtn').on('click', function(){
         const approved = generatedQuestions.filter(q => q.status === 'approved');
         if(!approved.length) return alert('Kaydedilecek onaylı soru yok!');
+
+        const ok = confirm(
+            'Bu işlem geri alınamaz.\n\n' +
+            'Onaylanan ' + approved.length + ' soru veritabanına kaydedilecek.\n\n' +
+            'Devam etmek istiyor musunuz?'
+        );
+
+        if (!ok) {
+            return;
+        }
+
         $(this).prop('disabled', true).text('Kaydediliyor...');
         $.post('../ajax/save-ai-questions.php', { questions: JSON.stringify(approved) }, function(r){
             if(r.success){ alert(r.message); location.reload(); }
