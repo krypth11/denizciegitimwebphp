@@ -35,7 +35,7 @@ try {
     }
 
     $stmt = $pdo->prepare(
-        'SELECT c.name as course_name, q.name as qualification_name
+        'SELECT c.name as course_name, c.id as course_id, q.name as qualification_name
          FROM courses c
          LEFT JOIN qualifications q ON c.qualification_id = q.id
          WHERE c.id = ?'
@@ -85,19 +85,19 @@ Soru Sayısı: {$count}";
 3. Sorular Türkçe olmalı
 4. Denizcilik terminolojisi kullan
 5. Gerçekçi ve eğitici olmalı
-6. Her soruya açıklama ekle
+6. Her soruya kısa açıklama ekle
 
-ÇIKTI FORMATI (sadece JSON, başka hiçbir şey yazma):
+ÇIKTI FORMATI (sadece JSON):
 {
   \"questions\": [
     {
-      \"question_text\": \"Soru metni\",
+      \"question_text\": \"Soru metni burada\",
       \"option_a\": \"A şıkkı\",
       \"option_b\": \"B şıkkı\",
       \"option_c\": \"C şıkkı\",
       \"option_d\": \"D şıkkı\",
       \"correct_answer\": \"A\",
-      \"explanation\": \"Açıklama\"
+      \"explanation\": \"Kısa açıklama\"
     }
   ]
 }";
@@ -162,53 +162,18 @@ Soru Sayısı: {$count}";
         exit;
     }
 
-    $stmt = $pdo->prepare(
-        'INSERT INTO questions (
-            id, course_id, question_type, question_text,
-            option_a, option_b, option_c, option_d,
-            correct_answer, explanation, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-    );
+    $questions_with_meta = array_map(static function ($q) use ($course_id, $question_type) {
+        return array_merge($q, [
+            'course_id' => $course_id,
+            'question_type' => $question_type,
+        ]);
+    }, $ai_response['questions']);
 
-    $added_count = 0;
-
-    foreach ($ai_response['questions'] as $q) {
-        if (empty($q['question_text']) || empty($q['option_a']) ||
-            empty($q['option_b']) || empty($q['option_c']) ||
-            empty($q['option_d']) || empty($q['correct_answer'])) {
-            continue;
-        }
-
-        $id = generate_uuid();
-
-        if ($stmt->execute([
-            $id,
-            $course_id,
-            $question_type,
-            $q['question_text'],
-            $q['option_a'],
-            $q['option_b'],
-            $q['option_c'],
-            $q['option_d'],
-            $q['correct_answer'],
-            $q['explanation'] ?? '',
-        ])) {
-            $added_count++;
-        }
-    }
-
-    if ($added_count > 0) {
-        echo json_encode([
-            'success' => true,
-            'message' => $added_count . ' soru başarıyla eklendi!',
-            'count' => $added_count,
-        ], JSON_UNESCAPED_UNICODE);
-    } else {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Hiçbir soru eklenemedi!',
-        ], JSON_UNESCAPED_UNICODE);
-    }
+    echo json_encode([
+        'success' => true,
+        'message' => count($questions_with_meta) . ' soru üretildi!',
+        'questions' => $questions_with_meta,
+    ], JSON_UNESCAPED_UNICODE);
 } catch (Exception $e) {
     echo json_encode([
         'success' => false,

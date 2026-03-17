@@ -184,6 +184,46 @@ try {
             }
             break;
 
+        case 'bulk_delete':
+            $ids = $_POST['ids'] ?? [];
+
+            if (empty($ids) || !is_array($ids)) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Silinecek soru seçilmedi!',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            $valid_ids = array_values(array_filter($ids, static function ($id) {
+                return !empty($id) && strlen((string)$id) === 36;
+            }));
+
+            if (empty($valid_ids)) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Geçersiz ID listesi!',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            $placeholders = implode(',', array_fill(0, count($valid_ids), '?'));
+            $stmt = $pdo->prepare("DELETE FROM questions WHERE id IN ($placeholders)");
+
+            if ($stmt->execute($valid_ids)) {
+                $deleted = $stmt->rowCount();
+                echo json_encode([
+                    'success' => true,
+                    'message' => $deleted . ' soru başarıyla silindi!',
+                ], JSON_UNESCAPED_UNICODE);
+            } else {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Silme işlemi başarısız!',
+                ], JSON_UNESCAPED_UNICODE);
+            }
+            break;
+
         default:
             echo json_encode([
                 'success' => false,
