@@ -59,6 +59,8 @@ small,
 
 .app-main {
     flex: 1;
+    display: flex;
+    align-items: stretch;
     min-height: 0;
     width: 100%;
 }
@@ -76,11 +78,12 @@ small,
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
 }
 
 .topbar-user {
     margin-left: auto;
+    white-space: nowrap;
 }
 
 .topbar .navbar-brand {
@@ -94,8 +97,7 @@ small,
     flex: 0 0 260px;
     background: var(--bg-surface);
     border-right: 1px solid var(--border);
-    min-height: 0;
-    max-height: 100%;
+    min-height: calc(100vh - 56px);
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -175,6 +177,7 @@ small,
 
 .main-content {
     flex: 1;
+    width: 100%;
     padding: var(--space-5);
     min-width: 0;
     overflow-x: hidden;
@@ -452,13 +455,16 @@ textarea::placeholder {
 }
 
 @media (max-width: 991.98px) {
+    .app-main {
+        display: block;
+    }
+
     .main-content {
         padding: 16px;
     }
 
     .topbar-user {
-        width: 100%;
-        justify-content: flex-end;
+        margin-left: 0;
     }
 
     .page-header h1,
@@ -468,6 +474,10 @@ textarea::placeholder {
 }
 
 @media (max-width: 767.98px) {
+    .topbar-inner {
+        flex-wrap: wrap;
+    }
+
     .main-content {
         padding: 14px;
     }
@@ -482,7 +492,9 @@ textarea::placeholder {
     }
 
     .topbar-user {
+        width: 100%;
         justify-content: space-between;
+        white-space: normal;
     }
 
     .questions-option-grid {
