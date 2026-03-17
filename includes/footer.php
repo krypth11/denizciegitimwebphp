@@ -18,11 +18,6 @@
     <!-- Custom JS -->
     <script src="/assets/js/app.js"></script>
 
-    <!-- Sayfa özel JavaScript -->
-    <?php if (isset($extra_js)): ?>
-        <?= $extra_js ?>
-    <?php endif; ?>
-
     <!-- Ortak Uyarı/Onay Modalı -->
     <div class="modal fade" id="appDialogModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
@@ -39,6 +34,11 @@
             </div>
         </div>
     </div>
+
+    <!-- Sayfa özel JavaScript -->
+    <?php if (isset($extra_js)): ?>
+        <?= $extra_js ?>
+    <?php endif; ?>
 
 </body>
 </html>
