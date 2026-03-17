@@ -1,4 +1,4 @@
-deployment
-  tasks
-    - export DEPLOYPATH=homeu2621168public_html
-    - bincp -R  $DEPLOYPATH
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/u2621168/admin.denizciegitim.com
+    - /bin/cp -R * $DEPLOYPATH
