@@ -22,9 +22,14 @@ function ms_json($success, $message = '', $data = [], $status = 200, $errors = [
 
 function ms_table_exists(PDO $pdo, $table)
 {
-    $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
-    $stmt->execute([$table]);
-    return (bool)$stmt->fetchColumn();
+    $sql = 'SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([DB_NAME, $table]);
+
+    return ((int)$stmt->fetchColumn()) > 0;
 }
 
 function ms_columns(PDO $pdo, $table)
