@@ -80,6 +80,7 @@ function settings_schema(PDO $pdo)
         'temperature' => settings_pick($cols, ['temperature']),
         'default_question_count' => settings_pick($cols, ['default_question_count']),
         'default_question_type' => settings_pick($cols, ['default_question_type']),
+        'theme_mode' => settings_pick($cols, ['theme_mode', 'theme'], false),
 
         'created_at' => settings_pick($cols, ['created_at', 'created_on'], false),
         'updated_at' => settings_pick($cols, ['updated_at', 'updated_on'], false),
@@ -140,6 +141,12 @@ function settings_normalize_type($value)
     $v = trim((string)$value);
     $allowed = ['all', 'sayısal', 'sözel'];
     return in_array($v, $allowed, true) ? $v : 'all';
+}
+
+function settings_normalize_theme($value)
+{
+    $v = strtolower(trim((string)$value));
+    return in_array($v, ['light', 'dark'], true) ? $v : 'light';
 }
 
 function settings_target_row(PDO $pdo, array $schema, $userId)
@@ -222,6 +229,12 @@ try {
                 settings_q($schema['default_question_type']) . ' AS default_question_type',
             ];
 
+            if ($schema['theme_mode']) {
+                $select[] = settings_q($schema['theme_mode']) . ' AS theme_mode';
+            } else {
+                $select[] = "'light' AS theme_mode";
+            }
+
             $sql = 'SELECT ' . implode(', ', $select)
                 . ' FROM ' . settings_q($schema['table']);
 
@@ -248,11 +261,13 @@ try {
                     'temperature' => 0.7,
                     'default_question_count' => 10,
                     'default_question_type' => 'all',
+                    'theme_mode' => 'light',
                 ];
             }
 
             $row['ai_provider'] = settings_normalize_provider($row['ai_provider'] ?? 'openai');
             $row['default_question_type'] = settings_normalize_type($row['default_question_type'] ?? 'all');
+            $row['theme_mode'] = settings_normalize_theme($row['theme_mode'] ?? 'light');
             $row['max_tokens'] = max(1, (int)($row['max_tokens'] ?? 2000));
             $row['temperature'] = max(0, min(1, (float)($row['temperature'] ?? 0.7)));
             $row['default_question_count'] = max(1, min(100, (int)($row['default_question_count'] ?? 10)));
@@ -269,6 +284,7 @@ try {
             $temperature = (float)($_POST['temperature'] ?? -1);
             $questionCount = (int)($_POST['default_question_count'] ?? 0);
             $questionType = settings_normalize_type($_POST['default_question_type'] ?? 'all');
+            $themeMode = settings_normalize_theme($_POST['theme_mode'] ?? 'light');
 
             if ($aiModel === '') {
                 settings_json(false, 'Model seçimi zorunludur.', [], 422, ['ai_model' => 'required']);
@@ -294,6 +310,10 @@ try {
                 $schema['default_question_count'] => $questionCount,
                 $schema['default_question_type'] => $questionType,
             ];
+
+            if ($schema['theme_mode']) {
+                $payload[$schema['theme_mode']] = $themeMode;
+            }
 
             if ($schema['updated_at']) {
                 $payload[$schema['updated_at']] = date('Y-m-d H:i:s');

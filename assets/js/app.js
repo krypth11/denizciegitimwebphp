@@ -1,3 +1,18 @@
+function applyGlobalTheme(mode) {
+    const safe = (mode === 'dark') ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', safe);
+    document.documentElement.setAttribute('data-bs-theme', safe);
+}
+
+try {
+    applyGlobalTheme(localStorage.getItem('admin_theme_mode') || 'light');
+    window.addEventListener('storage', function (e) {
+        if (e.key === 'admin_theme_mode') {
+            applyGlobalTheme(e.newValue || 'light');
+        }
+    });
+} catch (e) {}
+
 $(document).ajaxError(function (event, jqxhr, settings, thrownError) {
     console.error('AJAX Error:', thrownError);
     if (typeof window.showAppAlert === 'function') {

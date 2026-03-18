@@ -38,21 +38,18 @@ include '../includes/sidebar.php';
                 <div class="card h-100">
                     <div class="card-header bg-white"><h6 class="mb-0">Tema Ayarları</h6></div>
                     <div class="card-body">
-                        <div class="theme-option-group" id="themeOptionGroup">
-                            <label class="theme-option-item">
-                                <input type="radio" name="theme_mode" value="light">
-                                <span>Açık Tema</span>
-                            </label>
-                            <label class="theme-option-item">
-                                <input type="radio" name="theme_mode" value="dark">
-                                <span>Koyu Tema</span>
-                            </label>
-                            <label class="theme-option-item">
-                                <input type="radio" name="theme_mode" value="system">
-                                <span>Sistem Varsayılanı</span>
-                            </label>
+                        <input type="hidden" name="theme_mode" id="theme_mode" value="light">
+                        <div class="theme-toggle" role="group" aria-label="Tema Seçimi">
+                            <button type="button" class="theme-toggle-btn" data-theme="light">
+                                <i class="bi bi-sun-fill"></i>
+                                <span>Açık</span>
+                            </button>
+                            <button type="button" class="theme-toggle-btn" data-theme="dark">
+                                <i class="bi bi-moon-stars-fill"></i>
+                                <span>Koyu</span>
+                            </button>
                         </div>
-                        <small class="text-muted d-block mt-2">Tema tercihi tarayıcınızda saklanır.</small>
+                        <small class="text-muted d-block mt-2">Tema seçiminiz veritabanına kaydedilir ve tüm panelde uygulanır.</small>
                     </div>
                 </div>
             </div>
@@ -267,18 +264,27 @@ $(document).ready(function () {
         $('#ai_model').val(selected);
     }
 
-    function applyTheme(mode) {
-        const finalMode = mode === 'system'
-            ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-            : mode;
+    function setThemeToggle(mode) {
+        const safe = mode === 'dark' ? 'dark' : 'light';
+        $('#theme_mode').val(safe);
+        $('.theme-toggle-btn').removeClass('active');
+        $('.theme-toggle-btn[data-theme="' + safe + '"]').addClass('active');
+    }
 
-        document.documentElement.setAttribute('data-bs-theme', finalMode);
-        localStorage.setItem('admin_theme_mode', mode);
+    function applyTheme(mode) {
+        const safe = mode === 'dark' ? 'dark' : 'light';
+        if (typeof window.applyGlobalTheme === 'function') {
+            window.applyGlobalTheme(safe);
+        } else {
+            document.documentElement.setAttribute('data-theme', safe);
+            document.documentElement.setAttribute('data-bs-theme', safe);
+        }
+        localStorage.setItem('admin_theme_mode', safe);
+        setThemeToggle(safe);
     }
 
     function initTheme() {
         const saved = localStorage.getItem('admin_theme_mode') || 'light';
-        $('input[name="theme_mode"][value="' + saved + '"]').prop('checked', true);
         applyTheme(saved);
     }
 
@@ -320,6 +326,8 @@ $(document).ready(function () {
         $('#temperature').val(s.temperature ?? 0.7);
         $('#default_question_count').val(s.default_question_count ?? 10);
         $('#default_question_type').val(s.default_question_type || 'all');
+
+        applyTheme(s.theme_mode || localStorage.getItem('admin_theme_mode') || 'light');
     }
 
     $('input[name="ai_provider"]').on('change', function () {
@@ -329,8 +337,8 @@ $(document).ready(function () {
         renderProviderHelp(provider);
     });
 
-    $('input[name="theme_mode"]').on('change', function () {
-        applyTheme($(this).val());
+    $(document).on('click', '.theme-toggle-btn', function () {
+        applyTheme($(this).data('theme'));
     });
 
     $('#toggleApiKeyBtn').on('click', function () {
@@ -354,7 +362,8 @@ $(document).ready(function () {
             max_tokens: $('#max_tokens').val() || '',
             temperature: $('#temperature').val() || '',
             default_question_count: $('#default_question_count').val() || '',
-            default_question_type: $('#default_question_type').val() || 'all'
+            default_question_type: $('#default_question_type').val() || 'all',
+            theme_mode: $('#theme_mode').val() || 'light'
         };
 
         const res = await api('save_settings', 'POST', payload);
@@ -405,19 +414,33 @@ $(document).ready(function () {
     gap: 8px;
 }
 
-.theme-option-group {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+.theme-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    background: var(--bg-soft);
+    border-radius: 12px;
+    padding: 4px;
+    gap: 4px;
 }
 
-.theme-option-item {
-    border: 1px solid #e9ecef;
+.theme-toggle-btn {
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    min-height: 36px;
+    min-width: 90px;
     border-radius: 10px;
-    padding: 9px 10px;
-    display: flex;
-    gap: 8px;
+    display: inline-flex;
     align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 12px;
+}
+
+.theme-toggle-btn.active {
+    background: var(--primary-soft);
+    color: var(--text-main);
+    font-weight: 600;
 }
 
 .api-key-group .btn {
