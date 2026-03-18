@@ -107,7 +107,10 @@ function ms_schema(PDO $pdo)
         'category_cols' => $categoryCols,
         'category_id' => $categoryTable ? ms_pick($categoryCols, ['id', 'category_id', 'uuid'], false) : null,
         'category_name' => $categoryTable ? ms_pick($categoryCols, ['name', 'title', 'category_name'], false) : null,
+        'category_description' => $categoryTable ? ms_pick($categoryCols, ['description', 'content', 'summary', 'text'], false) : null,
         'category_order' => $categoryTable ? ms_pick($categoryCols, ['order_index', 'sort_order', 'display_order', 'order_no'], false) : null,
+        'category_created' => $categoryTable ? ms_pick($categoryCols, ['created_at', 'created_on'], false) : null,
+        'category_updated' => $categoryTable ? ms_pick($categoryCols, ['updated_at', 'updated_on'], false) : null,
     ];
 }
 
@@ -197,8 +200,15 @@ try {
             $sql = 'SELECT '
                 . 'c.' . ms_q($schema['category_id']) . ' AS id, '
                 . 'c.' . ms_q($schema['category_name']) . ' AS name, '
-                . ($schema['category_order'] ? 'c.' . ms_q($schema['category_order']) : '0') . ' AS order_index '
+                . ($schema['category_description'] ? 'c.' . ms_q($schema['category_description']) : "''") . ' AS description, '
+                . ($schema['category_order'] ? 'c.' . ms_q($schema['category_order']) : '0') . ' AS order_index, '
+                . 'COUNT(s.' . ms_q($schema['signal_id']) . ') AS signal_count '
                 . 'FROM ' . ms_q($schema['category_table']) . ' c '
+                . 'LEFT JOIN ' . ms_q($schema['signal_table']) . ' s '
+                . 'ON s.' . ms_q($schema['signal_category_fk']) . ' = c.' . ms_q($schema['category_id']) . ' '
+                . 'GROUP BY c.' . ms_q($schema['category_id']) . ', c.' . ms_q($schema['category_name'])
+                . ($schema['category_description'] ? ', c.' . ms_q($schema['category_description']) : '')
+                . ($schema['category_order'] ? ', c.' . ms_q($schema['category_order']) : '')
                 . 'ORDER BY '
                 . ($schema['category_order'] ? 'c.' . ms_q($schema['category_order']) . ' ASC, ' : '')
                 . 'c.' . ms_q($schema['category_name']) . ' ASC';
@@ -209,6 +219,131 @@ try {
                 'supports_category' => $supportsCategory,
                 'requires_category' => $supportsCategory,
             ]);
+            break;
+        }
+
+        case 'add_category': {
+            ms_require_schema($schema, ['category_table', 'category_id', 'category_name']);
+
+            $name = sanitize_input($_POST['name'] ?? '');
+            $description = sanitize_input($_POST['description'] ?? '');
+            $orderIndex = (int)($_POST['order_index'] ?? 0);
+
+            if ($name === '') {
+                ms_json(false, 'Kategori adı zorunludur.', [], 422, ['name' => 'required']);
+            }
+
+            $dupSql = 'SELECT COUNT(*) FROM ' . ms_q($schema['category_table'])
+                . ' WHERE LOWER(' . ms_q($schema['category_name']) . ') = LOWER(?)';
+            $dupStmt = $pdo->prepare($dupSql);
+            $dupStmt->execute([$name]);
+            if ((int)$dupStmt->fetchColumn() > 0) {
+                ms_json(false, 'Aynı isimde kategori zaten mevcut.', [], 422, ['name' => 'duplicate']);
+            }
+
+            $insert = [
+                $schema['category_name'] => $name,
+            ];
+
+            if ($schema['category_description']) {
+                $insert[$schema['category_description']] = $description;
+            }
+            if ($schema['category_order']) {
+                $insert[$schema['category_order']] = $orderIndex;
+            }
+            if ($schema['category_created']) {
+                $insert[$schema['category_created']] = date('Y-m-d H:i:s');
+            }
+            if ($schema['category_updated']) {
+                $insert[$schema['category_updated']] = date('Y-m-d H:i:s');
+            }
+
+            ms_maybe_set_id($insert, $schema['category_cols'], $schema['category_id']);
+            ms_insert($pdo, $schema['category_table'], $insert);
+
+            ms_json(true, 'Kategori başarıyla eklendi.');
+            break;
+        }
+
+        case 'update_category': {
+            ms_require_schema($schema, ['category_table', 'category_id', 'category_name']);
+
+            $id = $_POST['id'] ?? '';
+            $name = sanitize_input($_POST['name'] ?? '');
+            $description = sanitize_input($_POST['description'] ?? '');
+            $orderIndex = (int)($_POST['order_index'] ?? 0);
+
+            if ($id === '') {
+                ms_json(false, 'Kategori ID gerekli.', [], 422);
+            }
+            if ($name === '') {
+                ms_json(false, 'Kategori adı zorunludur.', [], 422, ['name' => 'required']);
+            }
+
+            $existsSql = 'SELECT COUNT(*) FROM ' . ms_q($schema['category_table'])
+                . ' WHERE ' . ms_q($schema['category_id']) . ' = ?';
+            $existsStmt = $pdo->prepare($existsSql);
+            $existsStmt->execute([$id]);
+            if ((int)$existsStmt->fetchColumn() === 0) {
+                ms_json(false, 'Kategori bulunamadı.', [], 404);
+            }
+
+            $dupSql = 'SELECT COUNT(*) FROM ' . ms_q($schema['category_table'])
+                . ' WHERE LOWER(' . ms_q($schema['category_name']) . ') = LOWER(?)'
+                . ' AND ' . ms_q($schema['category_id']) . ' <> ?';
+            $dupStmt = $pdo->prepare($dupSql);
+            $dupStmt->execute([$name, $id]);
+            if ((int)$dupStmt->fetchColumn() > 0) {
+                ms_json(false, 'Aynı isimde başka kategori mevcut.', [], 422, ['name' => 'duplicate']);
+            }
+
+            $update = [
+                $schema['category_name'] => $name,
+            ];
+
+            if ($schema['category_description']) {
+                $update[$schema['category_description']] = $description;
+            }
+            if ($schema['category_order']) {
+                $update[$schema['category_order']] = $orderIndex;
+            }
+            if ($schema['category_updated']) {
+                $update[$schema['category_updated']] = date('Y-m-d H:i:s');
+            }
+
+            ms_update($pdo, $schema['category_table'], $update, $schema['category_id'], $id);
+            ms_json(true, 'Kategori başarıyla güncellendi.');
+            break;
+        }
+
+        case 'delete_category': {
+            ms_require_schema($schema, ['category_table', 'category_id', 'signal_table', 'signal_category_fk']);
+
+            $id = $_POST['id'] ?? '';
+            if ($id === '') {
+                ms_json(false, 'Kategori ID gerekli.', [], 422);
+            }
+
+            $countSql = 'SELECT COUNT(*) FROM ' . ms_q($schema['signal_table'])
+                . ' WHERE ' . ms_q($schema['signal_category_fk']) . ' = ?';
+            $countStmt = $pdo->prepare($countSql);
+            $countStmt->execute([$id]);
+            $signalCount = (int)$countStmt->fetchColumn();
+
+            if ($signalCount > 0) {
+                ms_json(false, 'Bu kategoriye bağlı ' . $signalCount . ' signal var. Önce signal kayıtlarını silin.', [], 422);
+            }
+
+            $sql = 'DELETE FROM ' . ms_q($schema['category_table'])
+                . ' WHERE ' . ms_q($schema['category_id']) . ' = ? LIMIT 1';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$id]);
+
+            if ($stmt->rowCount() === 0) {
+                ms_json(false, 'Kategori bulunamadı veya silinemedi.', [], 404);
+            }
+
+            ms_json(true, 'Kategori başarıyla silindi.');
             break;
         }
 
