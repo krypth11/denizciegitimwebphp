@@ -50,7 +50,7 @@ try {
         (function () {
             try {
                 var dbTheme = <?= json_encode($initialTheme) ?>;
-                var pref = localStorage.getItem('admin_theme_preference') || dbTheme || 'system';
+                var pref = dbTheme || localStorage.getItem('admin_theme_preference') || 'system';
                 if (!['light', 'dark', 'system'].includes(pref)) pref = 'system';
 
                 var resolved = pref;

@@ -141,7 +141,9 @@ include '../includes/sidebar.php';
                         </td>
                         <td class="questions-col-question">
                             <div class="question-mobile-head">
-                                <strong class="question-title-mobile"><?= htmlspecialchars(mb_substr($q['question_text'], 0, 200)) ?>...</strong>
+                                <strong class="question-title-mobile question-title">
+                                    <?= htmlspecialchars(mb_strlen($q['question_text']) > 220 ? mb_substr($q['question_text'], 0, 220) . '…' : $q['question_text']) ?>
+                                </strong>
                                 <span class="question-mobile-type">
                                     <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
                                     <?php elseif ($q['question_type'] === 'karışık'): ?><span class="badge bg-warning text-dark">Karışık</span>
@@ -154,14 +156,14 @@ include '../includes/sidebar.php';
                                 <span><?= htmlspecialchars($q['course_name']) ?></span>
                             </div>
                             <div class="questions-option-grid mt-2">
-                                <div class="questions-option-item <?= $q['correct_answer'] === 'A' ? 'correct' : '' ?>">A) <?= htmlspecialchars(mb_substr($q['option_a'], 0, 28)) ?></div>
-                                <div class="questions-option-item <?= $q['correct_answer'] === 'B' ? 'correct' : '' ?>">B) <?= htmlspecialchars(mb_substr($q['option_b'], 0, 28)) ?></div>
-                                <div class="questions-option-item <?= $q['correct_answer'] === 'C' ? 'correct' : '' ?>">C) <?= htmlspecialchars(mb_substr($q['option_c'], 0, 28)) ?></div>
-                                <div class="questions-option-item <?= $q['correct_answer'] === 'D' ? 'correct' : '' ?>">D) <?= htmlspecialchars(mb_substr($q['option_d'], 0, 28)) ?></div>
+                                <div class="questions-option-item <?= $q['correct_answer'] === 'A' ? 'correct' : '' ?>">A) <?= htmlspecialchars(mb_strlen($q['option_a']) > 90 ? mb_substr($q['option_a'], 0, 90) . '…' : $q['option_a']) ?></div>
+                                <div class="questions-option-item <?= $q['correct_answer'] === 'B' ? 'correct' : '' ?>">B) <?= htmlspecialchars(mb_strlen($q['option_b']) > 90 ? mb_substr($q['option_b'], 0, 90) . '…' : $q['option_b']) ?></div>
+                                <div class="questions-option-item <?= $q['correct_answer'] === 'C' ? 'correct' : '' ?>">C) <?= htmlspecialchars(mb_strlen($q['option_c']) > 90 ? mb_substr($q['option_c'], 0, 90) . '…' : $q['option_c']) ?></div>
+                                <div class="questions-option-item <?= $q['correct_answer'] === 'D' ? 'correct' : '' ?>">D) <?= htmlspecialchars(mb_strlen($q['option_d']) > 90 ? mb_substr($q['option_d'], 0, 90) . '…' : $q['option_d']) ?></div>
                             </div>
                         </td>
                         <td class="questions-col-qualification"><small class="text-muted"><?= htmlspecialchars($q['qualification_name']) ?></small></td>
-                        <td class="questions-col-course"><strong><?= htmlspecialchars($q['course_name']) ?></strong></td>
+                        <td class="questions-col-course"><strong class="question-course"><?= htmlspecialchars($q['course_name']) ?></strong></td>
                         <td class="questions-actions-cell" onclick="event.stopPropagation()">
                             <div class="table-actions questions-actions-wrap">
                                 <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Düzenle"><i class="bi bi-pencil"></i></button>
@@ -825,5 +827,73 @@ JAVASCRIPT;
 ?>
 
 <script id="courses-data-json" type="application/json"><?= json_encode($courses, JSON_UNESCAPED_UNICODE) ?></script>
+
+<style>
+#questionsTable tbody td {
+    vertical-align: top;
+}
+
+.question-row-card {
+    transition: background-color .15s ease;
+}
+
+.question-title {
+    display: block;
+    font-weight: 600;
+    color: var(--text-main);
+    line-height: 1.35;
+}
+
+.questions-option-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.questions-option-item {
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 8px;
+    color: var(--text-main);
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.questions-option-item.correct {
+    background: var(--success-soft);
+    border-color: var(--success);
+    font-weight: 600;
+}
+
+.question-course {
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.questions-actions-wrap {
+    justify-content: flex-end;
+}
+
+@media (max-width: 991.98px) {
+    .questions-option-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 767.98px) {
+    .question-mobile-meta {
+        display: flex !important;
+        gap: 6px;
+        color: var(--text-muted);
+        font-size: 12px;
+        margin-top: 4px;
+    }
+
+    .questions-actions-wrap {
+        justify-content: flex-start;
+    }
+}
+</style>
 
 <?php include '../includes/footer.php'; ?>
