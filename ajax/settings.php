@@ -146,7 +146,7 @@ function settings_normalize_type($value)
 function settings_normalize_theme($value)
 {
     $v = strtolower(trim((string)$value));
-    return in_array($v, ['light', 'dark'], true) ? $v : 'light';
+    return in_array($v, ['light', 'dark', 'system'], true) ? $v : 'system';
 }
 
 function settings_target_row(PDO $pdo, array $schema, $userId)
@@ -232,7 +232,7 @@ try {
             if ($schema['theme_mode']) {
                 $select[] = settings_q($schema['theme_mode']) . ' AS theme_mode';
             } else {
-                $select[] = "'light' AS theme_mode";
+                $select[] = "'system' AS theme_mode";
             }
 
             $sql = 'SELECT ' . implode(', ', $select)
@@ -261,13 +261,13 @@ try {
                     'temperature' => 0.7,
                     'default_question_count' => 10,
                     'default_question_type' => 'all',
-                    'theme_mode' => 'light',
+                    'theme_mode' => 'system',
                 ];
             }
 
             $row['ai_provider'] = settings_normalize_provider($row['ai_provider'] ?? 'openai');
             $row['default_question_type'] = settings_normalize_type($row['default_question_type'] ?? 'all');
-            $row['theme_mode'] = settings_normalize_theme($row['theme_mode'] ?? 'light');
+            $row['theme_mode'] = settings_normalize_theme($row['theme_mode'] ?? 'system');
             $row['max_tokens'] = max(1, (int)($row['max_tokens'] ?? 2000));
             $row['temperature'] = max(0, min(1, (float)($row['temperature'] ?? 0.7)));
             $row['default_question_count'] = max(1, min(100, (int)($row['default_question_count'] ?? 10)));
@@ -284,7 +284,7 @@ try {
             $temperature = (float)($_POST['temperature'] ?? -1);
             $questionCount = (int)($_POST['default_question_count'] ?? 0);
             $questionType = settings_normalize_type($_POST['default_question_type'] ?? 'all');
-            $themeMode = settings_normalize_theme($_POST['theme_mode'] ?? 'light');
+            $themeMode = settings_normalize_theme($_POST['theme_mode'] ?? 'system');
 
             if ($aiModel === '') {
                 settings_json(false, 'Model seçimi zorunludur.', [], 422, ['ai_model' => 'required']);

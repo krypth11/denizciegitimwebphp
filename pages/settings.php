@@ -38,7 +38,7 @@ include '../includes/sidebar.php';
                 <div class="card h-100">
                     <div class="card-header bg-white"><h6 class="mb-0">Tema Ayarları</h6></div>
                     <div class="card-body">
-                        <input type="hidden" name="theme_mode" id="theme_mode" value="light">
+                        <input type="hidden" name="theme_mode" id="theme_mode" value="system">
                         <div class="theme-toggle" role="group" aria-label="Tema Seçimi">
                             <button type="button" class="theme-toggle-btn" data-theme="light">
                                 <i class="bi bi-sun-fill"></i>
@@ -47,6 +47,10 @@ include '../includes/sidebar.php';
                             <button type="button" class="theme-toggle-btn" data-theme="dark">
                                 <i class="bi bi-moon-stars-fill"></i>
                                 <span>Koyu</span>
+                            </button>
+                            <button type="button" class="theme-toggle-btn" data-theme="system">
+                                <i class="bi bi-display"></i>
+                                <span>Sistem</span>
                             </button>
                         </div>
                         <small class="text-muted d-block mt-2">Tema seçiminiz veritabanına kaydedilir ve tüm panelde uygulanır.</small>
@@ -224,6 +228,9 @@ $(document).ready(function () {
     const appAlert = (title, message, type = 'info') =>
         window.showAppAlert ? window.showAppAlert({ title, message, type }) : Promise.resolve();
 
+    const appConfirm = (title, message, options = {}) =>
+        window.showAppConfirm ? window.showAppConfirm({ title, message, ...options }) : Promise.resolve(false);
+
     const esc = (txt) => $('<div>').text(txt ?? '').html();
 
     const api = async (action, method = 'GET', data = {}) => {
@@ -264,28 +271,61 @@ $(document).ready(function () {
         $('#ai_model').val(selected);
     }
 
+    let initialFormSnapshot = '';
+    let isDirty = false;
+    let isSaving = false;
+
+    function normalizeThemePreference(mode) {
+        return ['light', 'dark', 'system'].includes(mode) ? mode : 'system';
+    }
+
     function setThemeToggle(mode) {
-        const safe = mode === 'dark' ? 'dark' : 'light';
+        const safe = normalizeThemePreference(mode);
         $('#theme_mode').val(safe);
         $('.theme-toggle-btn').removeClass('active');
         $('.theme-toggle-btn[data-theme="' + safe + '"]').addClass('active');
     }
 
-    function applyTheme(mode) {
-        const safe = mode === 'dark' ? 'dark' : 'light';
+    function applyTheme(mode, persist = true) {
+        const safe = normalizeThemePreference(mode);
         if (typeof window.applyGlobalTheme === 'function') {
-            window.applyGlobalTheme(safe);
+            window.applyGlobalTheme(safe, persist);
         } else {
-            document.documentElement.setAttribute('data-theme', safe);
-            document.documentElement.setAttribute('data-bs-theme', safe);
+            const resolved = safe === 'system'
+                ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                : safe;
+
+            document.documentElement.setAttribute('data-theme-preference', safe);
+            document.documentElement.setAttribute('data-theme', resolved);
+            document.documentElement.setAttribute('data-bs-theme', resolved);
         }
-        localStorage.setItem('admin_theme_mode', safe);
+        if (persist) localStorage.setItem('admin_theme_preference', safe);
         setThemeToggle(safe);
     }
 
     function initTheme() {
-        const saved = localStorage.getItem('admin_theme_mode') || 'light';
-        applyTheme(saved);
+        const saved = localStorage.getItem('admin_theme_preference') || 'system';
+        applyTheme(saved, false);
+    }
+
+    function collectFormSnapshot() {
+        const formArray = $('#settingsForm').serializeArray();
+        const normalized = formArray
+            .filter(x => x.name !== 'api_key')
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map(x => `${x.name}=${x.value}`)
+            .join('&') + `|api_key=${$('#api_key').val() || ''}`;
+        return normalized;
+    }
+
+    function refreshDirtyState() {
+        const now = collectFormSnapshot();
+        isDirty = now !== initialFormSnapshot;
+    }
+
+    function markCleanSnapshot() {
+        initialFormSnapshot = collectFormSnapshot();
+        isDirty = false;
     }
 
     function validateForm() {
@@ -327,7 +367,8 @@ $(document).ready(function () {
         $('#default_question_count').val(s.default_question_count ?? 10);
         $('#default_question_type').val(s.default_question_type || 'all');
 
-        applyTheme(s.theme_mode || localStorage.getItem('admin_theme_mode') || 'light');
+        applyTheme(s.theme_mode || localStorage.getItem('admin_theme_preference') || 'system');
+        markCleanSnapshot();
     }
 
     $('input[name="ai_provider"]').on('change', function () {
@@ -339,6 +380,11 @@ $(document).ready(function () {
 
     $(document).on('click', '.theme-toggle-btn', function () {
         applyTheme($(this).data('theme'));
+        refreshDirtyState();
+    });
+
+    $('#settingsForm').on('input change', 'input, select, textarea', function () {
+        refreshDirtyState();
     });
 
     $('#toggleApiKeyBtn').on('click', function () {
@@ -363,10 +409,12 @@ $(document).ready(function () {
             temperature: $('#temperature').val() || '',
             default_question_count: $('#default_question_count').val() || '',
             default_question_type: $('#default_question_type').val() || 'all',
-            theme_mode: $('#theme_mode').val() || 'light'
+            theme_mode: $('#theme_mode').val() || 'system'
         };
 
+        isSaving = true;
         const res = await api('save_settings', 'POST', payload);
+        isSaving = false;
         if (!res.success) {
             await appAlert('Hata', res.message || 'Ayarlar kaydedilemedi.', 'error');
             return;
@@ -374,6 +422,36 @@ $(document).ready(function () {
 
         await appAlert('Başarılı', res.message || 'Ayarlar kaydedildi.', 'success');
         await loadSettings();
+        markCleanSnapshot();
+    });
+
+    $(window).on('beforeunload', function (e) {
+        if (isDirty && !isSaving) {
+            const msg = 'Kaydedilmemiş değişiklikler var. Kaydetmeden çıkmak istediğinize emin misiniz?';
+            e.preventDefault();
+            e.returnValue = msg;
+            return msg;
+        }
+    });
+
+    $(document).on('click', 'a[href]', async function (e) {
+        if (!isDirty || isSaving) return;
+
+        const href = $(this).attr('href') || '';
+        if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+        if ($(this).attr('target') === '_blank') return;
+
+        e.preventDefault();
+        const ok = await appConfirm(
+            'Kaydedilmemiş Değişiklikler',
+            'Kaydedilmemiş değişiklikler var. Kaydetmeden çıkmak istediğinize emin misiniz?',
+            { type: 'warning', confirmText: 'Çık', cancelText: 'Kal' }
+        );
+
+        if (ok) {
+            isDirty = false;
+            window.location.href = href;
+        }
     });
 
     initTheme();
@@ -401,8 +479,8 @@ $(document).ready(function () {
 }
 
 .provider-card.active {
-    background: #eef5ff;
-    border-color: #9fc0f0;
+    background: var(--primary-soft);
+    border-color: var(--primary);
 }
 
 .provider-title {
@@ -421,6 +499,7 @@ $(document).ready(function () {
     border-radius: 12px;
     padding: 4px;
     gap: 4px;
+    width: 100%;
 }
 
 .theme-toggle-btn {
@@ -428,7 +507,7 @@ $(document).ready(function () {
     background: transparent;
     color: var(--text-muted);
     min-height: 36px;
-    min-width: 90px;
+    min-width: 82px;
     border-radius: 10px;
     display: inline-flex;
     align-items: center;
@@ -450,6 +529,10 @@ $(document).ready(function () {
 @media (max-width: 991.98px) {
     .provider-grid {
         grid-template-columns: 1fr;
+    }
+
+    .theme-toggle-btn {
+        flex: 1;
     }
 }
 

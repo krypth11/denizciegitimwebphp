@@ -1,14 +1,48 @@
-function applyGlobalTheme(mode) {
-    const safe = (mode === 'dark') ? 'dark' : 'light';
-    document.documentElement.setAttribute('data-theme', safe);
-    document.documentElement.setAttribute('data-bs-theme', safe);
+function resolveThemeMode(preference) {
+    const pref = ['light', 'dark', 'system'].includes(preference) ? preference : 'system';
+    if (pref === 'system') {
+        return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+    }
+    return pref;
 }
 
+function applyGlobalTheme(preference, persist = true) {
+    const pref = ['light', 'dark', 'system'].includes(preference) ? preference : 'system';
+    const resolved = resolveThemeMode(pref);
+
+    document.documentElement.setAttribute('data-theme-preference', pref);
+    document.documentElement.setAttribute('data-theme', resolved);
+    document.documentElement.setAttribute('data-bs-theme', resolved);
+
+    if (persist) {
+        try {
+            localStorage.setItem('admin_theme_preference', pref);
+        } catch (e) {}
+    }
+}
+
+window.applyGlobalTheme = applyGlobalTheme;
+
 try {
-    applyGlobalTheme(localStorage.getItem('admin_theme_mode') || 'light');
+    applyGlobalTheme(localStorage.getItem('admin_theme_preference') || 'system', false);
+
+    if (window.matchMedia) {
+        const mq = window.matchMedia('(prefers-color-scheme: dark)');
+        const onSystemThemeChange = function () {
+            const pref = localStorage.getItem('admin_theme_preference') || 'system';
+            if (pref === 'system') applyGlobalTheme('system', false);
+        };
+
+        if (typeof mq.addEventListener === 'function') {
+            mq.addEventListener('change', onSystemThemeChange);
+        } else if (typeof mq.addListener === 'function') {
+            mq.addListener(onSystemThemeChange);
+        }
+    }
+
     window.addEventListener('storage', function (e) {
-        if (e.key === 'admin_theme_mode') {
-            applyGlobalTheme(e.newValue || 'light');
+        if (e.key === 'admin_theme_preference') {
+            applyGlobalTheme(e.newValue || 'system', false);
         }
     });
 } catch (e) {}

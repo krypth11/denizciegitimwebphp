@@ -234,9 +234,9 @@ $(document).ready(function () {
                     <div class="ms-list-main" data-role="select-category" data-id="${c.id}">
                         <h6 class="mb-1">${escapeHtml(c.name)}</h6>
                         <div class="small text-muted">${escapeHtml(c.description || '-')}</div>
-                        <div class="small mt-1">
-                            <span class="badge bg-light text-dark">Sıra: ${c.order_index ?? 0}</span>
-                            <span class="badge bg-primary-subtle text-primary-emphasis">Signal: ${c.signal_count ?? 0}</span>
+                        <div class="small mt-1 d-flex flex-wrap gap-1">
+                            <span class="badge ms-chip">Sıra: ${c.order_index ?? 0}</span>
+                            <span class="badge ms-chip-accent">Signal: ${c.signal_count ?? 0}</span>
                         </div>
                     </div>
                     <div class="ms-list-actions">
@@ -288,7 +288,7 @@ $(document).ready(function () {
                                 <h6 class="mb-1">${escapeHtml(s.name)}</h6>
                                 <div class="small text-muted">${escapeHtml(s.category_name || '-')}</div>
                             </div>
-                            <span class="badge bg-secondary">#${s.order_index ?? 0}</span>
+                            <span class="badge ms-chip-muted">#${s.order_index ?? 0}</span>
                         </div>
                         <div class="small mt-2"><strong>Kod:</strong> ${escapeHtml(s.code || '-')}</div>
                         <div class="small text-muted mt-1 signal-desc-clamp">${escapeHtml(s.description || '-')}</div>
@@ -518,9 +518,13 @@ $(document).ready(function () {
     justify-content: space-between;
     gap: 10px;
     padding: 12px 14px;
-    border-bottom: 1px solid #f0f2f5;
+    border-bottom: 1px solid var(--border-soft);
+    background: var(--bg-surface);
 }
-.ms-list-item.active { background: #eef5ff; }
+.ms-list-item.active {
+    background: var(--primary-soft);
+    border-left: 3px solid var(--primary);
+}
 .ms-list-main { flex: 1; min-width: 0; }
 .ms-list-main[data-role="select-category"] { cursor: pointer; }
 .ms-list-main h6 { word-break: break-word; }
@@ -531,9 +535,27 @@ $(document).ready(function () {
     width: 56px;
     height: 56px;
     object-fit: contain;
-    border: 1px solid #e9ecef;
+    border: 1px solid var(--border);
     border-radius: 8px;
-    background: #fff;
+    background: var(--bg-soft);
+}
+
+.ms-chip {
+    background: var(--bg-soft);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+}
+
+.ms-chip-accent {
+    background: var(--primary-soft);
+    color: var(--text-main);
+    border: 1px solid var(--primary);
+}
+
+.ms-chip-muted {
+    background: var(--bg-soft-2);
+    color: var(--text-main);
+    border: 1px solid var(--border);
 }
 
 .signal-desc-clamp {

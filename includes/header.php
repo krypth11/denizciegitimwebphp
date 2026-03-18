@@ -6,7 +6,7 @@ if (!isset($user)) {
 $customCssPath = $_SERVER['DOCUMENT_ROOT'] . '/assets/css/custom.css';
 $customCssVersion = file_exists($customCssPath) ? filemtime($customCssPath) : time();
 
-$initialTheme = 'light';
+$initialTheme = 'system';
 try {
     if (isset($pdo) && isset($user['user_id'])) {
         $colStmt = $pdo->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'admin_settings'");
@@ -23,13 +23,13 @@ try {
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute([$user['user_id']]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                if ($row && in_array(strtolower((string)$row['theme_mode']), ['light', 'dark'], true)) {
+                if ($row && in_array(strtolower((string)$row['theme_mode']), ['light', 'dark', 'system'], true)) {
                     $initialTheme = strtolower((string)$row['theme_mode']);
                 }
             } else {
                 $sql = "SELECT `$themeCol` AS theme_mode FROM `admin_settings` ORDER BY " . ($updatedCol ? "`$updatedCol` DESC" : "1") . " LIMIT 1";
                 $row = $pdo->query($sql)->fetch(PDO::FETCH_ASSOC);
-                if ($row && in_array(strtolower((string)$row['theme_mode']), ['light', 'dark'], true)) {
+                if ($row && in_array(strtolower((string)$row['theme_mode']), ['light', 'dark', 'system'], true)) {
                     $initialTheme = strtolower((string)$row['theme_mode']);
                 }
             }
@@ -50,11 +50,18 @@ try {
         (function () {
             try {
                 var dbTheme = <?= json_encode($initialTheme) ?>;
-                var mode = localStorage.getItem('admin_theme_mode') || dbTheme || 'light';
-                if (!['light', 'dark'].includes(mode)) mode = 'light';
-                document.documentElement.setAttribute('data-theme', mode);
-                document.documentElement.setAttribute('data-bs-theme', mode);
-                localStorage.setItem('admin_theme_mode', mode);
+                var pref = localStorage.getItem('admin_theme_preference') || dbTheme || 'system';
+                if (!['light', 'dark', 'system'].includes(pref)) pref = 'system';
+
+                var resolved = pref;
+                if (pref === 'system') {
+                    resolved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+                }
+
+                document.documentElement.setAttribute('data-theme-preference', pref);
+                document.documentElement.setAttribute('data-theme', resolved);
+                document.documentElement.setAttribute('data-bs-theme', resolved);
+                localStorage.setItem('admin_theme_preference', pref);
             } catch (e) {}
         })();
     </script>

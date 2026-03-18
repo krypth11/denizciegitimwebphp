@@ -827,18 +827,19 @@ $(document).ready(function () {
 }
 
 .meq-option {
-    background: #f8f9fa;
-    border: 1px solid #e9ecef;
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 6px 8px;
+    color: var(--text-main);
     font-size: 13px;
     line-height: 1.35;
 }
 
 .meq-option-correct {
-    background: #eaf8ef;
-    border-color: #b9e5c8;
-    color: #1d7f44;
+    background: var(--success-soft);
+    border-color: var(--success);
+    color: var(--text-main);
     font-weight: 600;
 }
 
@@ -847,13 +848,13 @@ $(document).ready(function () {
 }
 
 .bulk-card-approved {
-    border: 1px solid #b9e5c8;
-    background: #f4fbf6;
+    border: 1px solid var(--success);
+    background: var(--success-soft);
 }
 
 .bulk-card-cancelled {
-    border: 1px solid #f3c2c7;
-    background: #fff6f7;
+    border: 1px solid var(--danger);
+    background: var(--danger-soft);
 }
 
 @media (max-width: 767.98px) {

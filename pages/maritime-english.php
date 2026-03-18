@@ -194,9 +194,9 @@ $(document).ready(function () {
                     <div class="me-list-main" data-role="select-category" data-id="${c.id}">
                         <h6 class="mb-1">${escapeHtml(c.name)}</h6>
                         <div class="small text-muted">${escapeHtml(c.description || '-')}</div>
-                        <div class="small mt-1">
-                            <span class="badge bg-light text-dark">Sıra: ${c.order_index ?? 0}</span>
-                            <span class="badge bg-primary-subtle text-primary-emphasis">Topic: ${c.topic_count ?? 0}</span>
+                        <div class="small mt-1 d-flex flex-wrap gap-1">
+                            <span class="badge me-chip">Sıra: ${c.order_index ?? 0}</span>
+                            <span class="badge me-chip-accent">Topic: ${c.topic_count ?? 0}</span>
                         </div>
                     </div>
                     <div class="me-list-actions">
@@ -246,9 +246,9 @@ $(document).ready(function () {
                     <div class="me-list-main">
                         <h6 class="mb-1">${escapeHtml(t.name)}</h6>
                         <div class="small text-muted">${escapeHtml(t.description || '-')}</div>
-                        <div class="small mt-1">
-                            <span class="badge bg-light text-dark">Sıra: ${t.order_index ?? 0}</span>
-                            <span class="badge bg-secondary">${escapeHtml(t.category_name || '')}</span>
+                        <div class="small mt-1 d-flex flex-wrap gap-1">
+                            <span class="badge me-chip">Sıra: ${t.order_index ?? 0}</span>
+                            <span class="badge me-chip-muted">${escapeHtml(t.category_name || '')}</span>
                         </div>
                     </div>
                     <div class="me-list-actions">
@@ -446,14 +446,36 @@ $(document).ready(function () {
     justify-content: space-between;
     gap: 10px;
     padding: 12px 14px;
-    border-bottom: 1px solid #f0f2f5;
+    border-bottom: 1px solid var(--border-soft);
+    background: var(--bg-surface);
 }
-.me-list-item.active { background: #eef5ff; }
+.me-list-item.active {
+    background: var(--primary-soft);
+    border-left: 3px solid var(--primary);
+}
 .me-list-main { flex: 1; min-width: 0; }
 .me-list-main[data-role="select-category"] { cursor: pointer; }
 .me-list-main h6 { word-break: break-word; }
 .me-list-actions { display: flex; gap: 6px; align-items: flex-start; }
 .me-search-wrap { width: 220px; }
+
+.me-chip {
+    background: var(--bg-soft);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+}
+
+.me-chip-accent {
+    background: var(--primary-soft);
+    color: var(--text-main);
+    border: 1px solid var(--primary);
+}
+
+.me-chip-muted {
+    background: var(--bg-soft-2);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+}
 
 @media (max-width: 991.98px) {
     .maritime-english-layout .card { min-height: auto; }
