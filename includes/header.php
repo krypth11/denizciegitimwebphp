@@ -7,6 +7,7 @@ $customCssPath = $_SERVER['DOCUMENT_ROOT'] . '/assets/css/custom.css';
 $customCssVersion = file_exists($customCssPath) ? filemtime($customCssPath) : time();
 
 $initialTheme = 'system';
+$hasDbTheme = false;
 try {
     if (isset($pdo) && isset($user['user_id'])) {
         $colStmt = $pdo->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'admin_settings'");
@@ -25,12 +26,14 @@ try {
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
                 if ($row && in_array(strtolower((string)$row['theme_mode']), ['light', 'dark', 'system'], true)) {
                     $initialTheme = strtolower((string)$row['theme_mode']);
+                    $hasDbTheme = true;
                 }
             } else {
                 $sql = "SELECT `$themeCol` AS theme_mode FROM `admin_settings` ORDER BY " . ($updatedCol ? "`$updatedCol` DESC" : "1") . " LIMIT 1";
                 $row = $pdo->query($sql)->fetch(PDO::FETCH_ASSOC);
                 if ($row && in_array(strtolower((string)$row['theme_mode']), ['light', 'dark', 'system'], true)) {
                     $initialTheme = strtolower((string)$row['theme_mode']);
+                    $hasDbTheme = true;
                 }
             }
         }
@@ -50,7 +53,9 @@ try {
         (function () {
             try {
                 var dbTheme = <?= json_encode($initialTheme) ?>;
-                var pref = dbTheme || localStorage.getItem('admin_theme_preference') || 'system';
+                var hasDbTheme = <?= $hasDbTheme ? 'true' : 'false' ?>;
+                var stored = localStorage.getItem('admin_theme_preference');
+                var pref = hasDbTheme ? (dbTheme || stored || 'system') : (stored || dbTheme || 'system');
                 if (!['light', 'dark', 'system'].includes(pref)) pref = 'system';
 
                 var resolved = pref;
@@ -61,7 +66,9 @@ try {
                 document.documentElement.setAttribute('data-theme-preference', pref);
                 document.documentElement.setAttribute('data-theme', resolved);
                 document.documentElement.setAttribute('data-bs-theme', resolved);
-                localStorage.setItem('admin_theme_preference', pref);
+                if (!stored || hasDbTheme) {
+                    localStorage.setItem('admin_theme_preference', pref);
+                }
             } catch (e) {}
         })();
     </script>
