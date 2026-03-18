@@ -88,8 +88,8 @@ function ms_schema(PDO $pdo)
     return [
         'signal_table' => $signalTable,
         'signal_cols' => $signalCols,
-        'signal_id' => ms_pick($signalCols, ['id', 'signal_id', 'uuid']),
-        'signal_name' => ms_pick($signalCols, ['name', 'title', 'signal_name', 'label']),
+        'signal_id' => ms_pick($signalCols, ['id', 'signal_id', 'uuid'], false),
+        'signal_name' => ms_pick($signalCols, ['name', 'title', 'signal_name', 'label'], false),
         'signal_code' => ms_pick($signalCols, ['code', 'signal_code', 'symbol', 'short_code'], false),
         'signal_description' => ms_pick($signalCols, ['description', 'meaning', 'content', 'summary', 'text'], false),
         'signal_image' => ms_pick($signalCols, ['image_url', 'image', 'icon_url', 'icon', 'asset_url'], false),
@@ -100,10 +100,19 @@ function ms_schema(PDO $pdo)
 
         'category_table' => $categoryTable,
         'category_cols' => $categoryCols,
-        'category_id' => $categoryTable ? ms_pick($categoryCols, ['id', 'category_id', 'uuid']) : null,
-        'category_name' => $categoryTable ? ms_pick($categoryCols, ['name', 'title', 'category_name']) : null,
+        'category_id' => $categoryTable ? ms_pick($categoryCols, ['id', 'category_id', 'uuid'], false) : null,
+        'category_name' => $categoryTable ? ms_pick($categoryCols, ['name', 'title', 'category_name'], false) : null,
         'category_order' => $categoryTable ? ms_pick($categoryCols, ['order_index', 'sort_order', 'display_order', 'order_no'], false) : null,
     ];
+}
+
+function ms_require_schema(array $schema, array $fields)
+{
+    foreach ($fields as $field) {
+        if (empty($schema[$field])) {
+            throw new RuntimeException('Eksik şema alanı: ' . $field);
+        }
+    }
 }
 
 function ms_maybe_set_id(array &$data, array $cols, $idCol)
@@ -165,12 +174,18 @@ try {
 
     switch ($action) {
         case 'list_categories': {
-            $supportsCategory = (bool)($schema['category_table'] && $schema['signal_category_fk']);
-            if (!$schema['category_table']) {
+            $supportsCategory = (bool)(
+                $schema['category_table']
+                && $schema['signal_category_fk']
+                && $schema['category_id']
+                && $schema['category_name']
+            );
+
+            if (!$supportsCategory) {
                 ms_json(true, '', [
                     'categories' => [],
-                    'supports_category' => $supportsCategory,
-                    'requires_category' => $supportsCategory,
+                    'supports_category' => false,
+                    'requires_category' => false,
                 ]);
             }
 
@@ -193,6 +208,8 @@ try {
         }
 
         case 'list_signals': {
+            ms_require_schema($schema, ['signal_table', 'signal_id', 'signal_name']);
+
             $search = trim((string)($_GET['search'] ?? ''));
             $categoryId = trim((string)($_GET['category_id'] ?? ''));
 
@@ -259,6 +276,8 @@ try {
         }
 
         case 'add_signal': {
+            ms_require_schema($schema, ['signal_table', 'signal_id', 'signal_name']);
+
             $name = sanitize_input($_POST['name'] ?? '');
             $code = sanitize_input($_POST['code'] ?? '');
             $description = sanitize_input($_POST['description'] ?? '');
@@ -318,6 +337,8 @@ try {
         }
 
         case 'update_signal': {
+            ms_require_schema($schema, ['signal_table', 'signal_id', 'signal_name']);
+
             $id = $_POST['id'] ?? '';
             $name = sanitize_input($_POST['name'] ?? '');
             $code = sanitize_input($_POST['code'] ?? '');
@@ -384,6 +405,8 @@ try {
         }
 
         case 'delete_signal': {
+            ms_require_schema($schema, ['signal_table', 'signal_id']);
+
             $id = $_POST['id'] ?? '';
             if ($id === '') {
                 ms_json(false, 'Signal ID gerekli.', [], 422);

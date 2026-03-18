@@ -136,13 +136,20 @@ $(document).ready(function () {
 
     const escapeHtml = (text) => $('<div>').text(text ?? '').html();
 
-    const api = (action, method = 'GET', data = {}) => {
-        return $.ajax({
-            url: endpoint + '?action=' + encodeURIComponent(action),
-            method,
-            data,
-            dataType: 'json'
-        });
+    const api = async (action, method = 'GET', data = {}) => {
+        try {
+            return await $.ajax({
+                url: endpoint + '?action=' + encodeURIComponent(action),
+                method,
+                data,
+                dataType: 'json'
+            });
+        } catch (xhr) {
+            return {
+                success: false,
+                message: xhr?.responseJSON?.message || 'Sunucu hatası oluştu. Lütfen tekrar deneyin.'
+            };
+        }
     };
 
     function renderCategorySelects() {
