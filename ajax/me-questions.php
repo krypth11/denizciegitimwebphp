@@ -416,6 +416,76 @@ try {
             break;
         }
 
+        case 'save_bulk_questions': {
+            $raw = $_POST['questions'] ?? '[]';
+            $items = json_decode($raw, true);
+
+            if (!is_array($items) || !$items) {
+                meq_json(false, 'Kaydedilecek soru bulunamadı.', [], 422);
+            }
+
+            $saved = 0;
+            $skipped = 0;
+
+            foreach ($items as $item) {
+                $categoryId = trim((string)($item['category_id'] ?? ''));
+                $topicId = trim((string)($item['topic_id'] ?? ''));
+                $questionText = sanitize_input($item['question_text'] ?? '');
+                $optionA = sanitize_input($item['option_a'] ?? '');
+                $optionB = sanitize_input($item['option_b'] ?? '');
+                $optionC = sanitize_input($item['option_c'] ?? '');
+                $optionD = sanitize_input($item['option_d'] ?? '');
+                $correct = strtoupper(trim((string)($item['correct_answer'] ?? '')));
+                $explanation = sanitize_input($item['explanation'] ?? '');
+
+                if (
+                    $categoryId === '' || $topicId === '' || $questionText === '' ||
+                    $optionA === '' || $optionB === '' || $optionC === '' || $optionD === '' ||
+                    !in_array($correct, ['A', 'B', 'C', 'D'], true)
+                ) {
+                    $skipped++;
+                    continue;
+                }
+
+                $topicSql = 'SELECT ' . meq_q($s['t_cat_fk']) . ' AS category_id FROM ' . meq_q($s['t_table'])
+                    . ' WHERE ' . meq_q($s['t_id']) . ' = ? LIMIT 1';
+                $topicStmt = $pdo->prepare($topicSql);
+                $topicStmt->execute([$topicId]);
+                $topicRow = $topicStmt->fetch(PDO::FETCH_ASSOC);
+
+                if (!$topicRow || (string)$topicRow['category_id'] !== (string)$categoryId) {
+                    $skipped++;
+                    continue;
+                }
+
+                $insert = [
+                    $s['q_topic_fk'] => $topicId,
+                    $s['q_text'] => $questionText,
+                    $s['q_opt_a'] => $optionA,
+                    $s['q_opt_b'] => $optionB,
+                    $s['q_opt_c'] => $optionC,
+                    $s['q_opt_d'] => $optionD,
+                    $s['q_correct'] => $correct,
+                ];
+
+                if ($s['q_cat_fk']) $insert[$s['q_cat_fk']] = $categoryId;
+                if ($s['q_explanation']) $insert[$s['q_explanation']] = $explanation;
+                if ($s['q_created']) $insert[$s['q_created']] = date('Y-m-d H:i:s');
+                if ($s['q_updated']) $insert[$s['q_updated']] = date('Y-m-d H:i:s');
+
+                meq_set_id_if_needed($insert, $s['q_cols'], $s['q_id']);
+                meq_insert($pdo, $s['q_table'], $insert);
+                $saved++;
+            }
+
+            if ($saved === 0) {
+                meq_json(false, 'Onaylanan sorular kaydedilemedi.', ['saved' => 0, 'skipped' => $skipped], 422);
+            }
+
+            meq_json(true, $saved . ' soru başarıyla kaydedildi.', ['saved' => $saved, 'skipped' => $skipped]);
+            break;
+        }
+
         default:
             meq_json(false, 'Geçersiz işlem.', [], 400);
     }
