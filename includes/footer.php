@@ -16,7 +16,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
     <!-- Custom JS -->
-    <script src="/assets/js/app2.js"></script>
+    <script src="/assets/js/app.js?v=<?= filemtime($_SERVER['DOCUMENT_ROOT'].'/assets/js/app.js') ?>"></script>
 
     <!-- Ortak Uyarı/Onay Modalı -->
     <div class="modal fade" id="appDialogModal" tabindex="-1" aria-hidden="true">
