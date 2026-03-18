@@ -5,42 +5,6 @@ if (!isset($user)) {
 
 $customCssPath = $_SERVER['DOCUMENT_ROOT'] . '/assets/css/custom.css';
 $customCssVersion = file_exists($customCssPath) ? filemtime($customCssPath) : time();
-
-$initialTheme = 'system';
-$hasDbTheme = false;
-try {
-    if (isset($pdo) && isset($user['user_id'])) {
-        $colStmt = $pdo->prepare("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'admin_settings'");
-        $colStmt->execute([DB_NAME]);
-        $cols = $colStmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
-
-        $themeCol = in_array('theme_mode', $cols, true) ? 'theme_mode' : (in_array('theme', $cols, true) ? 'theme' : null);
-        $userCol = in_array('user_id', $cols, true) ? 'user_id' : null;
-        $updatedCol = in_array('updated_at', $cols, true) ? 'updated_at' : (in_array('created_at', $cols, true) ? 'created_at' : null);
-
-        if ($themeCol) {
-            if ($userCol) {
-                $sql = "SELECT `$themeCol` AS theme_mode FROM `admin_settings` WHERE `$userCol` = ? ORDER BY " . ($updatedCol ? "`$updatedCol` DESC" : "1") . " LIMIT 1";
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute([$user['user_id']]);
-                $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                if ($row && in_array(strtolower((string)$row['theme_mode']), ['light', 'dark', 'system'], true)) {
-                    $initialTheme = strtolower((string)$row['theme_mode']);
-                    $hasDbTheme = true;
-                }
-            } else {
-                $sql = "SELECT `$themeCol` AS theme_mode FROM `admin_settings` ORDER BY " . ($updatedCol ? "`$updatedCol` DESC" : "1") . " LIMIT 1";
-                $row = $pdo->query($sql)->fetch(PDO::FETCH_ASSOC);
-                if ($row && in_array(strtolower((string)$row['theme_mode']), ['light', 'dark', 'system'], true)) {
-                    $initialTheme = strtolower((string)$row['theme_mode']);
-                    $hasDbTheme = true;
-                }
-            }
-        }
-    }
-} catch (Throwable $e) {
-    // Sessiz fallback: light
-}
 ?>
 <!DOCTYPE html>
 <html lang="tr">
@@ -52,10 +16,7 @@ try {
     <script>
         (function () {
             try {
-                var dbTheme = <?= json_encode($initialTheme) ?>;
-                var hasDbTheme = <?= $hasDbTheme ? 'true' : 'false' ?>;
-                var stored = localStorage.getItem('admin_theme_preference');
-                var pref = hasDbTheme ? (dbTheme || stored || 'system') : (stored || dbTheme || 'system');
+                var pref = localStorage.getItem('app_theme') || 'system';
                 if (!['light', 'dark', 'system'].includes(pref)) pref = 'system';
 
                 var resolved = pref;
@@ -66,9 +27,7 @@ try {
                 document.documentElement.setAttribute('data-theme-preference', pref);
                 document.documentElement.setAttribute('data-theme', resolved);
                 document.documentElement.setAttribute('data-bs-theme', resolved);
-                if (!stored || hasDbTheme) {
-                    localStorage.setItem('admin_theme_preference', pref);
-                }
+                localStorage.setItem('app_theme', pref);
             } catch (e) {}
         })();
     </script>

@@ -16,7 +16,7 @@ function applyGlobalTheme(preference, persist = true) {
 
     if (persist) {
         try {
-            localStorage.setItem('admin_theme_preference', pref);
+            localStorage.setItem('app_theme', pref);
         } catch (e) {}
     }
 }
@@ -24,12 +24,12 @@ function applyGlobalTheme(preference, persist = true) {
 window.applyGlobalTheme = applyGlobalTheme;
 
 try {
-    applyGlobalTheme(localStorage.getItem('admin_theme_preference') || 'system', false);
+    applyGlobalTheme(localStorage.getItem('app_theme') || 'system', false);
 
     if (window.matchMedia) {
         const mq = window.matchMedia('(prefers-color-scheme: dark)');
         const onSystemThemeChange = function () {
-            const pref = localStorage.getItem('admin_theme_preference') || 'system';
+            const pref = localStorage.getItem('app_theme') || 'system';
             if (pref === 'system') applyGlobalTheme('system', false);
         };
 
@@ -41,7 +41,7 @@ try {
     }
 
     window.addEventListener('storage', function (e) {
-        if (e.key === 'admin_theme_preference') {
+        if (e.key === 'app_theme') {
             applyGlobalTheme(e.newValue || 'system', false);
         }
     });

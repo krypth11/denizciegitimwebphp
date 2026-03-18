@@ -53,7 +53,7 @@ include '../includes/sidebar.php';
                                 <span>Sistem</span>
                             </button>
                         </div>
-                        <small class="text-muted d-block mt-2">Tema seçiminiz veritabanına kaydedilir ve tüm panelde uygulanır.</small>
+                        <small class="text-muted d-block mt-2">Tema seçiminiz bu tarayıcıda saklanır ve tüm panelde uygulanır.</small>
                     </div>
                 </div>
             </div>
@@ -299,12 +299,12 @@ $(document).ready(function () {
             document.documentElement.setAttribute('data-theme', resolved);
             document.documentElement.setAttribute('data-bs-theme', resolved);
         }
-        if (persist) localStorage.setItem('admin_theme_preference', safe);
+        if (persist) localStorage.setItem('app_theme', safe);
         setThemeToggle(safe);
     }
 
     function initTheme() {
-        const saved = localStorage.getItem('admin_theme_preference') || 'system';
+        const saved = localStorage.getItem('app_theme') || 'system';
         applyTheme(saved, false);
     }
 
@@ -367,7 +367,7 @@ $(document).ready(function () {
         $('#default_question_count').val(s.default_question_count ?? 10);
         $('#default_question_type').val(s.default_question_type || 'all');
 
-        applyTheme(s.theme_mode || localStorage.getItem('admin_theme_preference') || 'system');
+        applyTheme(localStorage.getItem('app_theme') || 'system', false);
         markCleanSnapshot();
     }
 
@@ -408,9 +408,10 @@ $(document).ready(function () {
             max_tokens: $('#max_tokens').val() || '',
             temperature: $('#temperature').val() || '',
             default_question_count: $('#default_question_count').val() || '',
-            default_question_type: $('#default_question_type').val() || 'all',
-            theme_mode: $('#theme_mode').val() || 'system'
+            default_question_type: $('#default_question_type').val() || 'all'
         };
+
+        localStorage.setItem('app_theme', $('#theme_mode').val() || 'system');
 
         isSaving = true;
         const res = await api('save_settings', 'POST', payload);
