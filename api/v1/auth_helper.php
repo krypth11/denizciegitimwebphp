@@ -283,6 +283,9 @@ function api_get_profile_schema(PDO $pdo): array
         'email' => $pick(['email']),
         'full_name' => $pick(['full_name', 'name', 'display_name'], false),
         'is_admin' => $pick(['is_admin'], false),
+        'is_guest' => $pick(['is_guest', 'guest'], false),
+        'is_deleted' => $pick(['is_deleted'], false),
+        'password' => $pick(['password_hash', 'hashed_password', 'password', 'pass_hash', 'passwd'], false),
         'current_qualification_id' => $pick(['current_qualification_id', 'qualification_id'], false),
         'target_qualification_id' => $pick(['target_qualification_id'], false),
         'onboarding_completed' => $pick(['onboarding_completed', 'is_onboarding_completed'], false),
@@ -300,6 +303,7 @@ function api_find_profile_by_user_id(PDO $pdo, string $userId): ?array
         "`{$schema['email']}` AS email",
         $schema['full_name'] ? "`{$schema['full_name']}` AS full_name" : "'' AS full_name",
         $schema['is_admin'] ? "`{$schema['is_admin']}` AS is_admin" : '0 AS is_admin',
+        $schema['is_guest'] ? "`{$schema['is_guest']}` AS is_guest" : '0 AS is_guest',
         $schema['current_qualification_id'] ? "`{$schema['current_qualification_id']}` AS current_qualification_id" : 'NULL AS current_qualification_id',
         $schema['target_qualification_id'] ? "`{$schema['target_qualification_id']}` AS target_qualification_id" : 'NULL AS target_qualification_id',
         $schema['onboarding_completed'] ? "`{$schema['onboarding_completed']}` AS onboarding_completed" : '0 AS onboarding_completed',
@@ -330,6 +334,7 @@ function api_find_profile_by_user_id(PDO $pdo, string $userId): ?array
         'email' => (string)($row['email'] ?? ''),
         'full_name' => (string)($row['full_name'] ?? ''),
         'is_admin' => ((int)($row['is_admin'] ?? 0) === 1),
+        'is_guest' => ((int)($row['is_guest'] ?? 0) === 1),
         'current_qualification_id' => $row['current_qualification_id'] ?? null,
         'target_qualification_id' => $row['target_qualification_id'] ?? null,
         'onboarding_completed' => ((int)($row['onboarding_completed'] ?? 0) === 1),
@@ -369,4 +374,132 @@ function api_qualification_exists(PDO $pdo, string $qualificationId): bool
     $stmt = $pdo->prepare('SELECT COUNT(*) FROM qualifications WHERE id = ?');
     $stmt->execute([$qualificationId]);
     return ((int)$stmt->fetchColumn()) > 0;
+}
+
+function api_email_exists(PDO $pdo, string $email): bool
+{
+    $schema = api_get_profile_schema($pdo);
+    $sql = 'SELECT COUNT(*) FROM `' . $schema['table'] . '` WHERE LOWER(`' . $schema['email'] . '`) = LOWER(?)';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$email]);
+    return ((int)$stmt->fetchColumn()) > 0;
+}
+
+function api_create_user_profile(PDO $pdo, array $input): string
+{
+    $schema = api_get_profile_schema($pdo);
+
+    $userId = generate_uuid();
+    $email = trim(strtolower((string)($input['email'] ?? '')));
+    $fullName = trim((string)($input['full_name'] ?? ''));
+    $passwordHash = (string)($input['password_hash'] ?? '');
+    $isAdmin = !empty($input['is_admin']) ? 1 : 0;
+    $isGuest = !empty($input['is_guest']) ? 1 : 0;
+    $onboardingCompleted = !empty($input['onboarding_completed']) ? 1 : 0;
+    $currentQualificationId = $input['current_qualification_id'] ?? null;
+    $targetQualificationId = $input['target_qualification_id'] ?? null;
+
+    $columns = [];
+    $holders = [];
+    $params = [];
+
+    $addValue = static function (string $column, $value) use (&$columns, &$holders, &$params): void {
+        $columns[] = '`' . $column . '`';
+        $holders[] = '?';
+        $params[] = $value;
+    };
+
+    $addNow = static function (string $column) use (&$columns, &$holders): void {
+        $columns[] = '`' . $column . '`';
+        $holders[] = 'NOW()';
+    };
+
+    $addValue($schema['id'], $userId);
+    $addValue($schema['email'], $email);
+
+    if ($schema['full_name']) {
+        $addValue($schema['full_name'], $fullName);
+    }
+    if ($schema['password']) {
+        $addValue($schema['password'], $passwordHash);
+    }
+    if ($schema['is_admin']) {
+        $addValue($schema['is_admin'], $isAdmin);
+    }
+    if ($schema['is_guest']) {
+        $addValue($schema['is_guest'], $isGuest);
+    }
+    if ($schema['is_deleted']) {
+        $addValue($schema['is_deleted'], 0);
+    }
+    if ($schema['onboarding_completed']) {
+        $addValue($schema['onboarding_completed'], $onboardingCompleted);
+    }
+    if ($schema['current_qualification_id']) {
+        $addValue($schema['current_qualification_id'], $currentQualificationId);
+    }
+    if ($schema['target_qualification_id']) {
+        $addValue($schema['target_qualification_id'], $targetQualificationId);
+    }
+    if ($schema['created_at']) {
+        $addNow($schema['created_at']);
+    }
+    if ($schema['updated_at']) {
+        $addNow($schema['updated_at']);
+    }
+
+    $sql = 'INSERT INTO `' . $schema['table'] . '` (' . implode(', ', $columns) . ') VALUES (' . implode(', ', $holders) . ')';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    return $userId;
+}
+
+function api_build_auth_user_payload(PDO $pdo, string $userId): array
+{
+    $profile = api_find_profile_by_user_id($pdo, $userId);
+    if ($profile) {
+        return [
+            'id' => (string)$profile['id'],
+            'email' => (string)$profile['email'],
+            'full_name' => (string)($profile['full_name'] ?? ''),
+            'is_admin' => (bool)($profile['is_admin'] ?? false),
+            'current_qualification_id' => $profile['current_qualification_id'] ?? null,
+            'onboarding_completed' => (bool)($profile['onboarding_completed'] ?? false),
+            'is_guest' => (bool)($profile['is_guest'] ?? false),
+        ];
+    }
+
+    $user = api_find_user_by_id($pdo, $userId);
+    if (!$user) {
+        return [
+            'id' => $userId,
+            'email' => '',
+            'full_name' => '',
+            'is_admin' => false,
+            'current_qualification_id' => null,
+            'onboarding_completed' => false,
+            'is_guest' => false,
+        ];
+    }
+
+    return [
+        'id' => (string)$user['id'],
+        'email' => (string)$user['email'],
+        'full_name' => (string)($user['full_name'] ?? ''),
+        'is_admin' => ((int)($user['is_admin'] ?? 0) === 1),
+        'current_qualification_id' => null,
+        'onboarding_completed' => false,
+        'is_guest' => false,
+    ];
+}
+
+function api_is_duplicate_error(Throwable $e): bool
+{
+    if ($e instanceof PDOException) {
+        $code = (string)($e->errorInfo[0] ?? $e->getCode());
+        return $code === '23000';
+    }
+
+    return false;
 }

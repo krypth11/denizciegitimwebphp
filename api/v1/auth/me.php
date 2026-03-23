@@ -10,12 +10,7 @@ try {
     $user = $auth['user'];
 
     api_success('Kullanıcı bilgisi alındı.', [
-        'user' => [
-            'id' => (string)$user['id'],
-            'email' => (string)$user['email'],
-            'full_name' => (string)($user['full_name'] ?? ''),
-            'is_admin' => ((int)($user['is_admin'] ?? 0) === 1),
-        ],
+        'user' => api_build_auth_user_payload($pdo, (string)$user['id']),
     ]);
 } catch (Throwable $e) {
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
