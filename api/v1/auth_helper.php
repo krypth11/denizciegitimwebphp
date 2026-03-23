@@ -503,3 +503,66 @@ function api_is_duplicate_error(Throwable $e): bool
 
     return false;
 }
+
+function api_is_guest_user(PDO $pdo, string $userId): bool
+{
+    $schema = api_get_profile_schema($pdo);
+
+    if ($schema['is_guest']) {
+        $sql = 'SELECT `' . $schema['is_guest'] . '` FROM `' . $schema['table'] . '` WHERE `' . $schema['id'] . '` = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $flag = $stmt->fetchColumn();
+        return ((int)$flag) === 1;
+    }
+
+    // Fallback: guest email stratejisi
+    $sql = 'SELECT `' . $schema['email'] . '` FROM `' . $schema['table'] . '` WHERE `' . $schema['id'] . '` = ? LIMIT 1';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$userId]);
+    $email = strtolower((string)$stmt->fetchColumn());
+    return $email !== '' && str_ends_with($email, '@guest.local');
+}
+
+function api_convert_guest_to_registered(PDO $pdo, string $userId, string $fullName, string $email, string $password): void
+{
+    $schema = api_get_profile_schema($pdo);
+
+    $updates = [];
+    $values = [];
+
+    if ($schema['full_name']) {
+        $updates[] = '`' . $schema['full_name'] . '` = ?';
+        $values[] = $fullName;
+    }
+
+    $updates[] = '`' . $schema['email'] . '` = ?';
+    $values[] = strtolower($email);
+
+    if ($schema['password']) {
+        $updates[] = '`' . $schema['password'] . '` = ?';
+        $values[] = hash_password($password);
+    }
+
+    if ($schema['is_guest']) {
+        $updates[] = '`' . $schema['is_guest'] . '` = 0';
+    }
+
+    if ($schema['is_deleted']) {
+        $updates[] = '`' . $schema['is_deleted'] . '` = 0';
+    }
+
+    if ($schema['updated_at']) {
+        $updates[] = '`' . $schema['updated_at'] . '` = NOW()';
+    }
+
+    if (empty($updates)) {
+        throw new RuntimeException('Güncellenecek alan bulunamadı.');
+    }
+
+    $sql = 'UPDATE `' . $schema['table'] . '` SET ' . implode(', ', $updates) . ' WHERE `' . $schema['id'] . '` = ?';
+    $values[] = $userId;
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($values);
+}
