@@ -6,6 +6,11 @@ DirectoryIndex index.php
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteBase /
+
+    # REST benzeri API yollarını .php dosyalarına yönlendir
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^api/v1/(.+)$ api/v1/$1.php [L,QSA]
 </IfModule>
 
 <IfModule mod_headers.c>
