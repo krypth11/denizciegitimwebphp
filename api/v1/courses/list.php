@@ -8,14 +8,7 @@ api_require_method('GET');
 try {
     api_require_auth($pdo);
 
-    $qualificationId = trim((string)($_GET['qualification_id'] ?? ''));
-    if ($qualificationId === '') {
-        api_error('qualification_id parametresi zorunludur.', 422);
-    }
-
-    if (mb_strlen($qualificationId) > 191) {
-        api_error('Geçersiz qualification_id.', 422);
-    }
+    $qualificationId = api_require_query_param('qualification_id', 191);
 
     $stmt = $pdo->prepare(
         'SELECT id, qualification_id, name, description, icon, order_index, created_at

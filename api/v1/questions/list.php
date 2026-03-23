@@ -15,14 +15,12 @@ try {
 
     $hasCol = static fn(string $col): bool => in_array($col, $columns, true);
 
-    $courseId = trim((string)($_GET['course_id'] ?? ''));
-    $topicId = trim((string)($_GET['topic_id'] ?? ''));
+    $courseId = api_validate_optional_id((string)($_GET['course_id'] ?? ''), 'course_id', 191);
+    $topicId = api_validate_optional_id((string)($_GET['topic_id'] ?? ''), 'topic_id', 191);
     $questionType = trim((string)($_GET['question_type'] ?? ''));
     $orderParam = strtolower(trim((string)($_GET['order'] ?? 'desc')));
 
-    $limit = filter_var($_GET['limit'] ?? 50, FILTER_VALIDATE_INT, [
-        'options' => ['default' => 50, 'min_range' => 1, 'max_range' => 200],
-    ]);
+    $limit = api_get_int_query('limit', 50, 1, 200);
 
     $order = in_array($orderParam, ['asc', 'desc'], true) ? strtoupper($orderParam) : 'DESC';
 
@@ -47,9 +45,6 @@ try {
     $params = [];
 
     if ($courseId !== '') {
-        if (mb_strlen($courseId) > 191) {
-            api_error('Geçersiz course_id.', 422);
-        }
         if ($hasCol('course_id')) {
             $where[] = 'course_id = ?';
             $params[] = $courseId;
@@ -57,9 +52,6 @@ try {
     }
 
     if ($topicId !== '') {
-        if (mb_strlen($topicId) > 191) {
-            api_error('Geçersiz topic_id.', 422);
-        }
         if ($hasCol('topic_id')) {
             $where[] = 'topic_id = ?';
             $params[] = $topicId;

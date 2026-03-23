@@ -24,16 +24,7 @@ function mc_pick_column(array $columns, array $candidates, bool $required = fals
 
 function mc_require_query_id(string $key): string
 {
-    $value = trim((string)($_GET[$key] ?? ''));
-    if ($value === '') {
-        api_error($key . ' parametresi zorunludur.', 422);
-    }
-
-    if (mb_strlen($value) > 191) {
-        api_error('Geçersiz ' . $key . ' değeri.', 422);
-    }
-
-    return $value;
+    return api_require_query_param($key, 191);
 }
 
 function mc_get_maritime_signals_schema(PDO $pdo): array

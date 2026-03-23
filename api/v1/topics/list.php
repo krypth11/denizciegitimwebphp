@@ -8,14 +8,7 @@ api_require_method('GET');
 try {
     api_require_auth($pdo);
 
-    $courseId = trim((string)($_GET['course_id'] ?? ''));
-    if ($courseId === '') {
-        api_error('course_id parametresi zorunludur.', 422);
-    }
-
-    if (mb_strlen($courseId) > 191) {
-        api_error('Geçersiz course_id.', 422);
-    }
+    $courseId = api_require_query_param('course_id', 191);
 
     $stmt = $pdo->prepare(
         'SELECT id, course_id, name, content, order_index, created_at
