@@ -1,9 +1,5 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-
-error_reporting(E_ALL);
-ini_set('display_errors', '0');
 set_time_limit(120);
 
 require_once '../includes/config.php';
@@ -307,6 +303,6 @@ Soru Sayısı: {$count}";
 } catch (Exception $e) {
     echo json_encode([
         'success' => false,
-        'message' => 'Hata: ' . $e->getMessage(),
+        'message' => 'İşlem sırasında bir sunucu hatası oluştu.',
     ], JSON_UNESCAPED_UNICODE);
 }

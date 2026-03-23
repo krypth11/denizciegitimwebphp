@@ -189,7 +189,6 @@ include '../includes/sidebar.php';
 <?php
 $extra_js = <<<'JAVASCRIPT'
 <script>
-// jQuery hazır mı kontrol et
 $(document).ready(function() {
     const appAlert = (title, message, type = 'info') => {
         if (typeof window.showAppAlert === 'function') {
@@ -204,7 +203,35 @@ $(document).ready(function() {
         return Promise.resolve(false);
     };
 
-    // DataTable başlat (sadece desktop)
+    const api = async (action, method = 'GET', data = {}) => {
+        if (typeof window.appAjax === 'function') {
+            return await window.appAjax({
+                url: '../ajax/qualifications.php?action=' + encodeURIComponent(action),
+                method,
+                data,
+                dataType: 'json'
+            });
+        }
+        try {
+            return await $.ajax({
+                url: '../ajax/qualifications.php?action=' + encodeURIComponent(action),
+                method,
+                data,
+                dataType: 'json'
+            });
+        } catch (_) {
+            return { success: false, message: 'İşlem sırasında bir hata oluştu.' };
+        }
+    };
+
+    const toggleBtn = ($btn, loading, text = 'İşleniyor...') => {
+        if (typeof window.appSetButtonLoading === 'function') {
+            window.appSetButtonLoading($btn, loading, text);
+            return;
+        }
+        $btn.prop('disabled', !!loading);
+    };
+
     if (window.matchMedia('(min-width: 768px)').matches) {
         $('#qualificationsTable').DataTable({
             language: {
@@ -216,7 +243,6 @@ $(document).ready(function() {
         });
     }
 
-    // Mobil kart filtre + sayfa boyutu
     function applyMobileQualificationFilter() {
         if (window.matchMedia('(min-width: 768px)').matches) return;
 
@@ -247,89 +273,66 @@ $(document).ready(function() {
     $('#mobileQualificationPageSize').on('change', applyMobileQualificationFilter);
     applyMobileQualificationFilter();
 
-    // Yeni Ekle Form
-    $('#addForm').on('submit', function(e) {
+    let addSubmitting = false;
+    $('#addForm').on('submit', async function(e) {
         e.preventDefault();
-        const formData = $(this).serialize();
+        if (addSubmitting) return;
 
-        $.ajax({
-            url: '../ajax/qualifications.php?action=add',
-            method: 'POST',
-            data: formData,
-            dataType: 'json',
-            success: function(response) {
-                if (response.success) {
-                    appAlert('Başarılı', response.message || 'Başarıyla eklendi!', 'success');
-                    setTimeout(() => location.reload(), 350);
-                } else {
-                    appAlert('Hata', response.message || 'Bilinmeyen hata', 'error');
-                }
-            },
-            error: function(xhr, status, error) {
-                console.error('AJAX Error:', {
-                    status: status,
-                    error: error,
-                    responseText: xhr.responseText
-                });
-                appAlert('Hata', 'AJAX Hatası!<br>Status: ' + status + '<br>Hata: ' + error + '<br><br>Detay için Console\'a bakın (F12)', 'error');
-            }
-        });
+        addSubmitting = true;
+        const $submit = $('#addForm button[type="submit"]');
+        toggleBtn($submit, true, 'Kaydediliyor...');
+
+        const response = await api('add', 'POST', $(this).serialize());
+        toggleBtn($submit, false);
+        addSubmitting = false;
+
+        if (response.success) {
+            await appAlert('Başarılı', response.message || 'Başarıyla eklendi!', 'success');
+            setTimeout(() => location.reload(), 250);
+            return;
+        }
+        await appAlert('Hata', response.message || 'Kayıt işlemi başarısız.', 'error');
     });
 
-    // Düzenle Butonu
-    $('.edit-btn').on('click', function() {
+    $('.edit-btn').on('click', async function() {
         const id = $(this).data('id');
 
-        $.ajax({
-            url: '../ajax/qualifications.php?action=get&id=' + id,
-            method: 'GET',
-            dataType: 'json',
-            success: function(response) {
-                if (response.success) {
-                    $('#edit_id').val(response.data.id);
-                    $('#edit_name').val(response.data.name);
-                    $('#edit_description').val(response.data.description || '');
-                    $('#edit_order_index').val(response.data.order_index || 0);
+        const response = await api('get', 'GET', { id });
+        if (!response.success) {
+            await appAlert('Hata', response.message || 'Veri yüklenemedi', 'error');
+            return;
+        }
 
-                    const editModal = new bootstrap.Modal(document.getElementById('editModal'));
-                    editModal.show();
-                } else {
-                    appAlert('Hata', response.message || 'Veri yüklenemedi', 'error');
-                }
-            },
-            error: function(xhr, status, error) {
-                console.error('Get AJAX Error:', {xhr, status, error});
-                appAlert('Hata', 'Veri yüklenemedi: ' + error, 'error');
-            }
-        });
+        $('#edit_id').val(response.data.id);
+        $('#edit_name').val(response.data.name);
+        $('#edit_description').val(response.data.description || '');
+        $('#edit_order_index').val(response.data.order_index || 0);
+
+        const editModal = new bootstrap.Modal(document.getElementById('editModal'));
+        editModal.show();
     });
 
-    // Düzenle Form
-    $('#editForm').on('submit', function(e) {
+    let editSubmitting = false;
+    $('#editForm').on('submit', async function(e) {
         e.preventDefault();
-        const formData = $(this).serialize();
+        if (editSubmitting) return;
 
-        $.ajax({
-            url: '../ajax/qualifications.php?action=update',
-            method: 'POST',
-            data: formData,
-            dataType: 'json',
-            success: function(response) {
-                if (response.success) {
-                    appAlert('Başarılı', response.message || 'Başarıyla güncellendi!', 'success');
-                    setTimeout(() => location.reload(), 350);
-                } else {
-                    appAlert('Hata', response.message || 'Güncelleme başarısız', 'error');
-                }
-            },
-            error: function(xhr, status, error) {
-                console.error('Update AJAX Error:', {xhr, status, error});
-                appAlert('Hata', 'Güncelleme hatası: ' + error, 'error');
-            }
-        });
+        editSubmitting = true;
+        const $submit = $('#editForm button[type="submit"]');
+        toggleBtn($submit, true, 'Güncelleniyor...');
+
+        const response = await api('update', 'POST', $(this).serialize());
+        toggleBtn($submit, false);
+        editSubmitting = false;
+
+        if (response.success) {
+            await appAlert('Başarılı', response.message || 'Başarıyla güncellendi!', 'success');
+            setTimeout(() => location.reload(), 250);
+            return;
+        }
+        await appAlert('Hata', response.message || 'Güncelleme başarısız', 'error');
     });
 
-    // Sil Butonu
     $('.delete-btn').on('click', async function() {
         const id = $(this).data('id');
         const ok = await appConfirm('Silme Onayı', 'Bu kaydı silmek istediğinizden emin misiniz?', {
@@ -339,24 +342,13 @@ $(document).ready(function() {
         });
         if (!ok) return;
 
-        $.ajax({
-            url: '../ajax/qualifications.php?action=delete',
-            method: 'POST',
-            data: { id: id },
-            dataType: 'json',
-            success: function(response) {
-                if (response.success) {
-                    appAlert('Başarılı', response.message || 'Başarıyla silindi!', 'success');
-                    setTimeout(() => location.reload(), 350);
-                } else {
-                    appAlert('Hata', response.message || 'Silme başarısız', 'error');
-                }
-            },
-            error: function(xhr, status, error) {
-                console.error('Delete AJAX Error:', {xhr, status, error});
-                appAlert('Hata', 'Silme hatası: ' + error, 'error');
-            }
-        });
+        const response = await api('delete', 'POST', { id });
+        if (response.success) {
+            await appAlert('Başarılı', response.message || 'Başarıyla silindi!', 'success');
+            setTimeout(() => location.reload(), 250);
+            return;
+        }
+        await appAlert('Hata', response.message || 'Silme başarısız', 'error');
     });
 });
 </script>

@@ -1,15 +1,5 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-
-error_reporting(E_ALL);
-ini_set('display_errors', '0');
-ini_set('log_errors', '1');
-
-while (ob_get_level() > 0) {
-    ob_end_clean();
-}
-ob_start();
 
 require_once '../includes/config.php';
 require_once '../includes/auth.php';
@@ -20,7 +10,7 @@ try {
 } catch (Throwable $e) {
     echo json_encode([
         'success' => false,
-        'message' => 'Yetki hatası: ' . $e->getMessage(),
+        'message' => 'Bu işlem için yetkiniz bulunmuyor.',
     ], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -167,8 +157,6 @@ try {
 } catch (Throwable $e) {
     echo json_encode([
         'success' => false,
-        'message' => 'Hata: ' . $e->getMessage(),
+        'message' => 'İşlem sırasında bir sunucu hatası oluştu.',
     ], JSON_UNESCAPED_UNICODE);
 }
-
-ob_end_flush();

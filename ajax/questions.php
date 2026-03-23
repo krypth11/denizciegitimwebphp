@@ -1,9 +1,5 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
-
-error_reporting(E_ALL);
-ini_set('display_errors', '0');
 
 require_once '../includes/config.php';
 require_once '../includes/auth.php';
@@ -127,6 +123,32 @@ try {
                 exit;
             }
 
+            if (empty($course_id) || empty($question_type) || empty($question_text) ||
+                empty($option_a) || empty($option_b) || empty($option_c) ||
+                empty($option_d) || empty($correct_answer)) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Tüm zorunlu alanları doldurun!',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            if (!in_array($question_type, ['sayısal', 'sözel'], true)) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Geçersiz soru tipi!',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            if (!in_array($correct_answer, ['A', 'B', 'C', 'D'], true)) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Geçersiz doğru cevap!',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
             $stmt = $pdo->prepare(
                 'UPDATE questions SET
                     course_id = ?,
@@ -233,6 +255,6 @@ try {
 } catch (Exception $e) {
     echo json_encode([
         'success' => false,
-        'message' => 'Hata: ' . $e->getMessage(),
+        'message' => 'İşlem sırasında bir sunucu hatası oluştu.',
     ], JSON_UNESCAPED_UNICODE);
 }

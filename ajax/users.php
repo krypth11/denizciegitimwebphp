@@ -353,5 +353,5 @@ try {
             users_response(false, 'Geçersiz işlem.', [], 400);
     }
 } catch (Throwable $e) {
-    users_response(false, 'İşlem hatası: ' . $e->getMessage(), [], 500);
+    users_response(false, 'İşlem sırasında bir sunucu hatası oluştu.', [], 500);
 }

@@ -48,15 +48,51 @@ try {
 } catch (e) {}
 
 $(document).ajaxError(function (event, jqxhr, settings, thrownError) {
-    console.error('AJAX Error:', thrownError);
     if (typeof window.showAppAlert === 'function') {
+        const status = jqxhr?.status;
+        let message = 'İşlem sırasında bir hata oluştu. Lütfen tekrar deneyin.';
+        if (status === 401) message = 'Oturumunuz sona ermiş olabilir. Lütfen tekrar giriş yapın.';
+        if (status === 403) message = 'Bu işlem için yetkiniz bulunmuyor.';
+        if (status === 404) message = 'İşlem kaynağı bulunamadı.';
+        if (status >= 500) message = 'Sunucu hatası oluştu. Lütfen daha sonra tekrar deneyin.';
+
         window.showAppAlert({
             title: 'Hata',
-            message: 'Bir hata oluştu: ' + thrownError,
+            message,
             type: 'error',
         });
     }
 });
+
+window.appSetButtonLoading = function (selectorOrEl, loading = true, loadingText = 'İşleniyor...') {
+    const $btn = selectorOrEl instanceof jQuery ? selectorOrEl : $(selectorOrEl);
+    if (!$btn.length) return;
+
+    if (loading) {
+        if (!$btn.data('original-html')) $btn.data('original-html', $btn.html());
+        $btn.prop('disabled', true).attr('aria-busy', 'true').html('<span class="spinner-border spinner-border-sm me-1"></span>' + loadingText);
+    } else {
+        const original = $btn.data('original-html');
+        $btn.prop('disabled', false).removeAttr('aria-busy');
+        if (original) {
+            $btn.html(original);
+            $btn.removeData('original-html');
+        }
+    }
+};
+
+window.appAjax = async function ({ url, method = 'GET', data = {}, dataType = 'json' }) {
+    try {
+        return await $.ajax({ url, method, data, dataType });
+    } catch (xhr) {
+        return {
+            success: false,
+            message: xhr?.responseJSON?.message || 'İşlem sırasında bir hata oluştu.',
+            errors: xhr?.responseJSON?.errors || {},
+            status: xhr?.status || 0,
+        };
+    }
+};
 
 function showToast(message, type = 'success') {
     const toast = `

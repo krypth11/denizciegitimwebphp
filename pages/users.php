@@ -138,6 +138,14 @@ $(document).ready(function () {
     const esc = (text) => $('<div>').text(text ?? '').html();
 
     const api = async (action, method = 'GET', data = {}) => {
+        if (typeof window.appAjax === 'function') {
+            return await window.appAjax({
+                url: endpoint + '?action=' + encodeURIComponent(action),
+                method,
+                data,
+                dataType: 'json'
+            });
+        }
         try {
             return await $.ajax({
                 url: endpoint + '?action=' + encodeURIComponent(action),
@@ -151,6 +159,14 @@ $(document).ready(function () {
                 message: xhr?.responseJSON?.message || 'Sunucu hatası oluştu.'
             };
         }
+    };
+
+    const toggleBtn = ($btn, loading, text = 'İşleniyor...') => {
+        if (typeof window.appSetButtonLoading === 'function') {
+            window.appSetButtonLoading($btn, loading, text);
+            return;
+        }
+        $btn.prop('disabled', !!loading);
     };
 
     function roleBadge(isAdmin) {
@@ -354,6 +370,10 @@ $(document).ready(function () {
 
     $('#userForm').on('submit', async function (e) {
         e.preventDefault();
+
+        const $saveBtn = $('#saveUserBtn');
+        if ($saveBtn.prop('disabled')) return;
+
         const validationError = validateForm();
         if (validationError) {
             await appAlert('Doğrulama Hatası', validationError, 'warning');
@@ -370,7 +390,9 @@ $(document).ready(function () {
         };
 
         const action = mode === 'add' ? 'add' : 'update';
+        toggleBtn($saveBtn, true, mode === 'add' ? 'Kaydediliyor...' : 'Güncelleniyor...');
         const res = await api(action, 'POST', payload);
+        toggleBtn($saveBtn, false);
         if (!res.success) {
             await appAlert('Hata', res.message || 'İşlem başarısız.', 'error');
             return;

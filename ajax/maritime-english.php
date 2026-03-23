@@ -1,6 +1,5 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *');
 
 require_once '../includes/config.php';
 require_once '../includes/auth.php';
@@ -457,5 +456,5 @@ try {
             me_json(false, 'Geçersiz işlem.', [], 400);
     }
 } catch (Throwable $e) {
-    me_json(false, 'İşlem hatası: ' . $e->getMessage(), [], 500);
+    me_json(false, 'İşlem sırasında bir sunucu hatası oluştu.', [], 500);
 }
