@@ -20,7 +20,7 @@ try {
     $questionType = trim((string)($_GET['question_type'] ?? ''));
     $orderParam = strtolower(trim((string)($_GET['order'] ?? 'desc')));
 
-    $limit = api_get_int_query('limit', 50, 1, 200);
+    $limit = api_get_int_query('limit', 200, 1, 10000);
 
     $order = in_array($orderParam, ['asc', 'desc'], true) ? strtoupper($orderParam) : 'DESC';
 
