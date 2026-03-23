@@ -90,14 +90,15 @@ function api_ensure_tokens_table(PDO $pdo): void
         id CHAR(36) NOT NULL,
         user_id VARCHAR(191) NOT NULL,
         token_hash CHAR(64) NOT NULL,
-        revoked TINYINT(1) NOT NULL DEFAULT 0,
-        created_at DATETIME NOT NULL,
+        name VARCHAR(100) NULL,
         expires_at DATETIME NULL,
+        last_used_at DATETIME NULL,
+        created_at DATETIME NOT NULL,
         revoked_at DATETIME NULL,
         PRIMARY KEY (id),
         UNIQUE KEY uq_api_tokens_hash (token_hash),
         KEY idx_api_tokens_user_id (user_id),
-        KEY idx_api_tokens_revoked (revoked)
+        KEY idx_api_tokens_revoked_at (revoked_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
     $pdo->exec($sql);
@@ -190,10 +191,10 @@ function api_create_user_token(PDO $pdo, string $userId): string
     $token = api_generate_token_plain();
     $hash = api_hash_token($token);
 
-    $sql = 'INSERT INTO api_tokens (id, user_id, token_hash, revoked, created_at, expires_at)
-            VALUES (?, ?, ?, 0, NOW(), DATE_ADD(NOW(), INTERVAL 30 DAY))';
+    $sql = 'INSERT INTO api_tokens (id, user_id, token_hash, name, expires_at, created_at, revoked_at)
+            VALUES (?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 DAY), NOW(), NULL)';
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([generate_uuid(), $userId, $hash]);
+    $stmt->execute([generate_uuid(), $userId, $hash, 'mobile']);
 
     return $token;
 }
@@ -211,7 +212,7 @@ function api_resolve_auth(PDO $pdo): ?array
 
     $sql = 'SELECT user_id FROM api_tokens
             WHERE token_hash = ?
-              AND revoked = 0
+              AND revoked_at IS NULL
               AND (expires_at IS NULL OR expires_at > NOW())
             LIMIT 1';
     $stmt = $pdo->prepare($sql);
@@ -226,6 +227,9 @@ function api_resolve_auth(PDO $pdo): ?array
     if (!$user) {
         return null;
     }
+
+    $touchStmt = $pdo->prepare('UPDATE api_tokens SET last_used_at = NOW() WHERE token_hash = ?');
+    $touchStmt->execute([$hash]);
 
     return [
         'token_hash' => $hash,
@@ -247,7 +251,7 @@ function api_revoke_hashed_token(PDO $pdo, string $tokenHash): void
 {
     api_ensure_tokens_table($pdo);
 
-    $sql = 'UPDATE api_tokens SET revoked = 1, revoked_at = NOW() WHERE token_hash = ? AND revoked = 0';
+    $sql = 'UPDATE api_tokens SET revoked_at = NOW() WHERE token_hash = ? AND revoked_at IS NULL';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$tokenHash]);
 }
