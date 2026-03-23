@@ -5,166 +5,164 @@ require_once dirname(__DIR__) . '/auth_helper.php';
 
 api_require_method('GET');
 
+function ds_q(string $column): string
+{
+    return '`' . str_replace('`', '', $column) . '`';
+}
+
+function ds_first(array $columns, array $candidates): ?string
+{
+    foreach ($candidates as $candidate) {
+        if (in_array($candidate, $columns, true)) {
+            return $candidate;
+        }
+    }
+    return null;
+}
+
+function ds_rate(int $correct, int $wrong): float
+{
+    $total = $correct + $wrong;
+    return $total > 0 ? round(($correct / $total) * 100, 2) : 0.0;
+}
+
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
 
     $statistics = [
-        'total_answered_questions' => 0,
-        'total_correct_answers' => 0,
-        'total_wrong_answers' => 0,
-        'success_rate' => 0,
-        'total_bookmarked_questions' => 0,
-        'current_qualification_id' => null,
-        'current_qualification_name' => null,
+        'total_answer_attempts' => 0,
+        'total_correct' => 0,
+        'total_wrong' => 0,
+        'success_rate' => 0.0,
+        'bookmarked_count' => 0,
+        'unique_answered_count' => 0,
+        'total_question_pool' => 0,
+        'unanswered_count' => 0,
         'total_study_sessions' => 0,
         'total_study_duration_seconds' => 0,
         'completed_daily_quiz_today' => false,
-        'answered_today' => 0,
-        'correct_today' => 0,
-        'last_study_at' => null,
+        'current_qualification_id' => null,
+        'current_qualification_name' => null,
+        'last_activity_at' => null,
     ];
 
-    // Profil + qualification bilgisi
     $profile = api_find_profile_by_user_id($pdo, $userId);
     if ($profile) {
         $statistics['current_qualification_id'] = $profile['current_qualification_id'] ?? null;
         $statistics['current_qualification_name'] = $profile['current_qualification_name'] ?? null;
     }
 
-    // user_progress özetleri
     $upCols = get_table_columns($pdo, 'user_progress');
+    $qCols = get_table_columns($pdo, 'questions');
+    $ssCols = get_table_columns($pdo, 'study_sessions');
+    $dqCols = get_table_columns($pdo, 'daily_quiz_progress');
+    $evCols = get_table_columns($pdo, 'question_attempt_events');
+
+    if (!empty($qCols)) {
+        $statistics['total_question_pool'] = (int)$pdo->query('SELECT COUNT(*) FROM `questions`')->fetchColumn();
+    }
+
     if (!empty($upCols) && in_array('user_id', $upCols, true)) {
-        $has = static fn(string $col): bool => in_array($col, $upCols, true);
-        $q = static fn(string $col): string => '`' . str_replace('`', '', $col) . '`';
+        $upQuestionId = ds_first($upCols, ['question_id']);
+        $upIsAnswered = ds_first($upCols, ['is_answered']);
+        $upTotalAnswerCount = ds_first($upCols, ['total_answer_count', 'answer_count', 'total_answers']);
+        $upCorrectCount = ds_first($upCols, ['correct_answer_count', 'correct_count']);
+        $upWrongCount = ds_first($upCols, ['wrong_answer_count', 'wrong_count', 'incorrect_count']);
+        $upIsCorrect = ds_first($upCols, ['is_correct']);
+        $upIsBookmarked = ds_first($upCols, ['is_bookmarked', 'bookmarked']);
+        $upDateCol = ds_first($upCols, ['last_answered_at', 'answered_at', 'updated_at', 'created_at']);
 
-        $isAnsweredCol = $has('is_answered') ? 'is_answered' : null;
-        $isCorrectCol = $has('is_correct') ? 'is_correct' : null;
-        $isBookmarkedCol = $has('is_bookmarked') ? 'is_bookmarked' : null;
-        $questionIdCol = $has('question_id') ? 'question_id' : null;
-        $correctCountCol = $has('correct_answer_count') ? 'correct_answer_count' : null;
-        $wrongCountCol = $has('wrong_answer_count') ? 'wrong_answer_count' : null;
+        $attemptExpr = $upTotalAnswerCount
+            ? 'COALESCE(SUM(up.' . ds_q($upTotalAnswerCount) . '),0)'
+            : ($upIsAnswered ? 'COALESCE(SUM(CASE WHEN up.' . ds_q($upIsAnswered) . ' = 1 THEN 1 ELSE 0 END),0)' : '0');
 
-        $answeredAtCol = $has('answered_at') ? 'answered_at' : ($has('last_answered_at') ? 'last_answered_at' : null);
-        $updatedAtCol = $has('updated_at') ? 'updated_at' : null;
+        $correctExpr = $upCorrectCount
+            ? 'COALESCE(SUM(up.' . ds_q($upCorrectCount) . '),0)'
+            : ($upIsCorrect ? 'COALESCE(SUM(CASE WHEN up.' . ds_q($upIsCorrect) . ' = 1 THEN 1 ELSE 0 END),0)' : '0');
 
-        $answeredExpr = '0';
-        if ($isAnsweredCol) {
-            $answeredExpr = 'SUM(CASE WHEN ' . $q($isAnsweredCol) . ' = 1 THEN 1 ELSE 0 END)';
-        } elseif ($questionIdCol) {
-            $answeredExpr = 'COUNT(DISTINCT ' . $q($questionIdCol) . ')';
-        }
+        $wrongExpr = $upWrongCount
+            ? 'COALESCE(SUM(up.' . ds_q($upWrongCount) . '),0)'
+            : ($upIsCorrect ? 'COALESCE(SUM(CASE WHEN up.' . ds_q($upIsCorrect) . ' = 0 THEN 1 ELSE 0 END),0)' : '0');
 
-        $correctExpr = '0';
-        if ($correctCountCol) {
-            $correctExpr = 'COALESCE(SUM(' . $q($correctCountCol) . '), 0)';
-        } elseif ($isCorrectCol) {
-            $correctExpr = 'SUM(CASE WHEN ' . $q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END)';
-        }
-
-        $wrongExpr = '0';
-        if ($wrongCountCol) {
-            $wrongExpr = 'COALESCE(SUM(' . $q($wrongCountCol) . '), 0)';
-        } elseif ($isCorrectCol) {
-            if ($isAnsweredCol) {
-                $wrongExpr = 'SUM(CASE WHEN ' . $q($isAnsweredCol) . ' = 1 AND ' . $q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END)';
-            } else {
-                $wrongExpr = 'SUM(CASE WHEN ' . $q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END)';
-            }
-        }
-
-        $bookmarkedExpr = $isBookmarkedCol
-            ? 'SUM(CASE WHEN ' . $q($isBookmarkedCol) . ' = 1 THEN 1 ELSE 0 END)'
+        $bookmarkExpr = $upIsBookmarked
+            ? 'COALESCE(SUM(CASE WHEN up.' . ds_q($upIsBookmarked) . ' = 1 THEN 1 ELSE 0 END),0)'
             : '0';
 
-        $answeredTodayExpr = '0';
-        $correctTodayExpr = '0';
-        if ($answeredAtCol) {
-            $answeredCondition = $isAnsweredCol ? ($q($isAnsweredCol) . ' = 1') : '1=1';
-            $answeredTodayExpr = 'SUM(CASE WHEN DATE(' . $q($answeredAtCol) . ') = CURDATE() AND ' . $answeredCondition . ' THEN 1 ELSE 0 END)';
+        $uniqueExpr = ($upQuestionId && $upIsAnswered)
+            ? 'COUNT(DISTINCT CASE WHEN up.' . ds_q($upIsAnswered) . ' = 1 THEN up.' . ds_q($upQuestionId) . ' END)'
+            : ($upQuestionId ? 'COUNT(DISTINCT up.' . ds_q($upQuestionId) . ')' : '0');
 
-            if ($isCorrectCol) {
-                $correctTodayExpr = 'SUM(CASE WHEN DATE(' . $q($answeredAtCol) . ') = CURDATE() AND ' . $q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END)';
-            }
-        }
+        $lastExpr = $upDateCol ? 'MAX(up.' . ds_q($upDateCol) . ')' : 'NULL';
 
-        $lastStudyUpExpr = 'NULL';
-        if ($updatedAtCol) {
-            $lastStudyUpExpr = 'MAX(' . $q($updatedAtCol) . ')';
-        } elseif ($answeredAtCol) {
-            $lastStudyUpExpr = 'MAX(' . $q($answeredAtCol) . ')';
-        }
+        $sql = 'SELECT '
+            . $attemptExpr . ' AS total_answer_attempts, '
+            . $correctExpr . ' AS total_correct, '
+            . $wrongExpr . ' AS total_wrong, '
+            . $bookmarkExpr . ' AS bookmarked_count, '
+            . $uniqueExpr . ' AS unique_answered_count, '
+            . $lastExpr . ' AS last_activity_up '
+            . 'FROM `user_progress` up WHERE up.`user_id` = ?';
 
-        $upSql = 'SELECT '
-            . 'COALESCE(' . $answeredExpr . ', 0) AS total_answered_questions, '
-            . 'COALESCE(' . $correctExpr . ', 0) AS total_correct_answers, '
-            . 'COALESCE(' . $wrongExpr . ', 0) AS total_wrong_answers, '
-            . 'COALESCE(' . $bookmarkedExpr . ', 0) AS total_bookmarked_questions, '
-            . 'COALESCE(' . $answeredTodayExpr . ', 0) AS answered_today, '
-            . 'COALESCE(' . $correctTodayExpr . ', 0) AS correct_today, '
-            . $lastStudyUpExpr . ' AS last_study_progress_at '
-            . 'FROM `user_progress` '
-            . 'WHERE `user_id` = ?';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
-        $upStmt = $pdo->prepare($upSql);
-        $upStmt->execute([$userId]);
-        $up = $upStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-
-        $statistics['total_answered_questions'] = (int)($up['total_answered_questions'] ?? 0);
-        $statistics['total_correct_answers'] = (int)($up['total_correct_answers'] ?? 0);
-        $statistics['total_wrong_answers'] = (int)($up['total_wrong_answers'] ?? 0);
-        $statistics['total_bookmarked_questions'] = (int)($up['total_bookmarked_questions'] ?? 0);
-        $statistics['answered_today'] = (int)($up['answered_today'] ?? 0);
-        $statistics['correct_today'] = (int)($up['correct_today'] ?? 0);
-        $statistics['last_study_at'] = $up['last_study_progress_at'] ?? null;
+        $statistics['total_answer_attempts'] = (int)($row['total_answer_attempts'] ?? 0);
+        $statistics['total_correct'] = (int)($row['total_correct'] ?? 0);
+        $statistics['total_wrong'] = (int)($row['total_wrong'] ?? 0);
+        $statistics['bookmarked_count'] = (int)($row['bookmarked_count'] ?? 0);
+        $statistics['unique_answered_count'] = (int)($row['unique_answered_count'] ?? 0);
+        $statistics['last_activity_at'] = $row['last_activity_up'] ?? null;
     }
 
-    // study_sessions özetleri
-    $ssCols = get_table_columns($pdo, 'study_sessions');
+    $statistics['unanswered_count'] = max(0, $statistics['total_question_pool'] - $statistics['unique_answered_count']);
+
     if (!empty($ssCols) && in_array('user_id', $ssCols, true)) {
-        $has = static fn(string $col): bool => in_array($col, $ssCols, true);
-        $q = static fn(string $col): string => '`' . str_replace('`', '', $col) . '`';
+        $ssDuration = ds_first($ssCols, ['duration_seconds']);
+        $ssDate = ds_first($ssCols, ['created_at', 'updated_at']);
 
-        $durationExpr = $has('duration_seconds') ? 'COALESCE(SUM(' . $q('duration_seconds') . '), 0)' : '0';
-        $lastStudyExpr = $has('created_at') ? 'MAX(' . $q('created_at') . ')' : 'NULL';
-
-        $ssSql = 'SELECT COUNT(*) AS total_study_sessions, '
-            . $durationExpr . ' AS total_study_duration_seconds, '
-            . $lastStudyExpr . ' AS last_study_session_at '
+        $sql = 'SELECT COUNT(*) AS total_sessions, '
+            . ($ssDuration ? 'COALESCE(SUM(' . ds_q($ssDuration) . '),0)' : '0') . ' AS total_duration, '
+            . ($ssDate ? 'MAX(' . ds_q($ssDate) . ')' : 'NULL') . ' AS last_activity_ss '
             . 'FROM `study_sessions` WHERE `user_id` = ?';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
-        $ssStmt = $pdo->prepare($ssSql);
-        $ssStmt->execute([$userId]);
-        $ss = $ssStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $statistics['total_study_sessions'] = (int)($row['total_sessions'] ?? 0);
+        $statistics['total_study_duration_seconds'] = (int)($row['total_duration'] ?? 0);
 
-        $statistics['total_study_sessions'] = (int)($ss['total_study_sessions'] ?? 0);
-        $statistics['total_study_duration_seconds'] = (int)($ss['total_study_duration_seconds'] ?? 0);
+        $ssLast = $row['last_activity_ss'] ?? null;
+        if ($ssLast && (!$statistics['last_activity_at'] || strtotime((string)$ssLast) > strtotime((string)$statistics['last_activity_at']))) {
+            $statistics['last_activity_at'] = $ssLast;
+        }
+    }
 
-        if (!empty($ss['last_study_session_at'])) {
-            if (empty($statistics['last_study_at']) || strtotime((string)$ss['last_study_session_at']) > strtotime((string)$statistics['last_study_at'])) {
-                $statistics['last_study_at'] = $ss['last_study_session_at'];
+    if (!empty($dqCols) && in_array('user_id', $dqCols, true)) {
+        $dqDate = ds_first($dqCols, ['quiz_date', 'date']);
+        if ($dqDate) {
+            $sql = 'SELECT COUNT(*) FROM `daily_quiz_progress` WHERE `user_id` = ? AND DATE(' . ds_q($dqDate) . ') = CURDATE()';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$userId]);
+            $statistics['completed_daily_quiz_today'] = ((int)$stmt->fetchColumn()) > 0;
+        }
+    }
+
+    if (!empty($evCols) && in_array('user_id', $evCols, true)) {
+        $evDate = ds_first($evCols, ['attempted_at', 'created_at']);
+        if ($evDate) {
+            $sql = 'SELECT MAX(' . ds_q($evDate) . ') FROM `question_attempt_events` WHERE `user_id` = ?';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$userId]);
+            $evLast = $stmt->fetchColumn();
+            if ($evLast && (!$statistics['last_activity_at'] || strtotime((string)$evLast) > strtotime((string)$statistics['last_activity_at']))) {
+                $statistics['last_activity_at'] = $evLast;
             }
         }
     }
 
-    // daily quiz completed today
-    $dqCols = get_table_columns($pdo, 'daily_quiz_progress');
-    if (!empty($dqCols) && in_array('user_id', $dqCols, true)) {
-        $dateCol = in_array('quiz_date', $dqCols, true) ? 'quiz_date' : (in_array('date', $dqCols, true) ? 'date' : null);
-        if ($dateCol) {
-            $dqSql = 'SELECT COUNT(*) FROM `daily_quiz_progress` WHERE `user_id` = ? AND DATE(`' . $dateCol . '`) = CURDATE()';
-            $dqStmt = $pdo->prepare($dqSql);
-            $dqStmt->execute([$userId]);
-            $statistics['completed_daily_quiz_today'] = ((int)$dqStmt->fetchColumn()) > 0;
-        }
-    }
-
-    $totalDecisionAnswers = (int)$statistics['total_correct_answers'] + (int)$statistics['total_wrong_answers'];
-    if ($totalDecisionAnswers > 0) {
-        $statistics['success_rate'] = round(((int)$statistics['total_correct_answers'] / $totalDecisionAnswers) * 100, 2);
-    } else {
-        $statistics['success_rate'] = 0;
-    }
+    $statistics['success_rate'] = ds_rate($statistics['total_correct'], $statistics['total_wrong']);
 
     api_success('Dashboard istatistikleri alındı.', [
         'statistics' => $statistics,

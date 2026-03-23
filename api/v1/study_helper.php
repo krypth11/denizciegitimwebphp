@@ -60,6 +60,26 @@ function study_get_question_schema(PDO $pdo): array
         'table' => 'questions',
         'id' => study_pick_column($cols, ['id'], true),
         'correct_answer' => study_pick_column($cols, ['correct_answer'], false),
+        'course_id' => study_pick_column($cols, ['course_id'], false),
+        'topic_id' => study_pick_column($cols, ['topic_id'], false),
+    ];
+}
+
+function study_get_course_schema(PDO $pdo): array
+{
+    $cols = get_table_columns($pdo, 'courses');
+    if (!$cols) {
+        return [
+            'table' => 'courses',
+            'id' => null,
+            'qualification_id' => null,
+        ];
+    }
+
+    return [
+        'table' => 'courses',
+        'id' => study_pick_column($cols, ['id'], true),
+        'qualification_id' => study_pick_column($cols, ['qualification_id'], false),
     ];
 }
 
@@ -88,6 +108,163 @@ function study_get_question_meta(PDO $pdo, string $questionId): array
 
     $correct = strtoupper(trim((string)($row['correct_answer'] ?? '')));
     return ['exists' => true, 'correct_answer' => ($correct !== '' ? $correct : null)];
+}
+
+function study_get_question_meta_with_relations(PDO $pdo, string $questionId): array
+{
+    $qSchema = study_get_question_schema($pdo);
+    $cSchema = study_get_course_schema($pdo);
+
+    $select = [
+        'q.' . study_q($qSchema['id']) . ' AS id',
+        ($qSchema['correct_answer'] ? 'q.' . study_q($qSchema['correct_answer']) : "''") . ' AS correct_answer',
+        ($qSchema['course_id'] ? 'q.' . study_q($qSchema['course_id']) : 'NULL') . ' AS course_id',
+        ($qSchema['topic_id'] ? 'q.' . study_q($qSchema['topic_id']) : 'NULL') . ' AS topic_id',
+    ];
+
+    $joinCourses = '';
+    if ($qSchema['course_id'] && $cSchema['id'] && $cSchema['qualification_id']) {
+        $select[] = 'c.' . study_q($cSchema['qualification_id']) . ' AS qualification_id';
+        $joinCourses = ' LEFT JOIN `' . $cSchema['table'] . '` c ON q.' . study_q($qSchema['course_id']) . ' = c.' . study_q($cSchema['id']) . ' ';
+    } else {
+        $select[] = 'NULL AS qualification_id';
+    }
+
+    $sql = 'SELECT ' . implode(', ', $select)
+        . ' FROM `' . $qSchema['table'] . '` q '
+        . $joinCourses
+        . ' WHERE q.' . study_q($qSchema['id']) . ' = ? LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$questionId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$row) {
+        return [
+            'exists' => false,
+            'correct_answer' => null,
+            'course_id' => null,
+            'qualification_id' => null,
+            'topic_id' => null,
+        ];
+    }
+
+    $correct = strtoupper(trim((string)($row['correct_answer'] ?? '')));
+    return [
+        'exists' => true,
+        'correct_answer' => ($correct !== '' ? $correct : null),
+        'course_id' => $row['course_id'] ?? null,
+        'qualification_id' => $row['qualification_id'] ?? null,
+        'topic_id' => $row['topic_id'] ?? null,
+    ];
+}
+
+function study_get_attempt_event_schema(PDO $pdo): array
+{
+    $cols = get_table_columns($pdo, 'question_attempt_events');
+    if (!$cols) {
+        return [];
+    }
+
+    return [
+        'table' => 'question_attempt_events',
+        'id' => study_pick_column($cols, ['id'], false),
+        'user_id' => study_pick_column($cols, ['user_id'], true),
+        'question_id' => study_pick_column($cols, ['question_id'], true),
+        'course_id' => study_pick_column($cols, ['course_id'], false),
+        'qualification_id' => study_pick_column($cols, ['qualification_id'], false),
+        'topic_id' => study_pick_column($cols, ['topic_id'], false),
+        'session_id' => study_pick_column($cols, ['session_id'], false),
+        'source' => study_pick_column($cols, ['source'], false),
+        'selected_answer' => study_pick_column($cols, ['selected_answer'], false),
+        'is_correct' => study_pick_column($cols, ['is_correct'], false),
+        'attempted_at' => study_pick_column($cols, ['attempted_at'], false),
+        'created_at' => study_pick_column($cols, ['created_at'], false),
+    ];
+}
+
+function study_insert_attempt_event(PDO $pdo, array $event): bool
+{
+    $schema = study_get_attempt_event_schema($pdo);
+    if (!$schema) {
+        return false;
+    }
+
+    $values = [];
+
+    if ($schema['id']) {
+        $values[$schema['id']] = (string)($event['id'] ?? generate_uuid());
+    }
+
+    $required = ['user_id', 'question_id'];
+    foreach ($required as $key) {
+        if (empty($schema[$key])) {
+            return false;
+        }
+        $values[$schema[$key]] = (string)($event[$key] ?? '');
+        if ($values[$schema[$key]] === '') {
+            return false;
+        }
+    }
+
+    if ($schema['course_id'] && array_key_exists('course_id', $event)) {
+        $values[$schema['course_id']] = $event['course_id'];
+    }
+    if ($schema['qualification_id'] && array_key_exists('qualification_id', $event)) {
+        $values[$schema['qualification_id']] = $event['qualification_id'];
+    }
+    if ($schema['topic_id'] && array_key_exists('topic_id', $event)) {
+        $values[$schema['topic_id']] = $event['topic_id'];
+    }
+    if ($schema['session_id'] && array_key_exists('session_id', $event)) {
+        $values[$schema['session_id']] = $event['session_id'];
+    }
+    if ($schema['source'] && array_key_exists('source', $event)) {
+        $values[$schema['source']] = (string)$event['source'];
+    }
+    if ($schema['selected_answer'] && array_key_exists('selected_answer', $event)) {
+        $values[$schema['selected_answer']] = (string)$event['selected_answer'];
+    }
+    if ($schema['is_correct'] && array_key_exists('is_correct', $event)) {
+        $values[$schema['is_correct']] = !empty($event['is_correct']) ? 1 : 0;
+    }
+
+    $nowColumns = [];
+    foreach (['attempted_at', 'created_at'] as $k) {
+        if (!empty($schema[$k])) {
+            $nowColumns[] = $schema[$k];
+        }
+    }
+
+    study_insert_progress_row($pdo, $schema, $values, $nowColumns);
+    return true;
+}
+
+function study_log_question_attempt_event(
+    PDO $pdo,
+    string $userId,
+    string $questionId,
+    string $selectedAnswer,
+    bool $isCorrect,
+    string $source = 'study',
+    ?string $sessionId = null
+): bool {
+    $meta = study_get_question_meta_with_relations($pdo, $questionId);
+    if (!$meta['exists']) {
+        return false;
+    }
+
+    return study_insert_attempt_event($pdo, [
+        'user_id' => $userId,
+        'question_id' => $questionId,
+        'course_id' => $meta['course_id'] ?? null,
+        'qualification_id' => $meta['qualification_id'] ?? null,
+        'topic_id' => $meta['topic_id'] ?? null,
+        'session_id' => $sessionId,
+        'source' => $source,
+        'selected_answer' => $selectedAnswer,
+        'is_correct' => $isCorrect,
+    ]);
 }
 
 function study_get_progress_by_user_question(PDO $pdo, array $schema, string $userId, string $questionId): ?array

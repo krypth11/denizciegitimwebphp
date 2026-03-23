@@ -1,6 +1,27 @@
 <?php
 
 require_once __DIR__ . '/auth_helper.php';
+require_once __DIR__ . '/study_helper.php';
+
+function dq_log_attempt_event(PDO $pdo, string $userId, array $event): bool
+{
+    $questionId = trim((string)($event['question_id'] ?? ''));
+    if ($questionId === '') {
+        return false;
+    }
+
+    return study_insert_attempt_event($pdo, [
+        'user_id' => $userId,
+        'question_id' => $questionId,
+        'course_id' => $event['course_id'] ?? null,
+        'qualification_id' => $event['qualification_id'] ?? null,
+        'topic_id' => $event['topic_id'] ?? null,
+        'session_id' => $event['session_id'] ?? null,
+        'source' => 'daily_quiz',
+        'selected_answer' => $event['selected_answer'] ?? null,
+        'is_correct' => !empty($event['is_correct']),
+    ]);
+}
 
 function dq_q(string $column): string
 {

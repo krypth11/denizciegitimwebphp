@@ -26,9 +26,14 @@ try {
         api_error('selected_answer sadece A/B/C/D olabilir.', 422);
     }
 
-    $questionMeta = study_get_question_meta($pdo, $questionId);
+    $questionMeta = study_get_question_meta_with_relations($pdo, $questionId);
     if (!$questionMeta['exists']) {
         api_error('Soru bulunamadı.', 404);
+    }
+
+    $sessionId = isset($payload['session_id']) ? trim((string)$payload['session_id']) : null;
+    if ($sessionId === '') {
+        $sessionId = null;
     }
 
     $computedIsCorrect = false;
@@ -39,6 +44,23 @@ try {
     }
 
     $progress = study_upsert_answer_progress($pdo, $userId, $questionId, $selectedAnswer, $computedIsCorrect);
+
+    // user_progress akışını bozmadan event-level kayıt ekle (tablo/kolon yoksa sessizce geç)
+    try {
+        study_insert_attempt_event($pdo, [
+            'user_id' => $userId,
+            'question_id' => $questionId,
+            'course_id' => $questionMeta['course_id'] ?? null,
+            'qualification_id' => $questionMeta['qualification_id'] ?? null,
+            'topic_id' => $questionMeta['topic_id'] ?? null,
+            'session_id' => $sessionId,
+            'source' => 'study',
+            'selected_answer' => $selectedAnswer,
+            'is_correct' => $computedIsCorrect,
+        ]);
+    } catch (Throwable $eventError) {
+        // Event logging best-effort, ana cevap kaydetme akışını bozma.
+    }
 
     api_success('Cevap kaydedildi.', [
         'progress' => $progress,
