@@ -255,3 +255,118 @@ function api_revoke_hashed_token(PDO $pdo, string $tokenHash): void
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$tokenHash]);
 }
+
+function api_get_profile_schema(PDO $pdo): array
+{
+    $columns = get_table_columns($pdo, 'user_profiles');
+    if (!$columns) {
+        throw new RuntimeException('user_profiles tablosu okunamadı.');
+    }
+
+    $pick = static function (array $candidates, bool $required = true) use ($columns): ?string {
+        foreach ($candidates as $candidate) {
+            if (in_array($candidate, $columns, true)) {
+                return $candidate;
+            }
+        }
+
+        if ($required) {
+            throw new RuntimeException('Gerekli profil kolonu bulunamadı: ' . implode(', ', $candidates));
+        }
+
+        return null;
+    };
+
+    return [
+        'table' => 'user_profiles',
+        'id' => $pick(['id']),
+        'email' => $pick(['email']),
+        'full_name' => $pick(['full_name', 'name', 'display_name'], false),
+        'is_admin' => $pick(['is_admin'], false),
+        'current_qualification_id' => $pick(['current_qualification_id', 'qualification_id'], false),
+        'target_qualification_id' => $pick(['target_qualification_id'], false),
+        'onboarding_completed' => $pick(['onboarding_completed', 'is_onboarding_completed'], false),
+        'created_at' => $pick(['created_at', 'created_on'], false),
+        'updated_at' => $pick(['updated_at', 'updated_on'], false),
+    ];
+}
+
+function api_find_profile_by_user_id(PDO $pdo, string $userId): ?array
+{
+    $schema = api_get_profile_schema($pdo);
+
+    $select = [
+        "`{$schema['id']}` AS id",
+        "`{$schema['email']}` AS email",
+        $schema['full_name'] ? "`{$schema['full_name']}` AS full_name" : "'' AS full_name",
+        $schema['is_admin'] ? "`{$schema['is_admin']}` AS is_admin" : '0 AS is_admin',
+        $schema['current_qualification_id'] ? "`{$schema['current_qualification_id']}` AS current_qualification_id" : 'NULL AS current_qualification_id',
+        $schema['target_qualification_id'] ? "`{$schema['target_qualification_id']}` AS target_qualification_id" : 'NULL AS target_qualification_id',
+        $schema['onboarding_completed'] ? "`{$schema['onboarding_completed']}` AS onboarding_completed" : '0 AS onboarding_completed',
+        $schema['created_at'] ? "`{$schema['created_at']}` AS created_at" : 'NULL AS created_at',
+        $schema['updated_at'] ? "`{$schema['updated_at']}` AS updated_at" : 'NULL AS updated_at',
+    ];
+
+    $sql = 'SELECT ' . implode(', ', $select)
+        . " FROM `{$schema['table']}` WHERE `{$schema['id']}` = ? LIMIT 1";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$userId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+
+    $currentName = null;
+    $qualId = (string)($row['current_qualification_id'] ?? '');
+    if ($qualId !== '') {
+        $q = $pdo->prepare('SELECT name FROM qualifications WHERE id = ? LIMIT 1');
+        $q->execute([$qualId]);
+        $currentName = $q->fetchColumn() ?: null;
+    }
+
+    return [
+        'id' => (string)$row['id'],
+        'email' => (string)($row['email'] ?? ''),
+        'full_name' => (string)($row['full_name'] ?? ''),
+        'is_admin' => ((int)($row['is_admin'] ?? 0) === 1),
+        'current_qualification_id' => $row['current_qualification_id'] ?? null,
+        'target_qualification_id' => $row['target_qualification_id'] ?? null,
+        'onboarding_completed' => ((int)($row['onboarding_completed'] ?? 0) === 1),
+        'created_at' => $row['created_at'] ?? null,
+        'updated_at' => $row['updated_at'] ?? null,
+        'current_qualification_name' => $currentName,
+    ];
+}
+
+function api_update_profile_fields(PDO $pdo, string $userId, array $updates): void
+{
+    if (!$updates) {
+        return;
+    }
+
+    $schema = api_get_profile_schema($pdo);
+    $set = [];
+    $values = [];
+
+    foreach ($updates as $col => $val) {
+        $set[] = "`{$col}` = ?";
+        $values[] = $val;
+    }
+
+    if ($schema['updated_at']) {
+        $set[] = "`{$schema['updated_at']}` = NOW()";
+    }
+
+    $values[] = $userId;
+    $sql = "UPDATE `{$schema['table']}` SET " . implode(', ', $set) . " WHERE `{$schema['id']}` = ?";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($values);
+}
+
+function api_qualification_exists(PDO $pdo, string $qualificationId): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM qualifications WHERE id = ?');
+    $stmt->execute([$qualificationId]);
+    return ((int)$stmt->fetchColumn()) > 0;
+}
