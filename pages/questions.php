@@ -116,54 +116,49 @@ include '../includes/sidebar.php';
         </div>
     </div>
 
-    <div class="card">
+    <div class="card d-none d-md-block">
         <div class="card-body">
             <div class="table-responsive">
             <table id="questionsTable" class="table table-hover align-middle">
                 <thead>
                     <tr>
                         <th class="questions-col-select" style="width:40px;"><input type="checkbox" id="selectAll"></th>
-                        <th class="questions-col-type" style="width:70px;">Tip</th>
-                        <th class="questions-col-question">Soru / Şıklar</th>
-                        <th class="questions-col-qualification">Yeterlilik</th>
-                        <th class="questions-col-course">Ders</th>
+                        <th class="questions-col-question">Soru</th>
+                        <th class="questions-col-meta">Yeterlilik / Ders</th>
                         <th class="questions-actions-col" style="width:80px;">İşlemler</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($questions as $q): ?>
-                    <tr class="question-row-card">
+                    <tr class="question-row-card desktop-question-row">
                         <td class="questions-col-select" onclick="event.stopPropagation()"><input type="checkbox" class="question-checkbox" value="<?= htmlspecialchars($q['id']) ?>"></td>
-                        <td class="questions-col-type">
-                            <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
-                            <?php elseif ($q['question_type'] === 'karışık'): ?><span class="badge bg-warning text-dark">Karışık</span>
-                            <?php else: ?><span class="badge bg-info">Sözel</span><?php endif; ?>
-                        </td>
                         <td class="questions-col-question">
                             <div class="question-mobile-head">
                                 <strong class="question-title-mobile question-title">
                                     <?= htmlspecialchars(mb_strlen($q['question_text']) > 220 ? mb_substr($q['question_text'], 0, 220) . '…' : $q['question_text']) ?>
                                 </strong>
-                                <span class="question-mobile-type">
-                                    <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
-                                    <?php elseif ($q['question_type'] === 'karışık'): ?><span class="badge bg-warning text-dark">Karışık</span>
-                                    <?php else: ?><span class="badge bg-info">Sözel</span><?php endif; ?>
-                                </span>
+                            </div>
+                            <div class="mt-1">
+                                <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
+                                <?php elseif ($q['question_type'] === 'karışık'): ?><span class="badge bg-warning text-dark">Karışık</span>
+                                <?php else: ?><span class="badge bg-info">Sözel</span><?php endif; ?>
                             </div>
                             <div class="question-mobile-meta d-none">
                                 <span><?= htmlspecialchars($q['qualification_name']) ?></span>
                                 <span>/</span>
                                 <span><?= htmlspecialchars($q['course_name']) ?></span>
                             </div>
-                            <div class="questions-option-grid mt-2">
-                                <div class="questions-option-item <?= $q['correct_answer'] === 'A' ? 'correct' : '' ?>">A) <?= htmlspecialchars(mb_strlen($q['option_a']) > 90 ? mb_substr($q['option_a'], 0, 90) . '…' : $q['option_a']) ?></div>
-                                <div class="questions-option-item <?= $q['correct_answer'] === 'B' ? 'correct' : '' ?>">B) <?= htmlspecialchars(mb_strlen($q['option_b']) > 90 ? mb_substr($q['option_b'], 0, 90) . '…' : $q['option_b']) ?></div>
-                                <div class="questions-option-item <?= $q['correct_answer'] === 'C' ? 'correct' : '' ?>">C) <?= htmlspecialchars(mb_strlen($q['option_c']) > 90 ? mb_substr($q['option_c'], 0, 90) . '…' : $q['option_c']) ?></div>
-                                <div class="questions-option-item <?= $q['correct_answer'] === 'D' ? 'correct' : '' ?>">D) <?= htmlspecialchars(mb_strlen($q['option_d']) > 90 ? mb_substr($q['option_d'], 0, 90) . '…' : $q['option_d']) ?></div>
+                            <div class="meq-options-grid mt-2">
+                                <div class="meq-option <?= $q['correct_answer'] === 'A' ? 'meq-option-correct' : '' ?>">A) <?= htmlspecialchars(mb_strlen($q['option_a']) > 90 ? mb_substr($q['option_a'], 0, 90) . '…' : $q['option_a']) ?></div>
+                                <div class="meq-option <?= $q['correct_answer'] === 'B' ? 'meq-option-correct' : '' ?>">B) <?= htmlspecialchars(mb_strlen($q['option_b']) > 90 ? mb_substr($q['option_b'], 0, 90) . '…' : $q['option_b']) ?></div>
+                                <div class="meq-option <?= $q['correct_answer'] === 'C' ? 'meq-option-correct' : '' ?>">C) <?= htmlspecialchars(mb_strlen($q['option_c']) > 90 ? mb_substr($q['option_c'], 0, 90) . '…' : $q['option_c']) ?></div>
+                                <div class="meq-option <?= $q['correct_answer'] === 'D' ? 'meq-option-correct' : '' ?>">D) <?= htmlspecialchars(mb_strlen($q['option_d']) > 90 ? mb_substr($q['option_d'], 0, 90) . '…' : $q['option_d']) ?></div>
                             </div>
                         </td>
-                        <td class="questions-col-qualification"><small class="text-muted"><?= htmlspecialchars($q['qualification_name']) ?></small></td>
-                        <td class="questions-col-course"><strong class="question-course"><?= htmlspecialchars($q['course_name']) ?></strong></td>
+                        <td class="questions-col-meta">
+                            <div><?= htmlspecialchars($q['qualification_name']) ?></div>
+                            <small class="text-muted"><?= htmlspecialchars($q['course_name']) ?></small>
+                        </td>
                         <td class="questions-actions-cell" onclick="event.stopPropagation()">
                             <div class="table-actions questions-actions-wrap">
                                 <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Düzenle"><i class="bi bi-pencil"></i></button>
@@ -176,6 +171,40 @@ include '../includes/sidebar.php';
             </table>
             </div>
         </div>
+    </div>
+
+    <div class="d-md-none">
+        <?php foreach ($questions as $q): ?>
+            <div class="card mb-3 meq-mobile-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <div class="form-check" onclick="event.stopPropagation()">
+                            <input type="checkbox" class="form-check-input question-checkbox" value="<?= htmlspecialchars($q['id']) ?>">
+                        </div>
+                        <div>
+                            <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
+                            <?php elseif ($q['question_type'] === 'karışık'): ?><span class="badge bg-warning text-dark">Karışık</span>
+                            <?php else: ?><span class="badge bg-info">Sözel</span><?php endif; ?>
+                        </div>
+                    </div>
+
+                    <div class="fw-semibold mt-2"><?= htmlspecialchars(mb_strlen($q['question_text']) > 220 ? mb_substr($q['question_text'], 0, 220) . '…' : $q['question_text']) ?></div>
+                    <div class="small text-muted mt-1"><?= htmlspecialchars($q['qualification_name']) ?> / <?= htmlspecialchars($q['course_name']) ?></div>
+
+                    <div class="meq-options-grid mt-2">
+                        <div class="meq-option <?= $q['correct_answer'] === 'A' ? 'meq-option-correct' : '' ?>">A) <?= htmlspecialchars(mb_strlen($q['option_a']) > 90 ? mb_substr($q['option_a'], 0, 90) . '…' : $q['option_a']) ?></div>
+                        <div class="meq-option <?= $q['correct_answer'] === 'B' ? 'meq-option-correct' : '' ?>">B) <?= htmlspecialchars(mb_strlen($q['option_b']) > 90 ? mb_substr($q['option_b'], 0, 90) . '…' : $q['option_b']) ?></div>
+                        <div class="meq-option <?= $q['correct_answer'] === 'C' ? 'meq-option-correct' : '' ?>">C) <?= htmlspecialchars(mb_strlen($q['option_c']) > 90 ? mb_substr($q['option_c'], 0, 90) . '…' : $q['option_c']) ?></div>
+                        <div class="meq-option <?= $q['correct_answer'] === 'D' ? 'meq-option-correct' : '' ?>">D) <?= htmlspecialchars(mb_strlen($q['option_d']) > 90 ? mb_substr($q['option_d'], 0, 90) . '…' : $q['option_d']) ?></div>
+                    </div>
+
+                    <div class="d-flex justify-content-end gap-2 mt-3">
+                        <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>"><i class="bi bi-pencil"></i> Düzenle</button>
+                        <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($q['id']) ?>"><i class="bi bi-trash"></i> Sil</button>
+                    </div>
+                </div>
+            </div>
+        <?php endforeach; ?>
     </div>
 </div>
 
@@ -576,7 +605,7 @@ $(document).ready(function() {
         order: [],
         pageLength: 50,
         responsive: true,
-        columnDefs: [{ orderable: false, targets: [0, 5] }]
+        columnDefs: [{ orderable: false, targets: [0, 3] }]
     });
 
     $('#filter_qualification').on('change', function() {
@@ -844,13 +873,13 @@ JAVASCRIPT;
     line-height: 1.35;
 }
 
-.questions-option-grid {
+.meq-options-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
 }
 
-.questions-option-item {
+.meq-option {
     background: var(--bg-soft);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -860,7 +889,7 @@ JAVASCRIPT;
     line-height: 1.35;
 }
 
-.questions-option-item.correct {
+.meq-option-correct {
     background: var(--success-soft);
     border-color: var(--success);
     font-weight: 600;
@@ -876,7 +905,7 @@ JAVASCRIPT;
 }
 
 @media (max-width: 991.98px) {
-    .questions-option-grid {
+    .meq-options-grid {
         grid-template-columns: 1fr;
     }
 }
