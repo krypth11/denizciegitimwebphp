@@ -329,12 +329,28 @@ function api_find_profile_by_user_id(PDO $pdo, string $userId): ?array
         $currentName = $q->fetchColumn() ?: null;
     }
 
+    $email = (string)($row['email'] ?? '');
+    $fullName = (string)($row['full_name'] ?? '');
+
+    $isGuest = null;
+    if ($schema['is_guest']) {
+        $isGuest = ((int)($row['is_guest'] ?? 0) === 1);
+    }
+    if ($isGuest === null) {
+        $emailLower = strtolower(trim($email));
+        $fullNameLower = strtolower(trim($fullName));
+
+        $isGuestByEmail = ($emailLower !== '' && str_ends_with($emailLower, '@guest.local'));
+        $isGuestByName = in_array($fullNameLower, ['misafir kullanıcı', 'misafir kullanici', 'guest user'], true);
+        $isGuest = $isGuestByEmail || $isGuestByName;
+    }
+
     return [
         'id' => (string)$row['id'],
-        'email' => (string)($row['email'] ?? ''),
-        'full_name' => (string)($row['full_name'] ?? ''),
+        'email' => $email,
+        'full_name' => $fullName,
         'is_admin' => ((int)($row['is_admin'] ?? 0) === 1),
-        'is_guest' => ((int)($row['is_guest'] ?? 0) === 1),
+        'is_guest' => (bool)$isGuest,
         'current_qualification_id' => $row['current_qualification_id'] ?? null,
         'target_qualification_id' => $row['target_qualification_id'] ?? null,
         'onboarding_completed' => ((int)($row['onboarding_completed'] ?? 0) === 1),
@@ -516,12 +532,20 @@ function api_is_guest_user(PDO $pdo, string $userId): bool
         return ((int)$flag) === 1;
     }
 
-    // Fallback: guest email stratejisi
-    $sql = 'SELECT `' . $schema['email'] . '` FROM `' . $schema['table'] . '` WHERE `' . $schema['id'] . '` = ? LIMIT 1';
+    // Fallback: guest email/full_name stratejisi
+    $fullNameCol = $schema['full_name'] ? ('`' . $schema['full_name'] . '`') : "''";
+    $sql = 'SELECT `' . $schema['email'] . '` AS email, ' . $fullNameCol . ' AS full_name FROM `' . $schema['table'] . '` WHERE `' . $schema['id'] . '` = ? LIMIT 1';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$userId]);
-    $email = strtolower((string)$stmt->fetchColumn());
-    return $email !== '' && str_ends_with($email, '@guest.local');
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $email = strtolower(trim((string)($row['email'] ?? '')));
+    $fullName = strtolower(trim((string)($row['full_name'] ?? '')));
+
+    $isGuestByEmail = $email !== '' && str_ends_with($email, '@guest.local');
+    $isGuestByName = in_array($fullName, ['misafir kullanıcı', 'misafir kullanici', 'guest user'], true);
+
+    return $isGuestByEmail || $isGuestByName;
 }
 
 function api_convert_guest_to_registered(PDO $pdo, string $userId, string $fullName, string $email, string $password): void
