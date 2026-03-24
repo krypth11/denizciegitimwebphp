@@ -41,6 +41,11 @@ try {
         $source = 'study';
     }
 
+    $sessionId = isset($payload['session_id']) ? trim((string)$payload['session_id']) : null;
+    if ($sessionId === '') {
+        $sessionId = null;
+    }
+
     $payloadScope = strtolower(trim((string)($payload['question_scope'] ?? $payload['question_type'] ?? '')));
     $isMaritimeEnglish = mc_is_maritime_english_source($source)
         || in_array($payloadScope, ['maritime_english', 'maritime-english', 'me'], true);
@@ -65,13 +70,31 @@ try {
             $computedIsCorrect = filter_var($payload['is_correct'], FILTER_VALIDATE_BOOLEAN);
         }
 
+        $eventInsertWarning = null;
+        $debugStep = 'me_event_insert';
+        try {
+            study_insert_attempt_event($pdo, [
+                'user_id' => $userId,
+                'question_id' => $questionId,
+                'course_id' => null,
+                'qualification_id' => $questionMeta['category_id'] ?? null,
+                'topic_id' => $questionMeta['topic_id'] ?? null,
+                'session_id' => $sessionId,
+                'source' => 'maritime_english',
+                'selected_answer' => $selectedAnswer,
+                'is_correct' => $computedIsCorrect,
+            ]);
+        } catch (Throwable $eventError) {
+            $eventInsertWarning = $eventError->getMessage();
+        }
+
         api_success('Maritime English cevabı kaydedildi.', [
             'source' => 'maritime_english',
             'question_id' => $questionId,
             'selected_answer' => $selectedAnswer,
             'is_correct' => $computedIsCorrect,
             'progress' => null,
-            'event_insert_warning' => null,
+            'event_insert_warning' => $eventInsertWarning,
         ]);
     }
 
@@ -114,12 +137,6 @@ try {
             'debug_question_id' => $questionId,
             'debug_source' => $source,
         ], 500);
-    }
-
-    $debugStep = 'session_parse';
-    $sessionId = isset($payload['session_id']) ? trim((string)$payload['session_id']) : null;
-    if ($sessionId === '') {
-        $sessionId = null;
     }
 
     $debugStep = 'correctness_compute';

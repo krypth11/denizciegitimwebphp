@@ -119,18 +119,22 @@ function mc_is_maritime_english_source(string $source): bool
 
 function mc_get_maritime_english_question_meta(PDO $pdo, string $questionId): array
 {
-    $schema = mc_get_maritime_english_schema($pdo)['questions'];
+    $fullSchema = mc_get_maritime_english_schema($pdo);
+    $schema = $fullSchema['questions'];
+    $topicSchema = $fullSchema['topics'];
 
     $select = [
-        mc_q($schema['id']) . ' AS id',
-        mc_q($schema['topic_id']) . ' AS topic_id',
-        ($schema['correct_answer'] ? mc_q($schema['correct_answer']) : "''") . ' AS correct_answer',
-        ($schema['option_e'] ? mc_q($schema['option_e']) : 'NULL') . ' AS option_e',
+        'q.' . mc_q($schema['id']) . ' AS id',
+        'q.' . mc_q($schema['topic_id']) . ' AS topic_id',
+        ($schema['correct_answer'] ? 'q.' . mc_q($schema['correct_answer']) : "''") . ' AS correct_answer',
+        ($schema['option_e'] ? 'q.' . mc_q($schema['option_e']) : 'NULL') . ' AS option_e',
+        't.' . mc_q($topicSchema['category_id']) . ' AS category_id',
     ];
 
     $sql = 'SELECT ' . implode(', ', $select)
-        . ' FROM ' . mc_q($schema['table'])
-        . ' WHERE ' . mc_q($schema['id']) . ' = ? LIMIT 1';
+        . ' FROM ' . mc_q($schema['table']) . ' q '
+        . ' LEFT JOIN ' . mc_q($topicSchema['table']) . ' t ON q.' . mc_q($schema['topic_id']) . ' = t.' . mc_q($topicSchema['id'])
+        . ' WHERE q.' . mc_q($schema['id']) . ' = ? LIMIT 1';
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$questionId]);
@@ -142,6 +146,7 @@ function mc_get_maritime_english_question_meta(PDO $pdo, string $questionId): ar
             'correct_answer' => null,
             'option_e' => null,
             'topic_id' => null,
+            'category_id' => null,
         ];
     }
 
@@ -153,5 +158,6 @@ function mc_get_maritime_english_question_meta(PDO $pdo, string $questionId): ar
         'correct_answer' => ($correct !== '' ? $correct : null),
         'option_e' => ($optionE !== '' ? $optionE : null),
         'topic_id' => $row['topic_id'] ?? null,
+        'category_id' => $row['category_id'] ?? null,
     ];
 }
