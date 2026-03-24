@@ -9,6 +9,9 @@ $user = require_admin();
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
 try {
+    $questionCols = get_table_columns($pdo, 'questions');
+    $hasOptionE = is_array($questionCols) && in_array('option_e', $questionCols, true);
+
     switch ($action) {
         case 'add':
             $course_id = $_POST['course_id'] ?? '';
@@ -18,7 +21,8 @@ try {
             $option_b = sanitize_input($_POST['option_b'] ?? '');
             $option_c = sanitize_input($_POST['option_c'] ?? '');
             $option_d = sanitize_input($_POST['option_d'] ?? '');
-            $correct_answer = $_POST['correct_answer'] ?? '';
+            $option_e = sanitize_input($_POST['option_e'] ?? '');
+            $correct_answer = strtoupper(trim((string)($_POST['correct_answer'] ?? '')));
             $explanation = sanitize_input($_POST['explanation'] ?? '');
 
             if (empty($course_id) || empty($question_type) || empty($question_text) ||
@@ -39,7 +43,7 @@ try {
                 exit;
             }
 
-            if (!in_array($correct_answer, ['A', 'B', 'C', 'D'], true)) {
+            if (!in_array($correct_answer, ['A', 'B', 'C', 'D', 'E'], true)) {
                 echo json_encode([
                     'success' => false,
                     'message' => 'Geçersiz doğru cevap!',
@@ -47,21 +51,45 @@ try {
                 exit;
             }
 
+            if ($correct_answer === 'E' && $option_e === '') {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'E doğru cevap için Şık E doldurulmalıdır!',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
             $id = generate_uuid();
 
-            $stmt = $pdo->prepare(
-                'INSERT INTO questions (
-                    id, course_id, question_type, question_text,
-                    option_a, option_b, option_c, option_d,
-                    correct_answer, explanation, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-            );
+            if ($hasOptionE) {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO questions (
+                        id, course_id, question_type, question_text,
+                        option_a, option_b, option_c, option_d, option_e,
+                        correct_answer, explanation, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                );
+                $ok = $stmt->execute([
+                    $id, $course_id, $question_type, $question_text,
+                    $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
+                    $correct_answer, $explanation,
+                ]);
+            } else {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO questions (
+                        id, course_id, question_type, question_text,
+                        option_a, option_b, option_c, option_d,
+                        correct_answer, explanation, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                );
+                $ok = $stmt->execute([
+                    $id, $course_id, $question_type, $question_text,
+                    $option_a, $option_b, $option_c, $option_d,
+                    $correct_answer, $explanation,
+                ]);
+            }
 
-            if ($stmt->execute([
-                $id, $course_id, $question_type, $question_text,
-                $option_a, $option_b, $option_c, $option_d,
-                $correct_answer, $explanation,
-            ])) {
+            if ($ok) {
                 echo json_encode([
                     'success' => true,
                     'message' => 'Soru başarıyla eklendi!',
@@ -112,7 +140,8 @@ try {
             $option_b = sanitize_input($_POST['option_b'] ?? '');
             $option_c = sanitize_input($_POST['option_c'] ?? '');
             $option_d = sanitize_input($_POST['option_d'] ?? '');
-            $correct_answer = $_POST['correct_answer'] ?? '';
+            $option_e = sanitize_input($_POST['option_e'] ?? '');
+            $correct_answer = strtoupper(trim((string)($_POST['correct_answer'] ?? '')));
             $explanation = sanitize_input($_POST['explanation'] ?? '');
 
             if (empty($id)) {
@@ -141,7 +170,7 @@ try {
                 exit;
             }
 
-            if (!in_array($correct_answer, ['A', 'B', 'C', 'D'], true)) {
+            if (!in_array($correct_answer, ['A', 'B', 'C', 'D', 'E'], true)) {
                 echo json_encode([
                     'success' => false,
                     'message' => 'Geçersiz doğru cevap!',
@@ -149,25 +178,56 @@ try {
                 exit;
             }
 
-            $stmt = $pdo->prepare(
-                'UPDATE questions SET
-                    course_id = ?,
-                    question_type = ?,
-                    question_text = ?,
-                    option_a = ?,
-                    option_b = ?,
-                    option_c = ?,
-                    option_d = ?,
-                    correct_answer = ?,
-                    explanation = ?
-                WHERE id = ?'
-            );
+            if ($correct_answer === 'E' && $option_e === '') {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'E doğru cevap için Şık E doldurulmalıdır!',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
 
-            if ($stmt->execute([
-                $course_id, $question_type, $question_text,
-                $option_a, $option_b, $option_c, $option_d,
-                $correct_answer, $explanation, $id,
-            ])) {
+            if ($hasOptionE) {
+                $stmt = $pdo->prepare(
+                    'UPDATE questions SET
+                        course_id = ?,
+                        question_type = ?,
+                        question_text = ?,
+                        option_a = ?,
+                        option_b = ?,
+                        option_c = ?,
+                        option_d = ?,
+                        option_e = ?,
+                        correct_answer = ?,
+                        explanation = ?
+                    WHERE id = ?'
+                );
+                $ok = $stmt->execute([
+                    $course_id, $question_type, $question_text,
+                    $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
+                    $correct_answer, $explanation, $id,
+                ]);
+            } else {
+                $stmt = $pdo->prepare(
+                    'UPDATE questions SET
+                        course_id = ?,
+                        question_type = ?,
+                        question_text = ?,
+                        option_a = ?,
+                        option_b = ?,
+                        option_c = ?,
+                        option_d = ?,
+                        correct_answer = ?,
+                        explanation = ?
+                    WHERE id = ?'
+                );
+                $ok = $stmt->execute([
+                    $course_id, $question_type, $question_text,
+                    $option_a, $option_b, $option_c, $option_d,
+                    $correct_answer, $explanation, $id,
+                ]);
+            }
+
+            if ($ok) {
                 echo json_encode([
                     'success' => true,
                     'message' => 'Soru güncellendi!',

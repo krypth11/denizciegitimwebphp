@@ -22,13 +22,18 @@ try {
         api_error('Geçersiz question_id.', 422);
     }
 
-    if (!in_array($selectedAnswer, ['A', 'B', 'C', 'D'], true)) {
-        api_error('selected_answer sadece A/B/C/D olabilir.', 422);
+    if (!in_array($selectedAnswer, ['A', 'B', 'C', 'D', 'E'], true)) {
+        api_error('selected_answer sadece A/B/C/D/E olabilir.', 422);
     }
 
     $questionMeta = study_get_question_meta_with_relations($pdo, $questionId);
     if (!$questionMeta['exists']) {
         api_error('Soru bulunamadı.', 404);
+    }
+
+    $optionE = trim((string)($questionMeta['option_e'] ?? ''));
+    if ($selectedAnswer === 'E' && $optionE === '') {
+        api_error('Bu soru için E şıkkı bulunmuyor.', 422);
     }
 
     $sessionId = isset($payload['session_id']) ? trim((string)$payload['session_id']) : null;

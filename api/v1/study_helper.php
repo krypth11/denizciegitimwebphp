@@ -60,6 +60,7 @@ function study_get_question_schema(PDO $pdo): array
         'table' => 'questions',
         'id' => study_pick_column($cols, ['id'], true),
         'correct_answer' => study_pick_column($cols, ['correct_answer'], false),
+        'option_e' => study_pick_column($cols, ['option_e'], false),
         'course_id' => study_pick_column($cols, ['course_id'], false),
         'topic_id' => study_pick_column($cols, ['topic_id'], false),
     ];
@@ -93,6 +94,11 @@ function study_get_question_meta(PDO $pdo, string $questionId): array
     } else {
         $select[] = "'' AS correct_answer";
     }
+    if ($schema['option_e']) {
+        $select[] = study_q($schema['option_e']) . ' AS option_e';
+    } else {
+        $select[] = 'NULL AS option_e';
+    }
 
     $sql = 'SELECT ' . implode(', ', $select)
         . ' FROM ' . study_q($schema['table'])
@@ -103,11 +109,15 @@ function study_get_question_meta(PDO $pdo, string $questionId): array
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$row) {
-        return ['exists' => false, 'correct_answer' => null];
+        return ['exists' => false, 'correct_answer' => null, 'option_e' => null];
     }
 
     $correct = strtoupper(trim((string)($row['correct_answer'] ?? '')));
-    return ['exists' => true, 'correct_answer' => ($correct !== '' ? $correct : null)];
+    return [
+        'exists' => true,
+        'correct_answer' => ($correct !== '' ? $correct : null),
+        'option_e' => $row['option_e'] ?? null,
+    ];
 }
 
 function study_get_question_meta_with_relations(PDO $pdo, string $questionId): array
@@ -118,6 +128,7 @@ function study_get_question_meta_with_relations(PDO $pdo, string $questionId): a
     $select = [
         'q.' . study_q($qSchema['id']) . ' AS id',
         ($qSchema['correct_answer'] ? 'q.' . study_q($qSchema['correct_answer']) : "''") . ' AS correct_answer',
+        ($qSchema['option_e'] ? 'q.' . study_q($qSchema['option_e']) : 'NULL') . ' AS option_e',
         ($qSchema['course_id'] ? 'q.' . study_q($qSchema['course_id']) : 'NULL') . ' AS course_id',
         ($qSchema['topic_id'] ? 'q.' . study_q($qSchema['topic_id']) : 'NULL') . ' AS topic_id',
     ];
@@ -143,6 +154,7 @@ function study_get_question_meta_with_relations(PDO $pdo, string $questionId): a
         return [
             'exists' => false,
             'correct_answer' => null,
+            'option_e' => null,
             'course_id' => null,
             'qualification_id' => null,
             'topic_id' => null,
@@ -153,6 +165,7 @@ function study_get_question_meta_with_relations(PDO $pdo, string $questionId): a
     return [
         'exists' => true,
         'correct_answer' => ($correct !== '' ? $correct : null),
+        'option_e' => $row['option_e'] ?? null,
         'course_id' => $row['course_id'] ?? null,
         'qualification_id' => $row['qualification_id'] ?? null,
         'topic_id' => $row['topic_id'] ?? null,

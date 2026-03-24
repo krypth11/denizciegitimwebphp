@@ -8,6 +8,9 @@ require_once '../includes/functions.php';
 $user = require_admin();
 
 try {
+    $questionCols = get_table_columns($pdo, 'questions');
+    $hasOptionE = is_array($questionCols) && in_array('option_e', $questionCols, true);
+
     $questions_json = $_POST['questions'] ?? '';
 
     if (empty($questions_json)) {
@@ -28,13 +31,23 @@ try {
         exit;
     }
 
-    $stmt = $pdo->prepare(
-        'INSERT INTO questions (
-            id, course_id, question_type, question_text,
-            option_a, option_b, option_c, option_d,
-            correct_answer, explanation, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-    );
+    if ($hasOptionE) {
+        $stmt = $pdo->prepare(
+            'INSERT INTO questions (
+                id, course_id, question_type, question_text,
+                option_a, option_b, option_c, option_d, option_e,
+                correct_answer, explanation, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+        );
+    } else {
+        $stmt = $pdo->prepare(
+            'INSERT INTO questions (
+                id, course_id, question_type, question_text,
+                option_a, option_b, option_c, option_d,
+                correct_answer, explanation, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+        );
+    }
 
     $saved_count = 0;
 
@@ -59,7 +72,14 @@ try {
             continue;
         }
 
-        if (!in_array($q['correct_answer'], ['A', 'B', 'C', 'D'], true)) {
+        $optionE = trim((string)($q['option_e'] ?? ''));
+        $correctAnswer = strtoupper(trim((string)($q['correct_answer'] ?? '')));
+
+        if (!in_array($correctAnswer, ['A', 'B', 'C', 'D', 'E'], true)) {
+            continue;
+        }
+
+        if ($correctAnswer === 'E' && $optionE === '') {
             continue;
         }
 
@@ -70,18 +90,36 @@ try {
 
         $id = generate_uuid();
 
-        if ($stmt->execute([
-            $id,
-            $q['course_id'],
-            $normalized_type,
-            $q['question_text'],
-            $q['option_a'],
-            $q['option_b'],
-            $q['option_c'],
-            $q['option_d'],
-            $q['correct_answer'],
-            $q['explanation'] ?? '',
-        ])) {
+        if ($hasOptionE) {
+            $ok = $stmt->execute([
+                $id,
+                $q['course_id'],
+                $normalized_type,
+                $q['question_text'],
+                $q['option_a'],
+                $q['option_b'],
+                $q['option_c'],
+                $q['option_d'],
+                ($optionE !== '' ? $optionE : null),
+                $correctAnswer,
+                $q['explanation'] ?? '',
+            ]);
+        } else {
+            $ok = $stmt->execute([
+                $id,
+                $q['course_id'],
+                $normalized_type,
+                $q['question_text'],
+                $q['option_a'],
+                $q['option_b'],
+                $q['option_c'],
+                $q['option_d'],
+                $correctAnswer,
+                $q['explanation'] ?? '',
+            ]);
+        }
+
+        if ($ok) {
             $saved_count++;
         }
     }

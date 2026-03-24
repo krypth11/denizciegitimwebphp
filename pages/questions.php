@@ -153,6 +153,9 @@ include '../includes/sidebar.php';
                                 <div class="meq-option <?= $q['correct_answer'] === 'B' ? 'meq-option-correct' : '' ?>">B) <?= htmlspecialchars(mb_strlen($q['option_b']) > 90 ? mb_substr($q['option_b'], 0, 90) . '…' : $q['option_b']) ?></div>
                                 <div class="meq-option <?= $q['correct_answer'] === 'C' ? 'meq-option-correct' : '' ?>">C) <?= htmlspecialchars(mb_strlen($q['option_c']) > 90 ? mb_substr($q['option_c'], 0, 90) . '…' : $q['option_c']) ?></div>
                                 <div class="meq-option <?= $q['correct_answer'] === 'D' ? 'meq-option-correct' : '' ?>">D) <?= htmlspecialchars(mb_strlen($q['option_d']) > 90 ? mb_substr($q['option_d'], 0, 90) . '…' : $q['option_d']) ?></div>
+                                <?php if (!empty($q['option_e'])): ?>
+                                <div class="meq-option <?= $q['correct_answer'] === 'E' ? 'meq-option-correct' : '' ?>">E) <?= htmlspecialchars(mb_strlen($q['option_e']) > 90 ? mb_substr($q['option_e'], 0, 90) . '…' : $q['option_e']) ?></div>
+                                <?php endif; ?>
                             </div>
                         </td>
                         <td class="questions-col-meta">
@@ -196,6 +199,9 @@ include '../includes/sidebar.php';
                         <div class="meq-option <?= $q['correct_answer'] === 'B' ? 'meq-option-correct' : '' ?>">B) <?= htmlspecialchars(mb_strlen($q['option_b']) > 90 ? mb_substr($q['option_b'], 0, 90) . '…' : $q['option_b']) ?></div>
                         <div class="meq-option <?= $q['correct_answer'] === 'C' ? 'meq-option-correct' : '' ?>">C) <?= htmlspecialchars(mb_strlen($q['option_c']) > 90 ? mb_substr($q['option_c'], 0, 90) . '…' : $q['option_c']) ?></div>
                         <div class="meq-option <?= $q['correct_answer'] === 'D' ? 'meq-option-correct' : '' ?>">D) <?= htmlspecialchars(mb_strlen($q['option_d']) > 90 ? mb_substr($q['option_d'], 0, 90) . '…' : $q['option_d']) ?></div>
+                        <?php if (!empty($q['option_e'])): ?>
+                        <div class="meq-option <?= $q['correct_answer'] === 'E' ? 'meq-option-correct' : '' ?>">E) <?= htmlspecialchars(mb_strlen($q['option_e']) > 90 ? mb_substr($q['option_e'], 0, 90) . '…' : $q['option_e']) ?></div>
+                        <?php endif; ?>
                     </div>
 
                     <div class="d-flex justify-content-end gap-2 mt-3">
@@ -217,8 +223,8 @@ include '../includes/sidebar.php';
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" required><option value="">Seçiniz...</option><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
             </div>
             <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" rows="3" required></textarea></div>
-            <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" required></div></div>
-            <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" required><option value="">Seçiniz...</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option></select></div>
+            <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e"></div></div>
+            <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" required><option value="">Seçiniz...</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
             <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" rows="2"></textarea></div>
         </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Kaydet</button></div></form>
     </div></div>
@@ -232,8 +238,8 @@ include '../includes/sidebar.php';
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" id="edit_question_type" required><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
             </div>
             <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" id="edit_question_text" rows="3" required></textarea></div>
-            <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" id="edit_option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" id="edit_option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" id="edit_option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" id="edit_option_d" required></div></div>
-            <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" id="edit_correct_answer" required><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option></select></div>
+            <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" id="edit_option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" id="edit_option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" id="edit_option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" id="edit_option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e" id="edit_option_e"></div></div>
+            <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" id="edit_correct_answer" required><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
             <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" id="edit_explanation" rows="2"></textarea></div>
         </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Güncelle</button></div></form>
     </div></div>
@@ -258,6 +264,7 @@ include '../includes/sidebar.php';
                 <small class="text-muted">Min 1 - Max 100</small>
             </div>
             <div class="mb-3"><label class="form-label">Konu / Açıklama (Opsiyonel)</label><textarea class="form-control" name="topic" rows="2" placeholder="Örn: Denizcilik mevzuatı, Radar kullanımı"></textarea></div>
+            <div class="mb-3"><label class="form-label">E şıkkı dahil edilsin mi?</label><select class="form-select" name="include_option_e"><option value="0" selected>Hayır</option><option value="1">Evet</option></select></div>
             <div id="aiProgress" class="d-none"><div class="alert alert-info"><div class="d-flex align-items-center"><div class="spinner-border spinner-border-sm me-2"></div><strong>AI Çalışıyor...</strong> Sorular üretiliyor, lütfen bekleyin...</div></div></div>
         </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-success" id="aiGenerateBtn"><i class="bi bi-stars"></i> Üret</button></div></form>
     </div></div>
@@ -311,6 +318,7 @@ A) Şık A
 B) Şık B
 C) Şık C
 D) Şık D
+E) Şık E (opsiyonel)
 Açıklama:
 Açıklama metni
 ⸻
@@ -325,7 +333,7 @@ Açıklama:
 Cevap Anahtarı
 1-A
 2-B
-3-C</pre>
+3-E</pre>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -376,7 +384,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
 
     const answerMap = {};
     if (answerKeyText) {
-        const answerRegex = /(\d+)\s*[-:]\s*([ABCD])/gi;
+        const answerRegex = /(\d+)\s*[-:]\s*([ABCDE])/gi;
         let answerMatch;
         while ((answerMatch = answerRegex.exec(answerKeyText)) !== null) {
             answerMap[parseInt(answerMatch[1], 10)] = answerMatch[2].toUpperCase();
@@ -413,7 +421,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
         lines[0] = lines[0].replace(/^\s*\d+\.\s*/, '').trim();
 
         const questionLines = [];
-        const options = { A: '', B: '', C: '', D: '' };
+        const options = { A: '', B: '', C: '', D: '', E: '' };
         let currentOption = null;
         let explanationMode = false;
         const explanationLines = [];
@@ -435,7 +443,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
                 continue;
             }
 
-            const optMatch = line.match(/^([ABCD])[\)\.\-:]\s*(.*)$/i);
+            const optMatch = line.match(/^([ABCDE])[\)\.\-:]\s*(.*)$/i);
             if (optMatch) {
                 currentOption = optMatch[1].toUpperCase();
                 let optValue = optMatch[2] || '';
@@ -459,7 +467,8 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
         const isValid =
             questionText.length >= 10 &&
             options.A && options.B && options.C && options.D &&
-            ['A', 'B', 'C', 'D'].includes(correctAnswer);
+            ['A', 'B', 'C', 'D', 'E'].includes(correctAnswer) &&
+            (correctAnswer !== 'E' || options.E);
 
         if (!isValid) {
             result.skipped_count++;
@@ -472,6 +481,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
             option_b: options.B,
             option_c: options.C,
             option_d: options.D,
+            option_e: options.E || '',
             correct_answer: correctAnswer,
             explanation: normalizeText(explanationLines.join(' ')),
             question_type: selectedType,
@@ -545,9 +555,10 @@ function renderAiPreview() {
                   <div class="col-md-6 mb-2"><label class="form-label">B</label><input class="form-control ai-draft-field" data-index="${index}" data-field="option_b" value="${q._draft.option_b || ''}"></div>
                   <div class="col-md-6 mb-2"><label class="form-label">C</label><input class="form-control ai-draft-field" data-index="${index}" data-field="option_c" value="${q._draft.option_c || ''}"></div>
                   <div class="col-md-6 mb-2"><label class="form-label">D</label><input class="form-control ai-draft-field" data-index="${index}" data-field="option_d" value="${q._draft.option_d || ''}"></div>
+                  <div class="col-md-6 mb-2"><label class="form-label">E (Opsiyonel)</label><input class="form-control ai-draft-field" data-index="${index}" data-field="option_e" value="${q._draft.option_e || ''}"></div>
                 </div>
                 <div class="row">
-                  <div class="col-md-3"><label class="form-label">Doğru Cevap</label><select class="form-select ai-draft-field" data-index="${index}" data-field="correct_answer"><option ${q._draft.correct_answer==='A'?'selected':''}>A</option><option ${q._draft.correct_answer==='B'?'selected':''}>B</option><option ${q._draft.correct_answer==='C'?'selected':''}>C</option><option ${q._draft.correct_answer==='D'?'selected':''}>D</option></select></div>
+                  <div class="col-md-3"><label class="form-label">Doğru Cevap</label><select class="form-select ai-draft-field" data-index="${index}" data-field="correct_answer"><option ${q._draft.correct_answer==='A'?'selected':''}>A</option><option ${q._draft.correct_answer==='B'?'selected':''}>B</option><option ${q._draft.correct_answer==='C'?'selected':''}>C</option><option ${q._draft.correct_answer==='D'?'selected':''}>D</option><option ${q._draft.correct_answer==='E'?'selected':''}>E</option></select></div>
                   <div class="col-md-9"><label class="form-label">Açıklama</label><input class="form-control ai-draft-field" data-index="${index}" data-field="explanation" value="${q._draft.explanation || ''}"></div>
                 </div>
                 <div class="mt-3">
@@ -576,6 +587,7 @@ function renderAiPreview() {
                   <div class="col-md-6"><div class="p-2 rounded ${b('B')}">B) ${q.option_b || ''}</div></div>
                   <div class="col-md-6"><div class="p-2 rounded ${b('C')}">C) ${q.option_c || ''}</div></div>
                   <div class="col-md-6"><div class="p-2 rounded ${b('D')}">D) ${q.option_d || ''}</div></div>
+                  ${q.option_e ? `<div class="col-md-6"><div class="p-2 rounded ${b('E')}">E) ${q.option_e || ''}</div></div>` : ''}
                 </div>
                 ${q.explanation ? `<div class="mt-2 text-muted"><small>${q.explanation}</small></div>` : ''}
               </div>
@@ -727,6 +739,11 @@ $(document).ready(function() {
 
     $('#addForm').on('submit', function(e){
         e.preventDefault();
+        const addCorrect = String($('[name="correct_answer"]', this).val() || '').toUpperCase();
+        const addOptionE = String($('[name="option_e"]', this).val() || '').trim();
+        if (addCorrect === 'E' && addOptionE === '') {
+            return appAlert('Uyarı', 'Doğru cevap E ise Şık E (Opsiyonel) alanı doldurulmalıdır.', 'warning');
+        }
         $.post('../ajax/questions.php?action=add', $(this).serialize(), function(r){
             if (r.success) {
                 appAlert('Başarılı', r.message, 'success');
@@ -743,12 +760,17 @@ $(document).ready(function() {
             const q=r.data;
             $('#edit_id').val(q.id); $('#edit_course_id').val(q.course_id); $('#edit_question_type').val(q.question_type);
             $('#edit_question_text').val(q.question_text); $('#edit_option_a').val(q.option_a); $('#edit_option_b').val(q.option_b);
-            $('#edit_option_c').val(q.option_c); $('#edit_option_d').val(q.option_d); $('#edit_correct_answer').val(q.correct_answer); $('#edit_explanation').val(q.explanation||'');
+            $('#edit_option_c').val(q.option_c); $('#edit_option_d').val(q.option_d); $('#edit_option_e').val(q.option_e || ''); $('#edit_correct_answer').val((q.correct_answer || '').toUpperCase()); $('#edit_explanation').val(q.explanation||'');
             bootstrap.Modal.getOrCreateInstance(document.getElementById('editModal')).show();
         });
     });
     $('#editForm').on('submit', function(e){
         e.preventDefault();
+        const editCorrect = String($('#edit_correct_answer').val() || '').toUpperCase();
+        const editOptionE = String($('#edit_option_e').val() || '').trim();
+        if (editCorrect === 'E' && editOptionE === '') {
+            return appAlert('Uyarı', 'Doğru cevap E ise Şık E (Opsiyonel) alanı doldurulmalıdır.', 'warning');
+        }
         $.post('../ajax/questions.php?action=update', $(this).serialize(), function(r){
             if (r.success) {
                 appAlert('Başarılı', r.message, 'success');
@@ -817,12 +839,16 @@ $(document).ready(function() {
     $(document).on('click', '.ai-edit-cancel', function(){ const i=$(this).data('index'); generatedQuestions[i]._editing=false; delete generatedQuestions[i]._draft; renderAiPreview(); });
     $(document).on('click', '.ai-edit-save', function(){
         const i=$(this).data('index'); const d=generatedQuestions[i]._draft;
-        if(!d.question_text||!d.option_a||!d.option_b||!d.option_c||!d.option_d||!['A','B','C','D'].includes(d.correct_answer)){
+        const answer = (d.correct_answer || '').toUpperCase();
+        if(!d.question_text||!d.option_a||!d.option_b||!d.option_c||!d.option_d||!['A','B','C','D','E'].includes(answer)){
+            return appAlert('Uyarı', 'Düzenleme geçersiz. Zorunlu alanları kontrol edin.', 'warning');
+        }
+        if(answer === 'E' && !(d.option_e || '').trim()){
             return appAlert('Uyarı', 'Düzenleme geçersiz. Zorunlu alanları kontrol edin.', 'warning');
         }
         Object.assign(generatedQuestions[i], {
             question_text:d.question_text, option_a:d.option_a, option_b:d.option_b, option_c:d.option_c, option_d:d.option_d,
-            correct_answer:d.correct_answer, explanation:d.explanation||''
+            option_e:d.option_e||'', correct_answer:answer, explanation:d.explanation||''
         });
         generatedQuestions[i]._editing=false; delete generatedQuestions[i]._draft; renderAiPreview();
     });

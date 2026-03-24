@@ -37,6 +37,7 @@ try {
     $question_type = $_POST['question_type'] ?? '';
     $count = (int)($_POST['question_count'] ?? ($_POST['count'] ?? 5));
     $topic = sanitize_input($_POST['topic'] ?? '');
+    $include_option_e = (int)($_POST['include_option_e'] ?? 0) === 1;
 
     if (empty($course_id) || empty($question_type)) {
         echo json_encode([
@@ -144,7 +145,7 @@ Soru Sayısı: {$count}";
     }
 
     $prompt .= "\n\nÖNEMLİ KURALLAR:
-1. Her soru mutlaka 4 şık (A, B, C, D) olmalı
+1. Her soru mutlaka " . ($include_option_e ? '5 şık (A, B, C, D, E)' : '4 şık (A, B, C, D)') . " olmalı
 2. Sadece 1 doğru cevap olmalı
 3. Sorular Türkçe olmalı
 4. Denizcilik terminolojisi kullan
@@ -160,7 +161,7 @@ Soru Sayısı: {$count}";
       \"option_b\": \"B şıkkı\",
       \"option_c\": \"C şıkkı\",
       \"option_d\": \"D şıkkı\",
-      \"correct_answer\": \"A\",
+      " . ($include_option_e ? "\\\"option_e\\\": \\\"E şıkkı\\\",\\n      " : '') . "\\\"correct_answer\\\": \\\"A\\\",
       \"explanation\": \"Kısa açıklama\"
     }
   ]
@@ -242,9 +243,22 @@ Soru Sayısı: {$count}";
         $option_b = trim((string)($q['option_b'] ?? ''));
         $option_c = trim((string)($q['option_c'] ?? ''));
         $option_d = trim((string)($q['option_d'] ?? ''));
-        $correct_answer = trim((string)($q['correct_answer'] ?? ''));
+        $option_e = trim((string)($q['option_e'] ?? ''));
+        $correct_answer = strtoupper(trim((string)($q['correct_answer'] ?? '')));
 
-        if ($question_text === '' || $option_a === '' || $option_b === '' || $option_c === '' || $option_d === '' || !in_array($correct_answer, ['A', 'B', 'C', 'D'], true)) {
+        if ($include_option_e && $option_e === '') {
+            continue;
+        }
+
+        if (!$include_option_e && $option_e !== '') {
+            $option_e = '';
+        }
+
+        if ($question_text === '' || $option_a === '' || $option_b === '' || $option_c === '' || $option_d === '' || !in_array($correct_answer, ['A', 'B', 'C', 'D', 'E'], true)) {
+            continue;
+        }
+
+        if ($correct_answer === 'E' && $option_e === '') {
             continue;
         }
 
@@ -281,6 +295,7 @@ Soru Sayısı: {$count}";
 
         $seen_batch_texts[] = $normalized;
         $deduplicated_questions[] = array_merge($q, [
+            'option_e' => $option_e,
             'course_id' => $course_id,
             'question_type' => $question_type,
             'status' => 'pending',
