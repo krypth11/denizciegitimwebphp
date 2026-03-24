@@ -50,6 +50,30 @@ try {
     }
 
     $saved_count = 0;
+    $skipped_count = 0;
+    $skipped_reasons = [];
+    $skipped_samples = [];
+
+    $add_skip = static function (string $reason, array $question = []) use (&$skipped_count, &$skipped_reasons, &$skipped_samples) {
+        $skipped_count++;
+        $skipped_reasons[$reason] = (int)($skipped_reasons[$reason] ?? 0) + 1;
+
+        if (count($skipped_samples) >= 8) {
+            return;
+        }
+
+        $questionText = trim((string)($question['question_text'] ?? ''));
+        if (mb_strlen($questionText, 'UTF-8') > 140) {
+            $questionText = mb_substr($questionText, 0, 140, 'UTF-8') . '…';
+        }
+
+        $skipped_samples[] = [
+            'reason' => $reason,
+            'question_text' => $questionText,
+            'correct_answer' => strtoupper(trim((string)($question['correct_answer'] ?? ''))),
+            'has_option_e' => trim((string)($question['option_e'] ?? '')) !== '',
+        ];
+    };
 
     $type_map = [
         'mixed' => 'karışık',
@@ -62,6 +86,7 @@ try {
 
     foreach ($questions as $q) {
         if (($q['status'] ?? 'pending') !== 'approved') {
+            $add_skip('status_not_approved', $q);
             continue;
         }
 
@@ -69,6 +94,7 @@ try {
             empty($q['option_b']) || empty($q['option_c']) ||
             empty($q['option_d']) || empty($q['correct_answer']) ||
             empty($q['course_id']) || empty($q['question_type'])) {
+            $add_skip('missing_required_fields', $q);
             continue;
         }
 
@@ -76,64 +102,87 @@ try {
         $correctAnswer = strtoupper(trim((string)($q['correct_answer'] ?? '')));
 
         if (!in_array($correctAnswer, ['A', 'B', 'C', 'D', 'E'], true)) {
+            $add_skip('invalid_correct_answer', $q);
             continue;
         }
 
         if ($correctAnswer === 'E' && $optionE === '') {
+            $add_skip('correct_answer_e_without_option_e', $q);
+            continue;
+        }
+
+        if (!$hasOptionE && $correctAnswer === 'E') {
+            $add_skip('db_has_no_option_e_column_for_e_answer', $q);
             continue;
         }
 
         $normalized_type = $type_map[$q['question_type']] ?? null;
         if ($normalized_type === null) {
+            $add_skip('invalid_question_type', $q);
             continue;
         }
 
         $id = generate_uuid();
 
-        if ($hasOptionE) {
-            $ok = $stmt->execute([
-                $id,
-                $q['course_id'],
-                $normalized_type,
-                $q['question_text'],
-                $q['option_a'],
-                $q['option_b'],
-                $q['option_c'],
-                $q['option_d'],
-                ($optionE !== '' ? $optionE : null),
-                $correctAnswer,
-                $q['explanation'] ?? '',
-            ]);
-        } else {
-            $ok = $stmt->execute([
-                $id,
-                $q['course_id'],
-                $normalized_type,
-                $q['question_text'],
-                $q['option_a'],
-                $q['option_b'],
-                $q['option_c'],
-                $q['option_d'],
-                $correctAnswer,
-                $q['explanation'] ?? '',
-            ]);
-        }
+        try {
+            if ($hasOptionE) {
+                $ok = $stmt->execute([
+                    $id,
+                    $q['course_id'],
+                    $normalized_type,
+                    $q['question_text'],
+                    $q['option_a'],
+                    $q['option_b'],
+                    $q['option_c'],
+                    $q['option_d'],
+                    ($optionE !== '' ? $optionE : null),
+                    $correctAnswer,
+                    $q['explanation'] ?? '',
+                ]);
+            } else {
+                $ok = $stmt->execute([
+                    $id,
+                    $q['course_id'],
+                    $normalized_type,
+                    $q['question_text'],
+                    $q['option_a'],
+                    $q['option_b'],
+                    $q['option_c'],
+                    $q['option_d'],
+                    $correctAnswer,
+                    $q['explanation'] ?? '',
+                ]);
+            }
 
-        if ($ok) {
-            $saved_count++;
+            if ($ok) {
+                $saved_count++;
+            } else {
+                $add_skip('db_insert_failed', $q);
+            }
+        } catch (Throwable $e) {
+            $add_skip('db_exception', $q);
+            error_log('save-ai-questions item insert error: ' . $e->getMessage());
         }
     }
 
     if ($saved_count > 0) {
         echo json_encode([
             'success' => true,
-            'message' => $saved_count . ' soru başarıyla kaydedildi!',
+            'message' => $saved_count . ' soru başarıyla kaydedildi!' . ($skipped_count > 0 ? ' ' . $skipped_count . ' soru atlandı.' : ''),
             'count' => $saved_count,
+            'saved_count' => $saved_count,
+            'skipped_count' => $skipped_count,
+            'skipped_reasons' => $skipped_reasons,
+            'skipped_samples' => $skipped_samples,
         ], JSON_UNESCAPED_UNICODE);
     } else {
         echo json_encode([
             'success' => false,
             'message' => 'Hiçbir onaylı soru kaydedilemedi!',
+            'saved_count' => 0,
+            'skipped_count' => $skipped_count,
+            'skipped_reasons' => $skipped_reasons,
+            'skipped_samples' => $skipped_samples,
         ], JSON_UNESCAPED_UNICODE);
     }
 } catch (Exception $e) {

@@ -598,6 +598,35 @@ function renderAiPreview() {
     $('#aiPreviewBody').html(html || '<div class="alert alert-warning">Soru yok.</div>');
 }
 
+function formatSkipSummary(resp) {
+    const skippedCount = Number(resp?.skipped_count || 0);
+    const reasons = resp?.skipped_reasons || {};
+    const samples = Array.isArray(resp?.skipped_samples) ? resp.skipped_samples : [];
+
+    if (!skippedCount) {
+        return '';
+    }
+
+    const reasonLines = Object.entries(reasons)
+        .map(([reason, count]) => `${reason}: ${count}`)
+        .join('\n');
+
+    const sampleLines = samples.slice(0, 3).map((s, idx) => {
+        const q = s.question_text || '(metin yok)';
+        return `${idx + 1}) [${s.reason}] ${q}`;
+    }).join('\n');
+
+    let msg = `Atlanan soru sayısı: ${skippedCount}`;
+    if (reasonLines) {
+        msg += `\n\nNedenler:\n${reasonLines}`;
+    }
+    if (sampleLines) {
+        msg += `\n\nÖrnekler:\n${sampleLines}`;
+    }
+
+    return msg;
+}
+
 $(document).ready(function() {
     const appAlert = (title, message, type = 'info') => {
         if (typeof window.showAppAlert === 'function') {
@@ -819,6 +848,17 @@ $(document).ready(function() {
                     filtered_duplicates: r.filtered_duplicates ?? 0,
                     filtered_existing: r.filtered_existing ?? 0
                 };
+
+                const validationSkipMsg = formatSkipSummary({
+                    skipped_count: r.validation_skipped_count,
+                    skipped_reasons: r.validation_skipped_reasons,
+                    skipped_samples: r.validation_skipped_samples
+                });
+
+                if (validationSkipMsg) {
+                    appAlert('AI Filtre Bilgisi', validationSkipMsg.replace(/\n/g, '<br>'), 'warning');
+                }
+
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('aiModal')).hide();
                 renderAiPreview();
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('aiPreviewModal')).show();
@@ -873,13 +913,17 @@ $(document).ready(function() {
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
             data: { questions: JSON.stringify(approved) },
             success: function(r){
+                const skipSummary = formatSkipSummary(r);
+
                 if(r.success){
-                    appAlert('Başarılı', r.message, 'success');
+                    const msg = skipSummary ? `${r.message}<br><br>${skipSummary.replace(/\n/g, '<br>')}` : r.message;
+                    appAlert('Başarılı', msg, 'success');
                     setTimeout(() => location.reload(), 350);
                     return;
                 }
 
-                appAlert('Hata', r.message, 'error');
+                const errMsg = skipSummary ? `${r.message}<br><br>${skipSummary.replace(/\n/g, '<br>')}` : r.message;
+                appAlert('Hata', errMsg, 'error');
                 $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
             },
             error: function(xhr){

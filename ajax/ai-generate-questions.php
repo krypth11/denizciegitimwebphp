@@ -145,8 +145,11 @@ Soru Sayısı: {$count}";
     }
 
     $prompt .= "\n\nÖNEMLİ KURALLAR:
-1. Her soru mutlaka " . ($include_option_e ? '5 şık (A, B, C, D, E)' : '4 şık (A, B, C, D)') . " olmalı
-2. Sadece 1 doğru cevap olmalı
+1. Her soruda A, B, C, D şıkları ZORUNLU olmalı
+2. E şıkkı OPSİYONEL (varsa option_e'ye yaz)
+3. Doğru cevap A/B/C/D/E olabilir; doğru cevap E ise option_e boş olamaz
+4. " . ($include_option_e ? 'Mümkün olduğunca E şıklı sorular da üret.' : 'E şıkkını sadece doğal ve gerekli olduğunda kullan.') . "
+5. Sadece 1 doğru cevap olmalı
 3. Sorular Türkçe olmalı
 4. Denizcilik terminolojisi kullan
 5. Gerçekçi ve eğitici olmalı
@@ -161,7 +164,8 @@ Soru Sayısı: {$count}";
       \"option_b\": \"B şıkkı\",
       \"option_c\": \"C şıkkı\",
       \"option_d\": \"D şıkkı\",
-      " . ($include_option_e ? "\\\"option_e\\\": \\\"E şıkkı\\\",\\n      " : '') . "\\\"correct_answer\\\": \\\"A\\\",
+      \"option_e\": \"E şıkkı (opsiyonel)\",
+      \"correct_answer\": \"A\",
       \"explanation\": \"Kısa açıklama\"
     }
   ]
@@ -236,6 +240,30 @@ Soru Sayısı: {$count}";
     $existing_normalized = array_map('normalize_question_text', $existing_questions);
     $filtered_duplicates = 0;
     $filtered_existing = 0;
+    $validation_skipped_count = 0;
+    $validation_skipped_reasons = [];
+    $validation_skipped_samples = [];
+
+    $add_validation_skip = static function (string $reason, array $question = []) use (&$validation_skipped_count, &$validation_skipped_reasons, &$validation_skipped_samples) {
+        $validation_skipped_count++;
+        $validation_skipped_reasons[$reason] = (int)($validation_skipped_reasons[$reason] ?? 0) + 1;
+
+        if (count($validation_skipped_samples) >= 8) {
+            return;
+        }
+
+        $questionText = trim((string)($question['question_text'] ?? ''));
+        if ($questionText !== '' && mb_strlen($questionText, 'UTF-8') > 140) {
+            $questionText = mb_substr($questionText, 0, 140, 'UTF-8') . '…';
+        }
+
+        $validation_skipped_samples[] = [
+            'reason' => $reason,
+            'question_text' => $questionText,
+            'correct_answer' => strtoupper(trim((string)($question['correct_answer'] ?? ''))),
+            'has_option_e' => trim((string)($question['option_e'] ?? '')) !== '',
+        ];
+    };
 
     foreach ($raw_questions as $q) {
         $question_text = trim((string)($q['question_text'] ?? ''));
@@ -246,24 +274,24 @@ Soru Sayısı: {$count}";
         $option_e = trim((string)($q['option_e'] ?? ''));
         $correct_answer = strtoupper(trim((string)($q['correct_answer'] ?? '')));
 
-        if ($include_option_e && $option_e === '') {
+        if ($question_text === '' || $option_a === '' || $option_b === '' || $option_c === '' || $option_d === '') {
+            $add_validation_skip('missing_required_fields', $q);
             continue;
         }
 
-        if (!$include_option_e && $option_e !== '') {
-            $option_e = '';
-        }
-
-        if ($question_text === '' || $option_a === '' || $option_b === '' || $option_c === '' || $option_d === '' || !in_array($correct_answer, ['A', 'B', 'C', 'D', 'E'], true)) {
+        if (!in_array($correct_answer, ['A', 'B', 'C', 'D', 'E'], true)) {
+            $add_validation_skip('invalid_correct_answer', $q);
             continue;
         }
 
         if ($correct_answer === 'E' && $option_e === '') {
+            $add_validation_skip('correct_answer_e_without_option_e', $q);
             continue;
         }
 
         $normalized = normalize_question_text($question_text);
         if ($normalized === '') {
+            $add_validation_skip('empty_normalized_question_text', $q);
             continue;
         }
 
@@ -277,6 +305,7 @@ Soru Sayısı: {$count}";
 
         if ($is_existing_duplicate) {
             $filtered_existing++;
+            $add_validation_skip('duplicate_with_existing_question', $q);
             continue;
         }
 
@@ -290,6 +319,7 @@ Soru Sayısı: {$count}";
 
         if ($is_batch_duplicate) {
             $filtered_duplicates++;
+            $add_validation_skip('duplicate_with_generated_batch', $q);
             continue;
         }
 
@@ -313,6 +343,9 @@ Soru Sayısı: {$count}";
         'deduplicated_count' => $deduplicated_count,
         'filtered_duplicates' => $filtered_duplicates,
         'filtered_existing' => $filtered_existing,
+        'validation_skipped_count' => $validation_skipped_count,
+        'validation_skipped_reasons' => $validation_skipped_reasons,
+        'validation_skipped_samples' => $validation_skipped_samples,
         'questions' => $deduplicated_questions,
     ], JSON_UNESCAPED_UNICODE);
 } catch (Exception $e) {
