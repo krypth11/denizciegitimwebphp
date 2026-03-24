@@ -450,12 +450,14 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
                 if (/^\s*[*✓✔]/.test(optValue) || /\(\s*doğru\s*\)/i.test(optValue)) {
                     inferredCorrect = currentOption;
                 }
-                options[currentOption] = cleanOptionText(optValue);
+                const value = cleanOptionText(optValue || '').trim();
+                options[currentOption] = value.length ? value : null;
                 continue;
             }
 
             if (currentOption) {
-                options[currentOption] = normalizeText(`${options[currentOption]} ${line}`);
+                const currentValue = options[currentOption] || '';
+                options[currentOption] = normalizeText(`${currentValue} ${line}`);
             } else {
                 questionLines.push(line);
             }
@@ -468,7 +470,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
             questionText.length >= 10 &&
             options.A && options.B && options.C && options.D &&
             ['A', 'B', 'C', 'D', 'E'].includes(correctAnswer) &&
-            (correctAnswer !== 'E' || options.E);
+            (correctAnswer !== 'E' || (options.E && options.E.length > 0));
 
         if (!isValid) {
             result.skipped_count++;
@@ -481,7 +483,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
             option_b: options.B,
             option_c: options.C,
             option_d: options.D,
-            option_e: options.E || '',
+            option_e: options.E ?? null,
             correct_answer: correctAnswer,
             explanation: normalizeText(explanationLines.join(' ')),
             question_type: selectedType,
@@ -897,12 +899,24 @@ $(document).ready(function() {
         const approved = generatedQuestions.filter(q => q.status === 'approved');
         if(!approved.length) return appAlert('Uyarı', 'Kaydedilecek onaylı soru yok!', 'warning');
 
+        const normalizedApproved = approved.map(q => {
+            const item = { ...q };
+            if (item.option_e === '') {
+                item.option_e = null;
+            }
+            return item;
+        });
+
         const ok = await appConfirm(
             'Kaydetme Onayı',
             'Bu işlem geri alınamaz.<br><br>Onaylanan <strong>' + approved.length + '</strong> soru veritabanına kaydedilecek.<br><br>Devam etmek istiyor musunuz?',
             { type: 'warning', confirmText: 'Kaydet', cancelText: 'İptal' }
         );
         if (!ok) return;
+
+        if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+            console.log('AI SAVE PAYLOAD', normalizedApproved);
+        }
 
         $('#saveAiQuestionsBtn').prop('disabled', true).text('Kaydediliyor...');
         $.ajax({
@@ -911,7 +925,7 @@ $(document).ready(function() {
             dataType: 'json',
             xhrFields: { withCredentials: true },
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            data: { questions: JSON.stringify(approved) },
+            data: { questions: JSON.stringify(normalizedApproved) },
             success: function(r){
                 const skipSummary = formatSkipSummary(r);
 
