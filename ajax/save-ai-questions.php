@@ -53,6 +53,9 @@ try {
     $skipped_count = 0;
     $skipped_reasons = [];
     $skipped_samples = [];
+    $debug_received_questions_count = count($questions);
+    $debug_e_answer_count = 0;
+    $debug_e_with_option_e_count = 0;
 
     $add_skip = static function (string $reason, array $question = []) use (&$skipped_count, &$skipped_reasons, &$skipped_samples) {
         $skipped_count++;
@@ -112,6 +115,10 @@ try {
         $correctRaw = $q['correct_answer'] ?? ($q['correctAnswer'] ?? '');
         $correctAnswer = strtoupper(trim((string)$correctRaw));
 
+        if ($correctAnswer === 'E') {
+            $debug_e_answer_count++;
+        }
+
         if ($correctAnswer === 'E' && $optionE === null && isset($q['options']) && is_array($q['options'])) {
             $fallbackOptionE = $q['options']['E'] ?? ($q['options']['e'] ?? null);
             if (is_string($fallbackOptionE) || is_numeric($fallbackOptionE)) {
@@ -120,6 +127,10 @@ try {
                     $optionE = $fallbackOptionE;
                 }
             }
+        }
+
+        if ($correctAnswer === 'E' && $optionE !== null) {
+            $debug_e_with_option_e_count++;
         }
 
         if (!in_array($correctAnswer, ['A', 'B', 'C', 'D', 'E'], true)) {
@@ -195,6 +206,10 @@ try {
             'skipped_count' => $skipped_count,
             'skipped_reasons' => $skipped_reasons,
             'skipped_samples' => $skipped_samples,
+            'debug_version' => 'SAVE-AI-E-FIX-1',
+            'debug_received_questions_count' => $debug_received_questions_count,
+            'debug_e_answer_count' => $debug_e_answer_count,
+            'debug_e_with_option_e_count' => $debug_e_with_option_e_count,
         ], JSON_UNESCAPED_UNICODE);
     } else {
         echo json_encode([
@@ -204,6 +219,10 @@ try {
             'skipped_count' => $skipped_count,
             'skipped_reasons' => $skipped_reasons,
             'skipped_samples' => $skipped_samples,
+            'debug_version' => 'SAVE-AI-E-FIX-1',
+            'debug_received_questions_count' => $debug_received_questions_count,
+            'debug_e_answer_count' => $debug_e_answer_count,
+            'debug_e_with_option_e_count' => $debug_e_with_option_e_count,
         ], JSON_UNESCAPED_UNICODE);
     }
 } catch (Exception $e) {

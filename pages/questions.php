@@ -359,6 +359,9 @@ Cevap Anahtarı
 <?php
 $extra_js = <<<'JAVASCRIPT'
 <script>
+window.__QUESTIONS_PAGE_VERSION__ = 'E-OPTION-FIX-1';
+console.log('QUESTIONS PAGE VERSION', window.__QUESTIONS_PAGE_VERSION__);
+
 let generatedQuestions = [];
 let coursesData = JSON.parse(document.getElementById('courses-data-json').textContent);
 let generationMeta = null;
@@ -627,6 +630,15 @@ function formatSkipSummary(resp) {
     }
 
     return msg;
+}
+
+function formatDebugSummary(resp) {
+    const debugVersion = resp?.debug_version || '-';
+    const receivedCount = Number(resp?.debug_received_questions_count || 0);
+    const eAnswerCount = Number(resp?.debug_e_answer_count || 0);
+    const eWithOptionECount = Number(resp?.debug_e_with_option_e_count || 0);
+
+    return `Debug Version: ${debugVersion}\nAlınan Soru: ${receivedCount}\nE Cevaplı: ${eAnswerCount}\nE + option_e dolu: ${eWithOptionECount}`;
 }
 
 $(document).ready(function() {
@@ -914,9 +926,7 @@ $(document).ready(function() {
         );
         if (!ok) return;
 
-        if (['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-            console.log('AI SAVE PAYLOAD', normalizedApproved);
-        }
+        console.log('SAVE PAYLOAD', normalizedApproved);
 
         $('#saveAiQuestionsBtn').prop('disabled', true).text('Kaydediliyor...');
         $.ajax({
@@ -928,15 +938,20 @@ $(document).ready(function() {
             data: { questions: JSON.stringify(normalizedApproved) },
             success: function(r){
                 const skipSummary = formatSkipSummary(r);
+                const debugSummary = formatDebugSummary(r);
 
                 if(r.success){
-                    const msg = skipSummary ? `${r.message}<br><br>${skipSummary.replace(/\n/g, '<br>')}` : r.message;
+                    const msgParts = [r.message, debugSummary];
+                    if (skipSummary) msgParts.push(skipSummary);
+                    const msg = msgParts.filter(Boolean).join('<br><br>').replace(/\n/g, '<br>');
                     appAlert('Başarılı', msg, 'success');
                     setTimeout(() => location.reload(), 350);
                     return;
                 }
 
-                const errMsg = skipSummary ? `${r.message}<br><br>${skipSummary.replace(/\n/g, '<br>')}` : r.message;
+                const errParts = [r.message, debugSummary];
+                if (skipSummary) errParts.push(skipSummary);
+                const errMsg = errParts.filter(Boolean).join('<br><br>').replace(/\n/g, '<br>');
                 appAlert('Hata', errMsg, 'error');
                 $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
             },
