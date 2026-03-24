@@ -271,7 +271,11 @@ Soru Sayısı: {$count}";
         $option_b = trim((string)($q['option_b'] ?? ''));
         $option_c = trim((string)($q['option_c'] ?? ''));
         $option_d = trim((string)($q['option_d'] ?? ''));
-        $option_e = trim((string)($q['option_e'] ?? ''));
+        $option_e_raw = $q['option_e'] ?? null;
+        $option_e = is_string($option_e_raw) ? trim($option_e_raw) : null;
+        if ($option_e === '') {
+            $option_e = null;
+        }
         $correct_answer = strtoupper(trim((string)($q['correct_answer'] ?? '')));
 
         if ($question_text === '' || $option_a === '' || $option_b === '' || $option_c === '' || $option_d === '') {
@@ -284,9 +288,22 @@ Soru Sayısı: {$count}";
             continue;
         }
 
-        if ($correct_answer === 'E' && $option_e === '') {
-            $add_validation_skip('correct_answer_e_without_option_e', $q);
-            continue;
+        // Eğer AI E seçmiş ama option_e boşsa → bu soruyu direkt discard etmeden önce debug logla
+        if ($correct_answer === 'E' && ($option_e === null || $option_e === '')) {
+            error_log('AI GENERATED INVALID E QUESTION: ' . json_encode($q));
+        }
+
+        if ($correct_answer === 'E') {
+            if ($option_e === '') {
+                // fallback: E şıkkını diğerlerinden türetmeye çalışma, sadece skip et ama log düş
+                $add_validation_skip('correct_answer_e_without_option_e', $q);
+                continue;
+            }
+            if ($option_e === null) {
+                // fallback: E şıkkını diğerlerinden türetmeye çalışma, sadece skip et ama log düş
+                $add_validation_skip('correct_answer_e_without_option_e', $q);
+                continue;
+            }
         }
 
         $normalized = normalize_question_text($question_text);
