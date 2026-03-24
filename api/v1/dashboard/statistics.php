@@ -5,19 +5,10 @@ require_once dirname(__DIR__) . '/auth_helper.php';
 
 api_require_method('GET');
 
-function stats_first_col(array $columns, array $candidates): ?string
+function stats_dbg(string $message, array $context = []): void
 {
-    foreach ($candidates as $candidate) {
-        if (in_array($candidate, $columns, true)) {
-            return $candidate;
-        }
-    }
-    return null;
-}
-
-function stats_q(string $column): string
-{
-    return '`' . str_replace('`', '', $column) . '`';
+    $suffix = $context ? ' | ' . json_encode($context, JSON_UNESCAPED_UNICODE) : '';
+    error_log('[dashboard.statistics] ' . $message . $suffix);
 }
 
 try {
@@ -30,60 +21,34 @@ try {
         'total_wrong' => 0,
     ];
 
-    // Öncelikli kaynak: question_attempt_events (event-level en doğru deneme sayımı)
-    $evCols = get_table_columns($pdo, 'question_attempt_events');
-    if (!empty($evCols) && in_array('user_id', $evCols, true)) {
-        $evIsCorrect = stats_first_col($evCols, ['is_correct']);
+    $sqlSolved = 'SELECT COUNT(*) FROM `question_attempt_events` WHERE `user_id` = ?';
+    $stmtSolved = $pdo->prepare($sqlSolved);
+    $stmtSolved->execute([$userId]);
+    $statistics['total_solved'] = (int)$stmtSolved->fetchColumn();
 
-        if ($evIsCorrect) {
-            $sql = 'SELECT '
-                . 'COALESCE(SUM(CASE WHEN ' . stats_q($evIsCorrect) . ' = 1 THEN 1 ELSE 0 END),0) AS total_correct, '
-                . 'COALESCE(SUM(CASE WHEN ' . stats_q($evIsCorrect) . ' = 0 THEN 1 ELSE 0 END),0) AS total_wrong '
-                . 'FROM `question_attempt_events` '
-                . 'WHERE `user_id` = ?';
+    $sqlCorrect = 'SELECT COUNT(*) FROM `question_attempt_events` WHERE `user_id` = ? AND `is_correct` = 1';
+    $stmtCorrect = $pdo->prepare($sqlCorrect);
+    $stmtCorrect->execute([$userId]);
+    $statistics['total_correct'] = (int)$stmtCorrect->fetchColumn();
 
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$userId]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $sqlWrong = 'SELECT COUNT(*) FROM `question_attempt_events` WHERE `user_id` = ? AND `is_correct` = 0';
+    $stmtWrong = $pdo->prepare($sqlWrong);
+    $stmtWrong->execute([$userId]);
+    $statistics['total_wrong'] = (int)$stmtWrong->fetchColumn();
 
-            $statistics['total_correct'] = (int)($row['total_correct'] ?? 0);
-            $statistics['total_wrong'] = (int)($row['total_wrong'] ?? 0);
-            $statistics['total_solved'] = $statistics['total_correct'] + $statistics['total_wrong'];
+    // İstenen kesin tutarlılık
+    $statistics['total_solved'] = $statistics['total_correct'] + $statistics['total_wrong'];
 
-            api_success('Dashboard istatistikleri alındı.', [
-                'statistics' => $statistics,
-            ]);
-        }
-    }
-
-    // Fallback: user_progress snapshot aggregate
-    $upCols = get_table_columns($pdo, 'user_progress');
-    if (!empty($upCols) && in_array('user_id', $upCols, true)) {
-        $upCorrectCount = stats_first_col($upCols, ['correct_answer_count', 'correct_count']);
-        $upWrongCount = stats_first_col($upCols, ['wrong_answer_count', 'wrong_count', 'incorrect_count']);
-        $upIsCorrect = stats_first_col($upCols, ['is_correct']);
-
-        $correctExpr = $upCorrectCount
-            ? 'COALESCE(SUM(' . stats_q($upCorrectCount) . '),0)'
-            : ($upIsCorrect ? 'COALESCE(SUM(CASE WHEN ' . stats_q($upIsCorrect) . ' = 1 THEN 1 ELSE 0 END),0)' : '0');
-
-        $wrongExpr = $upWrongCount
-            ? 'COALESCE(SUM(' . stats_q($upWrongCount) . '),0)'
-            : ($upIsCorrect ? 'COALESCE(SUM(CASE WHEN ' . stats_q($upIsCorrect) . ' = 0 THEN 1 ELSE 0 END),0)' : '0');
-
-        $sql = 'SELECT '
-            . $correctExpr . ' AS total_correct, '
-            . $wrongExpr . ' AS total_wrong '
-            . 'FROM `user_progress` '
-            . 'WHERE `user_id` = ?';
-
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$userId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
-
-        $statistics['total_correct'] = (int)($row['total_correct'] ?? 0);
-        $statistics['total_wrong'] = (int)($row['total_wrong'] ?? 0);
-        $statistics['total_solved'] = $statistics['total_correct'] + $statistics['total_wrong'];
+    // Debug: 0 durumunda query + user_id context logla
+    if ($statistics['total_solved'] === 0) {
+        stats_dbg('total_solved is zero', [
+            'user_id' => $userId,
+            'query_solved' => $sqlSolved,
+            'query_correct' => $sqlCorrect,
+            'query_wrong' => $sqlWrong,
+            'total_correct' => $statistics['total_correct'],
+            'total_wrong' => $statistics['total_wrong'],
+        ]);
     }
 
     api_success('Dashboard istatistikleri alındı.', [

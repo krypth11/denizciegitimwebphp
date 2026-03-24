@@ -20,6 +20,12 @@ function trends_first_col(array $columns, array $candidates): ?string
     return null;
 }
 
+function trends_dbg(string $message, array $context = []): void
+{
+    $suffix = $context ? ' | ' . json_encode($context, JSON_UNESCAPED_UNICODE) : '';
+    error_log('[dashboard.trends] ' . $message . $suffix);
+}
+
 /**
  * Son 7 günü (bugün dahil) en eski->en yeni döndürür.
  * İleride range desteği eklemek için tek noktadan genişletilebilir.
@@ -44,8 +50,9 @@ function trends_build_last_7_days_series(PDO $pdo, string $userId): array
         return $result;
     }
 
-    $evDate = trends_first_col($evCols, ['attempted_at', 'created_at']);
+    $evDate = trends_first_col($evCols, ['attempted_at']);
     if (!$evDate) {
+        trends_dbg('attempted_at column missing', ['user_id' => $userId]);
         $base = new DateTimeImmutable('today -6 day');
         for ($i = 0; $i < 7; $i++) {
             $d = $base->modify('+' . $i . ' day');
@@ -59,17 +66,15 @@ function trends_build_last_7_days_series(PDO $pdo, string $userId): array
     }
 
     $start = new DateTimeImmutable('today -6 day');
-    $endExclusive = new DateTimeImmutable('tomorrow');
 
     $sql = 'SELECT DATE(' . trends_q($evDate) . ') AS event_date, COUNT(*) AS solved_count '
         . 'FROM `question_attempt_events` '
         . 'WHERE `user_id` = ? '
-        . 'AND ' . trends_q($evDate) . ' >= ? '
-        . 'AND ' . trends_q($evDate) . ' < ? '
+        . 'AND ' . trends_q($evDate) . ' >= DATE_SUB(CURDATE(), INTERVAL 6 DAY) '
         . 'GROUP BY DATE(' . trends_q($evDate) . ')';
 
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$userId, $start->format('Y-m-d 00:00:00'), $endExclusive->format('Y-m-d 00:00:00')]);
+    $stmt->execute([$userId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     $map = [];
@@ -88,6 +93,18 @@ function trends_build_last_7_days_series(PDO $pdo, string $userId): array
             'label' => $d->format('d.m'),
             'solved_count' => (int)($map[$date] ?? 0),
         ];
+    }
+
+    $totalSolved = 0;
+    foreach ($result as $item) {
+        $totalSolved += (int)$item['solved_count'];
+    }
+    if ($totalSolved === 0) {
+        trends_dbg('last_7_days all zero', [
+            'user_id' => $userId,
+            'query' => $sql,
+            'start_date_sql' => 'DATE_SUB(CURDATE(), INTERVAL 6 DAY)',
+        ]);
     }
 
     return $result;
