@@ -679,10 +679,36 @@ function parseRawJson(text) {
 }
 
 $(document).ready(function() {
+    let isSavingAiQuestions = false;
+
     const appAlert = (title, message, type = 'info') => {
         if (typeof window.showAppAlert === 'function') {
             window.showAppAlert(title, message, type);
         }
+    };
+
+    const setSaveButtonState = (isLoading, text) => {
+        const $btn = $('#saveAiQuestionsBtn');
+        $btn.prop('disabled', !!isLoading).text(text);
+        isSavingAiQuestions = !!isLoading;
+    };
+
+    const closeAiPreviewModalSafely = () => {
+        const modalEl = document.getElementById('aiPreviewModal');
+        if (!modalEl) return;
+
+        const instance = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
+        instance.hide();
+
+        // Bootstrap state cleanup (edge-case: stuck backdrop/modal-open)
+        document.body.classList.remove('modal-open');
+        document.body.style.removeProperty('overflow');
+        document.body.style.removeProperty('padding-right');
+        document.querySelectorAll('.modal-backdrop').forEach((el) => el.remove());
+
+        modalEl.classList.remove('show');
+        modalEl.style.display = 'none';
+        modalEl.setAttribute('aria-hidden', 'true');
     };
 
     const appConfirm = (title, message, options = {}) => {
@@ -945,8 +971,11 @@ $(document).ready(function() {
     });
 
     $('#saveAiQuestionsBtn').on('click', async function(){
+        if (isSavingAiQuestions) return;
+
         const approved = generatedQuestions.filter(q => q.status === 'approved');
         if(!approved.length) return appAlert('Uyarı', 'Kaydedilecek onaylı soru yok!', 'warning');
+        const idleButtonText = approved.length + ' Soruyu Kaydet';
 
         const normalizedApproved = approved.map(q => {
             const item = { ...q };
@@ -965,7 +994,10 @@ $(document).ready(function() {
 
         console.log('SAVE PAYLOAD', normalizedApproved);
 
-        $('#saveAiQuestionsBtn').prop('disabled', true).text('Kaydediliyor...');
+        setSaveButtonState(true, 'Kaydediliyor...');
+        let shouldCloseModal = false;
+        let shouldReload = false;
+
         $.ajax({
             url: '../ajax/save-ai-questions.php',
             method: 'POST',
@@ -985,7 +1017,8 @@ $(document).ready(function() {
                     msgParts.push('Backend Response Detayı:', detailsHtml);
                     const msg = msgParts.filter(Boolean).join('<br><br>').replace(/\n/g, '<br>');
                     appAlert('Başarılı', msg, 'success');
-                    // DEBUG AMAÇLI: response görünürlüğü için geçici olarak otomatik reload kapatıldı.
+                    shouldCloseModal = true;
+                    shouldReload = true;
                     return;
                 }
 
@@ -994,7 +1027,6 @@ $(document).ready(function() {
                 errParts.push('Backend Response Detayı:', detailsHtml);
                 const errMsg = errParts.filter(Boolean).join('<br><br>').replace(/\n/g, '<br>');
                 appAlert('Hata', errMsg, 'error');
-                $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
             },
             error: function(xhr){
                 console.log('SAVE RESPONSE ERROR', xhr.status, xhr.responseText);
@@ -1012,7 +1044,17 @@ $(document).ready(function() {
                 const errorBody = parsed ? `<pre style="text-align:left;max-height:360px;overflow:auto;white-space:pre-wrap;">${toPrettyJson(parsed)}</pre>` : `<pre style="text-align:left;max-height:360px;overflow:auto;white-space:pre-wrap;">${String(raw)}</pre>`;
 
                 appAlert('Hata', `Kaydetme sırasında bir hata oluştu.<br><br>HTTP: ${xhr.status}<br><br>Raw Response:<br>${errorBody}`, 'error');
-                $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
+            },
+            complete: function(){
+                setSaveButtonState(false, idleButtonText);
+
+                if (shouldCloseModal) {
+                    closeAiPreviewModalSafely();
+                }
+
+                if (shouldReload) {
+                    setTimeout(() => location.reload(), 600);
+                }
             }
         });
     });
