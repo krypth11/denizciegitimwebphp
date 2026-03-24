@@ -1,9 +1,51 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 
-$GLOBALS['__save_ai_response_sent__'] = false;
+ob_start();
 
-register_shutdown_function(static function () {
+$GLOBALS['__save_ai_response_sent__'] = false;
+$GLOBALS['__save_ai_guard_handling__'] = false;
+
+$saveAiEmitJson = static function (array $payload, int $statusCode = 500): void {
+    if (!headers_sent()) {
+        http_response_code($statusCode);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+
+    $GLOBALS['__save_ai_response_sent__'] = true;
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+};
+
+set_error_handler(static function (int $severity, string $message, string $file, int $line): bool {
+    if (!(error_reporting() & $severity)) {
+        return false;
+    }
+
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+
+set_exception_handler(static function (Throwable $e) use ($saveAiEmitJson): void {
+    if (!empty($GLOBALS['__save_ai_guard_handling__'])) {
+        return;
+    }
+
+    $GLOBALS['__save_ai_guard_handling__'] = true;
+    $saveAiEmitJson([
+        'success' => false,
+        'debug_version' => 'SAVE-AI-FATAL-DEBUG-1',
+        'exception' => true,
+        'message' => $e->getMessage(),
+        'file' => $e->getFile(),
+        'line' => $e->getLine(),
+    ], 500);
+    exit;
+});
+
+register_shutdown_function(static function () use ($saveAiEmitJson): void {
     $last = error_get_last();
     if (!$last) {
         return;
@@ -14,22 +56,27 @@ register_shutdown_function(static function () {
         return;
     }
 
-    if (!empty($GLOBALS['__save_ai_response_sent__'])) {
+    if (!empty($GLOBALS['__save_ai_response_sent__']) || !empty($GLOBALS['__save_ai_guard_handling__'])) {
         return;
     }
 
-    if (!headers_sent()) {
-        http_response_code(500);
-        header('Content-Type: application/json; charset=utf-8');
+    $GLOBALS['__save_ai_guard_handling__'] = true;
+
+    $outputBuffer = '';
+    if (ob_get_level() > 0) {
+        $outputBuffer = (string)ob_get_contents();
     }
 
-    echo json_encode([
+    $saveAiEmitJson([
         'success' => false,
-        'message' => 'Fatal error oluştu, boş response engellendi.',
-        'debug_version' => 'SAVE-AI-E-DEBUG-1',
-        'exception_message' => $last['message'] ?? 'fatal_error',
-        'exception_code' => 0,
-    ], JSON_UNESCAPED_UNICODE);
+        'debug_version' => 'SAVE-AI-FATAL-DEBUG-1',
+        'fatal' => true,
+        'type' => $last['type'] ?? 0,
+        'message' => $last['message'] ?? 'fatal_error',
+        'file' => $last['file'] ?? null,
+        'line' => $last['line'] ?? null,
+        'output_buffer' => $outputBuffer,
+    ], 500);
 });
 
 require_once '../includes/config.php';
