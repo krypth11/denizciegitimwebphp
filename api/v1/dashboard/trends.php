@@ -26,6 +26,15 @@ function trends_dbg(string $message, array $context = []): void
     error_log('[dashboard.trends] ' . $message . $suffix);
 }
 
+function trends_rate(int $correct, int $wrong): float
+{
+    $den = $correct + $wrong;
+    if ($den <= 0) {
+        return 0.0;
+    }
+    return round(($correct / $den) * 100, 2);
+}
+
 /**
  * Son 7 günü (bugün dahil) en eski->en yeni döndürür.
  * İleride range desteği eklemek için tek noktadan genişletilebilir.
@@ -114,8 +123,44 @@ try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
 
+    $activeDaysLast7 = 0;
+    $successRateLast7 = 0.0;
+    $studyDurationLast7Seconds = 0;
+
+    $sqlEventLast7 = 'SELECT '
+        . 'COALESCE(SUM(CASE WHEN `is_correct` = 1 THEN 1 ELSE 0 END),0) AS correct_last_7, '
+        . 'COALESCE(SUM(CASE WHEN `is_correct` = 0 THEN 1 ELSE 0 END),0) AS wrong_last_7, '
+        . 'COUNT(DISTINCT DATE(`attempted_at`)) AS active_days_last_7 '
+        . 'FROM `question_attempt_events` '
+        . 'WHERE `user_id` = ? '
+        . 'AND `attempted_at` >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)';
+
+    $stmtEventLast7 = $pdo->prepare($sqlEventLast7);
+    $stmtEventLast7->execute([$userId]);
+    $rowEventLast7 = $stmtEventLast7->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $correctLast7 = (int)($rowEventLast7['correct_last_7'] ?? 0);
+    $wrongLast7 = (int)($rowEventLast7['wrong_last_7'] ?? 0);
+    $activeDaysLast7 = (int)($rowEventLast7['active_days_last_7'] ?? 0);
+    $successRateLast7 = (float)trends_rate($correctLast7, $wrongLast7);
+
+    $ssCols = get_table_columns($pdo, 'study_sessions');
+    if (!empty($ssCols) && in_array('user_id', $ssCols, true) && in_array('duration_seconds', $ssCols, true) && in_array('created_at', $ssCols, true)) {
+        $sqlDurationLast7 = 'SELECT COALESCE(SUM(`duration_seconds`),0) '
+            . 'FROM `study_sessions` '
+            . 'WHERE `user_id` = ? '
+            . 'AND `created_at` >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)';
+
+        $stmtDurationLast7 = $pdo->prepare($sqlDurationLast7);
+        $stmtDurationLast7->execute([$userId]);
+        $studyDurationLast7Seconds = (int)$stmtDurationLast7->fetchColumn();
+    }
+
     $trends = [
         'last_7_days' => trends_build_last_7_days_series($pdo, $userId),
+        'study_duration_last_7_seconds' => $studyDurationLast7Seconds,
+        'active_days_last_7' => $activeDaysLast7,
+        'success_rate_last_7' => $successRateLast7,
     ];
 
     api_success('Dashboard trend verisi alındı.', [
