@@ -103,9 +103,55 @@ function mc_get_maritime_english_schema(PDO $pdo): array
             'option_b' => mc_pick_column($qCols, ['option_b', 'answer_b', 'choice_b'], false),
             'option_c' => mc_pick_column($qCols, ['option_c', 'answer_c', 'choice_c'], false),
             'option_d' => mc_pick_column($qCols, ['option_d', 'answer_d', 'choice_d'], false),
+            'option_e' => mc_pick_column($qCols, ['option_e', 'answer_e', 'choice_e', 'e_option'], false),
             'correct_answer' => mc_pick_column($qCols, ['correct_answer', 'correct_option', 'answer'], false),
             'explanation' => mc_pick_column($qCols, ['explanation', 'solution', 'description'], false),
             'created_at' => mc_pick_column($qCols, ['created_at', 'created_on'], false),
         ],
+    ];
+}
+
+function mc_is_maritime_english_source(string $source): bool
+{
+    $normalized = strtolower(trim($source));
+    return in_array($normalized, ['maritime_english', 'maritime-english', 'me', 'me_quiz', 'maritime_english_quiz'], true);
+}
+
+function mc_get_maritime_english_question_meta(PDO $pdo, string $questionId): array
+{
+    $schema = mc_get_maritime_english_schema($pdo)['questions'];
+
+    $select = [
+        mc_q($schema['id']) . ' AS id',
+        mc_q($schema['topic_id']) . ' AS topic_id',
+        ($schema['correct_answer'] ? mc_q($schema['correct_answer']) : "''") . ' AS correct_answer',
+        ($schema['option_e'] ? mc_q($schema['option_e']) : 'NULL') . ' AS option_e',
+    ];
+
+    $sql = 'SELECT ' . implode(', ', $select)
+        . ' FROM ' . mc_q($schema['table'])
+        . ' WHERE ' . mc_q($schema['id']) . ' = ? LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$questionId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$row) {
+        return [
+            'exists' => false,
+            'correct_answer' => null,
+            'option_e' => null,
+            'topic_id' => null,
+        ];
+    }
+
+    $correct = strtoupper(trim((string)($row['correct_answer'] ?? '')));
+    $optionE = trim((string)($row['option_e'] ?? ''));
+
+    return [
+        'exists' => true,
+        'correct_answer' => ($correct !== '' ? $correct : null),
+        'option_e' => ($optionE !== '' ? $optionE : null),
+        'topic_id' => $row['topic_id'] ?? null,
     ];
 }

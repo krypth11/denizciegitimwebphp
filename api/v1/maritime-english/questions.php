@@ -19,6 +19,7 @@ try {
         . ($schema['option_b'] ? mc_q($schema['option_b']) : "''") . ' AS option_b, '
         . ($schema['option_c'] ? mc_q($schema['option_c']) : "''") . ' AS option_c, '
         . ($schema['option_d'] ? mc_q($schema['option_d']) : "''") . ' AS option_d, '
+        . ($schema['option_e'] ? mc_q($schema['option_e']) : 'NULL') . ' AS option_e, '
         . ($schema['correct_answer'] ? mc_q($schema['correct_answer']) : "''") . ' AS correct_answer, '
         . ($schema['explanation'] ? mc_q($schema['explanation']) : "''") . ' AS explanation, '
         . ($schema['created_at'] ? mc_q($schema['created_at']) : 'NULL') . ' AS created_at '
@@ -30,6 +31,13 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$topicId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $rows = array_map(static function (array $row): array {
+        $row['correct_answer'] = strtoupper(trim((string)($row['correct_answer'] ?? '')));
+        $optionE = trim((string)($row['option_e'] ?? ''));
+        $row['option_e'] = ($optionE !== '') ? $optionE : null;
+        return $row;
+    }, $rows);
 
     api_success('Maritime english soru listesi getirildi.', [
         'questions' => $rows,
