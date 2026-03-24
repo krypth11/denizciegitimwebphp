@@ -486,7 +486,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
             option_b: options.B,
             option_c: options.C,
             option_d: options.D,
-            option_e: options.E || '',
+            option_e: options.E ?? null,
             correct_answer: correctAnswer,
             explanation: normalizeText(explanationLines.join(' ')),
             question_type: selectedType,
@@ -639,6 +639,43 @@ function formatDebugSummary(resp) {
     const eWithOptionECount = Number(resp?.debug_e_with_option_e_count || 0);
 
     return `Debug Version: ${debugVersion}\nAlınan Soru: ${receivedCount}\nE Cevaplı: ${eAnswerCount}\nE + option_e dolu: ${eWithOptionECount}`;
+}
+
+function toPrettyJson(value) {
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch (e) {
+        return String(value);
+    }
+}
+
+function formatSaveResponseDetails(resp) {
+    const detail = {
+        success: !!resp?.success,
+        message: resp?.message ?? null,
+        saved_count: resp?.saved_count ?? null,
+        skipped_count: resp?.skipped_count ?? null,
+        skipped_reasons: resp?.skipped_reasons ?? null,
+        skipped_samples: resp?.skipped_samples ?? null,
+        row_results: resp?.row_results ?? null,
+        exception_message: resp?.exception_message ?? null,
+        exception_code: resp?.exception_code ?? null,
+        debug_version: resp?.debug_version ?? null,
+        debug_e_answer_count: resp?.debug_e_answer_count ?? null,
+        debug_e_saved_count: resp?.debug_e_saved_count ?? null,
+        debug_e_skipped_count: resp?.debug_e_skipped_count ?? null,
+    };
+
+    return `<pre style="text-align:left;max-height:360px;overflow:auto;white-space:pre-wrap;">${toPrettyJson(detail)}</pre>`;
+}
+
+function parseRawJson(text) {
+    if (!text || typeof text !== 'string') return null;
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        return null;
+    }
 }
 
 $(document).ready(function() {
@@ -913,8 +950,8 @@ $(document).ready(function() {
 
         const normalizedApproved = approved.map(q => {
             const item = { ...q };
-            if (item.option_e === '' && item.correct_answer !== 'E') {
-            item.option_e = null;
+            if (item.option_e === '') {
+                item.option_e = null;
             }
             return item;
         });
@@ -937,25 +974,31 @@ $(document).ready(function() {
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
             data: { questions: JSON.stringify(normalizedApproved) },
             success: function(r){
+                console.log('SAVE RESPONSE SUCCESS', r);
                 const skipSummary = formatSkipSummary(r);
                 const debugSummary = formatDebugSummary(r);
+                const detailsHtml = formatSaveResponseDetails(r);
 
                 if(r.success){
                     const msgParts = [r.message, debugSummary];
                     if (skipSummary) msgParts.push(skipSummary);
+                    msgParts.push('Backend Response Detayı:', detailsHtml);
                     const msg = msgParts.filter(Boolean).join('<br><br>').replace(/\n/g, '<br>');
                     appAlert('Başarılı', msg, 'success');
-                    setTimeout(() => location.reload(), 350);
+                    // DEBUG AMAÇLI: response görünürlüğü için geçici olarak otomatik reload kapatıldı.
                     return;
                 }
 
                 const errParts = [r.message, debugSummary];
                 if (skipSummary) errParts.push(skipSummary);
+                errParts.push('Backend Response Detayı:', detailsHtml);
                 const errMsg = errParts.filter(Boolean).join('<br><br>').replace(/\n/g, '<br>');
                 appAlert('Hata', errMsg, 'error');
                 $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
             },
             error: function(xhr){
+                console.log('SAVE RESPONSE ERROR', xhr.status, xhr.responseText);
+
                 if (xhr.status === 401) {
                     appAlert('Oturum', 'Oturum süresi dolmuş görünüyor. Lütfen tekrar giriş yapın.', 'warning');
                     setTimeout(() => {
@@ -964,7 +1007,11 @@ $(document).ready(function() {
                     return;
                 }
 
-                appAlert('Hata', 'Kaydetme sırasında bir hata oluştu.', 'error');
+                const raw = xhr.responseText || '(boş response)';
+                const parsed = parseRawJson(raw);
+                const errorBody = parsed ? `<pre style="text-align:left;max-height:360px;overflow:auto;white-space:pre-wrap;">${toPrettyJson(parsed)}</pre>` : `<pre style="text-align:left;max-height:360px;overflow:auto;white-space:pre-wrap;">${String(raw)}</pre>`;
+
+                appAlert('Hata', `Kaydetme sırasında bir hata oluştu.<br><br>HTTP: ${xhr.status}<br><br>Raw Response:<br>${errorBody}`, 'error');
                 $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
             }
         });
