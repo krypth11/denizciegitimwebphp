@@ -56,7 +56,6 @@ try {
     $qCols = get_table_columns($pdo, 'questions');
     $cCols = get_table_columns($pdo, 'courses');
     $qualCols = get_table_columns($pdo, 'qualifications');
-    $evCols = get_table_columns($pdo, 'question_attempt_events');
 
     if (empty($upCols) || empty($qCols) || !in_array('user_id', $upCols, true)) {
         api_success('Dashboard detay istatistikleri alındı.', ['details' => $details]);
@@ -274,45 +273,42 @@ try {
         }
     }
 
-    // consistency from event table when available
-    if (!empty($evCols) && in_array('user_id', $evCols, true)) {
-        $evDate = dd_first($evCols, ['attempted_at', 'created_at']);
-        if ($evDate) {
-            $sql = 'SELECT DISTINCT DATE(' . dd_q($evDate) . ') AS d FROM `question_attempt_events` WHERE `user_id` = ? ORDER BY d DESC';
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$userId]);
-            $days = array_values(array_filter(array_map(static fn(array $r): string => (string)($r['d'] ?? ''), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [])));
+    // consistency (all-time snapshot kaynağı: user_progress tarih kolonları)
+    if ($upDateCol) {
+        $sql = 'SELECT DISTINCT DATE(' . dd_q($upDateCol) . ') AS d FROM `user_progress` WHERE `user_id` = ? ORDER BY d DESC';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $days = array_values(array_filter(array_map(static fn(array $r): string => (string)($r['d'] ?? ''), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [])));
 
-            $set = array_fill_keys($days, true);
-            $today = new DateTimeImmutable('today');
-            $last7 = 0;
-            $last30 = 0;
+        $set = array_fill_keys($days, true);
+        $today = new DateTimeImmutable('today');
+        $last7 = 0;
+        $last30 = 0;
 
-            for ($i = 0; $i < 30; $i++) {
-                $d = $today->modify('-' . $i . ' day')->format('Y-m-d');
-                if (isset($set[$d])) {
-                    if ($i < 7) {
-                        $last7++;
-                    }
-                    $last30++;
+        for ($i = 0; $i < 30; $i++) {
+            $d = $today->modify('-' . $i . ' day')->format('Y-m-d');
+            if (isset($set[$d])) {
+                if ($i < 7) {
+                    $last7++;
                 }
+                $last30++;
             }
-
-            $streak = 0;
-            if (!empty($days)) {
-                $cursor = new DateTimeImmutable($days[0]);
-                while (isset($set[$cursor->format('Y-m-d')])) {
-                    $streak++;
-                    $cursor = $cursor->modify('-1 day');
-                }
-            }
-
-            $details['consistency'] = [
-                'current_streak_days' => $streak,
-                'active_days_last_7' => $last7,
-                'active_days_last_30' => $last30,
-            ];
         }
+
+        $streak = 0;
+        if (!empty($days)) {
+            $cursor = new DateTimeImmutable($days[0]);
+            while (isset($set[$cursor->format('Y-m-d')])) {
+                $streak++;
+                $cursor = $cursor->modify('-1 day');
+            }
+        }
+
+        $details['consistency'] = [
+            'current_streak_days' => $streak,
+            'active_days_last_7' => $last7,
+            'active_days_last_30' => $last30,
+        ];
     }
 
     api_success('Dashboard detay istatistikleri alındı.', [

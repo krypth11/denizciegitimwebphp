@@ -57,7 +57,6 @@ try {
     $qCols = get_table_columns($pdo, 'questions');
     $ssCols = get_table_columns($pdo, 'study_sessions');
     $dqCols = get_table_columns($pdo, 'daily_quiz_progress');
-    $evCols = get_table_columns($pdo, 'question_attempt_events');
 
     if (!empty($qCols)) {
         $statistics['total_question_pool'] = (int)$pdo->query('SELECT COUNT(*) FROM `questions`')->fetchColumn();
@@ -146,19 +145,6 @@ try {
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$userId]);
             $statistics['completed_daily_quiz_today'] = ((int)$stmt->fetchColumn()) > 0;
-        }
-    }
-
-    if (!empty($evCols) && in_array('user_id', $evCols, true)) {
-        $evDate = ds_first($evCols, ['attempted_at', 'created_at']);
-        if ($evDate) {
-            $sql = 'SELECT MAX(' . ds_q($evDate) . ') FROM `question_attempt_events` WHERE `user_id` = ?';
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$userId]);
-            $evLast = $stmt->fetchColumn();
-            if ($evLast && (!$statistics['last_activity_at'] || strtotime((string)$evLast) > strtotime((string)$statistics['last_activity_at']))) {
-                $statistics['last_activity_at'] = $evLast;
-            }
         }
     }
 
