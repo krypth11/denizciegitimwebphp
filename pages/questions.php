@@ -486,7 +486,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
             option_b: options.B,
             option_c: options.C,
             option_d: options.D,
-            option_e: options.E ?? null,
+            option_e: options.E || '',
             correct_answer: correctAnswer,
             explanation: normalizeText(explanationLines.join(' ')),
             question_type: selectedType,
@@ -913,8 +913,8 @@ $(document).ready(function() {
 
         const normalizedApproved = approved.map(q => {
             const item = { ...q };
-            if (item.option_e === '') {
-                item.option_e = null;
+            if (item.option_e === '' && item.correct_answer !== 'E') {
+            item.option_e = null;
             }
             return item;
         });
