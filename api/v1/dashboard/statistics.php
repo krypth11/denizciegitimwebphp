@@ -49,6 +49,7 @@ try {
         'success_rate_last_7' => 0.0,
         'qualification_stats' => [],
         'course_stats' => [],
+        'stats_rows' => [],
     ];
 
     $sqlSolved = 'SELECT COUNT(*) FROM `question_attempt_events` WHERE `user_id` = ?';
@@ -181,6 +182,40 @@ try {
                 'course_name' => (string)($row['course_name'] ?? ''),
                 'qualification_id' => (string)($row['qualification_id'] ?? ''),
                 'qualification_name' => (string)($row['qualification_name'] ?? ''),
+                'total_solved' => $totalSolved,
+                'total_correct' => $totalCorrect,
+                'total_wrong' => $totalWrong,
+                'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+            ];
+        }
+
+        // Flutter için sade tek liste (qualification + course)
+        $sqlStatsRows = 'SELECT '
+            . 'qf.' . stats_q($qualNameCol) . ' AS qualification_name, '
+            . 'c.' . stats_q($cNameCol) . ' AS course_name, '
+            . 'COUNT(*) AS total_solved, '
+            . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
+            . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
+            . 'FROM `question_attempt_events` e '
+            . 'INNER JOIN `questions` q ON e.`question_id` = q.' . stats_q($qIdCol) . ' '
+            . 'INNER JOIN `courses` c ON q.' . stats_q($qCourseIdCol) . ' = c.' . stats_q($cIdCol) . ' '
+            . 'INNER JOIN `qualifications` qf ON c.' . stats_q($cQualificationIdCol) . ' = qf.' . stats_q($qualIdCol) . ' '
+            . 'WHERE e.`user_id` = ? '
+            . 'GROUP BY qf.' . stats_q($qualNameCol) . ', c.' . stats_q($cNameCol) . ' '
+            . 'ORDER BY qualification_name ASC, course_name ASC';
+
+        $stmtStatsRows = $pdo->prepare($sqlStatsRows);
+        $stmtStatsRows->execute([$userId]);
+        $rowsStatsRows = $stmtStatsRows->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        foreach ($rowsStatsRows as $row) {
+            $totalSolved = (int)($row['total_solved'] ?? 0);
+            $totalCorrect = (int)($row['total_correct'] ?? 0);
+            $totalWrong = (int)($row['total_wrong'] ?? 0);
+
+            $statistics['stats_rows'][] = [
+                'qualification_name' => (string)($row['qualification_name'] ?? ''),
+                'course_name' => (string)($row['course_name'] ?? ''),
                 'total_solved' => $totalSolved,
                 'total_correct' => $totalCorrect,
                 'total_wrong' => $totalWrong,
