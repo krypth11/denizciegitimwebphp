@@ -35,6 +35,24 @@ function stats_rate(int $correct, int $wrong): float
     return round(($correct / $den) * 100, 2);
 }
 
+function stats_normalize_source(?string $source): string
+{
+    $normalized = strtolower(trim((string)$source));
+    if ($normalized === '' || $normalized === 'study') {
+        return 'study';
+    }
+
+    if (in_array($normalized, ['maritime_english', 'maritime-english', 'me', 'me_quiz', 'maritime_english_quiz'], true)) {
+        return 'maritime_english';
+    }
+
+    if (in_array($normalized, ['daily_quiz', 'daily-quiz', 'daily quiz'], true)) {
+        return 'daily_quiz';
+    }
+
+    return str_replace(' ', '_', $normalized);
+}
+
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
@@ -47,6 +65,7 @@ try {
         'total_sessions' => 0,
         'active_days_last_7' => 0,
         'success_rate_last_7' => 0.0,
+        'source_stats' => [],
         'qualification_stats' => [],
         'course_stats' => [],
         'stats_rows' => [],
@@ -66,6 +85,65 @@ try {
     $stmtWrong = $pdo->prepare($sqlWrong);
     $stmtWrong->execute([$userId]);
     $statistics['total_wrong'] = (int)$stmtWrong->fetchColumn();
+
+    $sourceMap = [
+        'study' => [
+            'source' => 'study',
+            'total_solved' => 0,
+            'total_correct' => 0,
+            'total_wrong' => 0,
+            'success_rate' => 0.0,
+        ],
+        'maritime_english' => [
+            'source' => 'maritime_english',
+            'total_solved' => 0,
+            'total_correct' => 0,
+            'total_wrong' => 0,
+            'success_rate' => 0.0,
+        ],
+        'daily_quiz' => [
+            'source' => 'daily_quiz',
+            'total_solved' => 0,
+            'total_correct' => 0,
+            'total_wrong' => 0,
+            'success_rate' => 0.0,
+        ],
+    ];
+
+    $sqlSourceStats = 'SELECT '
+        . 'LOWER(TRIM(COALESCE(`source`, ""))) AS source_raw, '
+        . 'COUNT(*) AS total_solved, '
+        . 'SUM(CASE WHEN `is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
+        . 'SUM(CASE WHEN `is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
+        . 'FROM `question_attempt_events` '
+        . 'WHERE `user_id` = ? '
+        . 'GROUP BY LOWER(TRIM(COALESCE(`source`, "")))';
+    $stmtSourceStats = $pdo->prepare($sqlSourceStats);
+    $stmtSourceStats->execute([$userId]);
+    $rowsSourceStats = $stmtSourceStats->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    foreach ($rowsSourceStats as $row) {
+        $sourceKey = stats_normalize_source((string)($row['source_raw'] ?? ''));
+        if (!isset($sourceMap[$sourceKey])) {
+            $sourceMap[$sourceKey] = [
+                'source' => $sourceKey,
+                'total_solved' => 0,
+                'total_correct' => 0,
+                'total_wrong' => 0,
+                'success_rate' => 0.0,
+            ];
+        }
+
+        $sourceMap[$sourceKey]['total_solved'] += (int)($row['total_solved'] ?? 0);
+        $sourceMap[$sourceKey]['total_correct'] += (int)($row['total_correct'] ?? 0);
+        $sourceMap[$sourceKey]['total_wrong'] += (int)($row['total_wrong'] ?? 0);
+    }
+
+    foreach ($sourceMap as $key => $item) {
+        $sourceMap[$key]['success_rate'] = stats_rate((int)$item['total_correct'], (int)$item['total_wrong']);
+    }
+
+    $statistics['source_stats'] = array_values($sourceMap);
 
     // İstenen kesin tutarlılık
     $statistics['total_solved'] = $statistics['total_correct'] + $statistics['total_wrong'];
@@ -109,6 +187,8 @@ try {
     $qCols = get_table_columns($pdo, 'questions');
     $cCols = get_table_columns($pdo, 'courses');
     $qualCols = get_table_columns($pdo, 'qualifications');
+    $meqCols = get_table_columns($pdo, 'maritime_english_questions');
+    $metCols = get_table_columns($pdo, 'maritime_english_topics');
 
     $qIdCol = stats_first_col($qCols, ['id']);
     $qCourseIdCol = stats_first_col($qCols, ['course_id']);
@@ -117,6 +197,11 @@ try {
     $cQualificationIdCol = stats_first_col($cCols, ['qualification_id']);
     $qualIdCol = stats_first_col($qualCols, ['id']);
     $qualNameCol = stats_first_col($qualCols, ['name', 'title']);
+
+    $meqIdCol = stats_first_col($meqCols, ['id', 'question_id']);
+    $meqTopicIdCol = stats_first_col($meqCols, ['topic_id', 'maritime_english_topic_id']);
+    $metIdCol = stats_first_col($metCols, ['id', 'topic_id']);
+    $metNameCol = stats_first_col($metCols, ['name', 'title', 'topic_name']);
 
     if ($qIdCol && $qCourseIdCol && $cIdCol && $cNameCol && $cQualificationIdCol && $qualIdCol && $qualNameCol) {
         $sqlQualificationStats = 'SELECT '
@@ -220,6 +305,71 @@ try {
                 'total_correct' => $totalCorrect,
                 'total_wrong' => $totalWrong,
                 'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+            ];
+        }
+    }
+
+    if ($meqIdCol && $meqTopicIdCol && $metIdCol && $metNameCol) {
+        $sqlMeCourseStats = 'SELECT '
+            . 't.' . stats_q($metIdCol) . ' AS topic_id, '
+            . 't.' . stats_q($metNameCol) . ' AS topic_name, '
+            . 'COUNT(*) AS total_solved, '
+            . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
+            . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
+            . 'FROM `question_attempt_events` e '
+            . 'INNER JOIN `maritime_english_questions` meq ON e.`question_id` = meq.' . stats_q($meqIdCol) . ' '
+            . 'INNER JOIN `maritime_english_topics` t ON meq.' . stats_q($meqTopicIdCol) . ' = t.' . stats_q($metIdCol) . ' '
+            . 'WHERE e.`user_id` = ? '
+            . 'AND LOWER(TRIM(COALESCE(e.`source`, ""))) IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz") '
+            . 'GROUP BY t.' . stats_q($metIdCol) . ', t.' . stats_q($metNameCol) . ' '
+            . 'ORDER BY total_solved DESC, topic_name ASC';
+
+        $stmtMeCourseStats = $pdo->prepare($sqlMeCourseStats);
+        $stmtMeCourseStats->execute([$userId]);
+        $rowsMeCourseStats = $stmtMeCourseStats->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $meTotalSolved = 0;
+        $meTotalCorrect = 0;
+        $meTotalWrong = 0;
+
+        foreach ($rowsMeCourseStats as $row) {
+            $totalSolved = (int)($row['total_solved'] ?? 0);
+            $totalCorrect = (int)($row['total_correct'] ?? 0);
+            $totalWrong = (int)($row['total_wrong'] ?? 0);
+
+            $meTotalSolved += $totalSolved;
+            $meTotalCorrect += $totalCorrect;
+            $meTotalWrong += $totalWrong;
+
+            $statistics['course_stats'][] = [
+                'course_id' => (string)($row['topic_id'] ?? ''),
+                'course_name' => (string)($row['topic_name'] ?? ''),
+                'qualification_id' => 'maritime_english',
+                'qualification_name' => 'Maritime English',
+                'total_solved' => $totalSolved,
+                'total_correct' => $totalCorrect,
+                'total_wrong' => $totalWrong,
+                'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+            ];
+
+            $statistics['stats_rows'][] = [
+                'qualification_name' => 'Maritime English',
+                'course_name' => (string)($row['topic_name'] ?? ''),
+                'total_solved' => $totalSolved,
+                'total_correct' => $totalCorrect,
+                'total_wrong' => $totalWrong,
+                'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+            ];
+        }
+
+        if ($meTotalSolved > 0) {
+            $statistics['qualification_stats'][] = [
+                'qualification_id' => 'maritime_english',
+                'qualification_name' => 'Maritime English',
+                'total_solved' => $meTotalSolved,
+                'total_correct' => $meTotalCorrect,
+                'total_wrong' => $meTotalWrong,
+                'success_rate' => $meTotalSolved > 0 ? (float)round(($meTotalCorrect / $meTotalSolved) * 100, 2) : 0.0,
             ];
         }
     }
