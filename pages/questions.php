@@ -443,7 +443,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
                 continue;
             }
 
-            const optMatch = line.match(/^([ABCDE])\s*[\)\.\-:]\s*(.*)$/i);
+            const optMatch = line.match(/^[\s\-–—•\*]*([ABCDE])\s*[\)\.\-:]?\s*(.*)$/i);
             if (optMatch) {
                 currentOption = optMatch[1].toUpperCase();
                 let optValue = optMatch[2] || '';

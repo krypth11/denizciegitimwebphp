@@ -98,15 +98,36 @@ try {
             continue;
         }
 
-        $optionE = trim((string)($q['option_e'] ?? ''));
-        $correctAnswer = strtoupper(trim((string)($q['correct_answer'] ?? '')));
+        $optionERaw = $q['option_e'] ?? ($q['optionE'] ?? ($q['e_option'] ?? null));
+        if (is_array($optionERaw) || is_object($optionERaw)) {
+            $optionERaw = null;
+        }
+        $optionE = is_string($optionERaw) || is_numeric($optionERaw)
+            ? trim((string)$optionERaw)
+            : null;
+        if ($optionE === '') {
+            $optionE = null;
+        }
+
+        $correctRaw = $q['correct_answer'] ?? ($q['correctAnswer'] ?? '');
+        $correctAnswer = strtoupper(trim((string)$correctRaw));
+
+        if ($correctAnswer === 'E' && $optionE === null && isset($q['options']) && is_array($q['options'])) {
+            $fallbackOptionE = $q['options']['E'] ?? ($q['options']['e'] ?? null);
+            if (is_string($fallbackOptionE) || is_numeric($fallbackOptionE)) {
+                $fallbackOptionE = trim((string)$fallbackOptionE);
+                if ($fallbackOptionE !== '') {
+                    $optionE = $fallbackOptionE;
+                }
+            }
+        }
 
         if (!in_array($correctAnswer, ['A', 'B', 'C', 'D', 'E'], true)) {
             $add_skip('invalid_correct_answer', $q);
             continue;
         }
 
-        if ($correctAnswer === 'E' && $optionE === '') {
+        if ($correctAnswer === 'E' && $optionE === null) {
             $add_skip('correct_answer_e_without_option_e', $q);
             continue;
         }
@@ -135,7 +156,7 @@ try {
                     $q['option_b'],
                     $q['option_c'],
                     $q['option_d'],
-                    ($optionE !== '' ? $optionE : null),
+                    $optionE,
                     $correctAnswer,
                     $q['explanation'] ?? '',
                 ]);
