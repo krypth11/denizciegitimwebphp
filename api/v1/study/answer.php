@@ -36,6 +36,12 @@ try {
         $sessionId = null;
     }
 
+    $allowedSources = ['study', 'daily_quiz', 'exam'];
+    $source = strtolower(trim((string)($payload['source'] ?? 'study')));
+    if (!in_array($source, $allowedSources, true)) {
+        $source = 'study';
+    }
+
     $computedIsCorrect = false;
     if (!empty($questionMeta['correct_answer'])) {
         $computedIsCorrect = ($selectedAnswer === strtoupper((string)$questionMeta['correct_answer']));
@@ -54,7 +60,7 @@ try {
             'qualification_id' => $questionMeta['qualification_id'] ?? null,
             'topic_id' => $questionMeta['topic_id'] ?? null,
             'session_id' => $sessionId,
-            'source' => 'study',
+            'source' => $source,
             'selected_answer' => $selectedAnswer,
             'is_correct' => $computedIsCorrect,
         ]);
