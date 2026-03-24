@@ -47,6 +47,8 @@ try {
         'total_sessions' => 0,
         'active_days_last_7' => 0,
         'success_rate_last_7' => 0.0,
+        'qualification_stats' => [],
+        'course_stats' => [],
     ];
 
     $sqlSolved = 'SELECT COUNT(*) FROM `question_attempt_events` WHERE `user_id` = ?';
@@ -100,6 +102,91 @@ try {
 
         $statistics['total_sessions'] = (int)($rowSessions['total_sessions'] ?? 0);
         $statistics['total_study_duration_seconds'] = (int)($rowSessions['total_study_duration_seconds'] ?? 0);
+    }
+
+    // Qualification/Course bazlı istatistikler (event + joins)
+    $qCols = get_table_columns($pdo, 'questions');
+    $cCols = get_table_columns($pdo, 'courses');
+    $qualCols = get_table_columns($pdo, 'qualifications');
+
+    $qIdCol = stats_first_col($qCols, ['id']);
+    $qCourseIdCol = stats_first_col($qCols, ['course_id']);
+    $cIdCol = stats_first_col($cCols, ['id']);
+    $cNameCol = stats_first_col($cCols, ['name', 'title']);
+    $cQualificationIdCol = stats_first_col($cCols, ['qualification_id']);
+    $qualIdCol = stats_first_col($qualCols, ['id']);
+    $qualNameCol = stats_first_col($qualCols, ['name', 'title']);
+
+    if ($qIdCol && $qCourseIdCol && $cIdCol && $cNameCol && $cQualificationIdCol && $qualIdCol && $qualNameCol) {
+        $sqlQualificationStats = 'SELECT '
+            . 'qf.' . stats_q($qualIdCol) . ' AS qualification_id, '
+            . 'qf.' . stats_q($qualNameCol) . ' AS qualification_name, '
+            . 'COUNT(*) AS total_solved, '
+            . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
+            . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
+            . 'FROM `question_attempt_events` e '
+            . 'INNER JOIN `questions` q ON e.`question_id` = q.' . stats_q($qIdCol) . ' '
+            . 'INNER JOIN `courses` c ON q.' . stats_q($qCourseIdCol) . ' = c.' . stats_q($cIdCol) . ' '
+            . 'INNER JOIN `qualifications` qf ON c.' . stats_q($cQualificationIdCol) . ' = qf.' . stats_q($qualIdCol) . ' '
+            . 'WHERE e.`user_id` = ? '
+            . 'GROUP BY qf.' . stats_q($qualIdCol) . ', qf.' . stats_q($qualNameCol) . ' '
+            . 'ORDER BY total_solved DESC, qualification_name ASC';
+
+        $stmtQualificationStats = $pdo->prepare($sqlQualificationStats);
+        $stmtQualificationStats->execute([$userId]);
+        $rowsQualificationStats = $stmtQualificationStats->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        foreach ($rowsQualificationStats as $row) {
+            $totalSolved = (int)($row['total_solved'] ?? 0);
+            $totalCorrect = (int)($row['total_correct'] ?? 0);
+            $totalWrong = (int)($row['total_wrong'] ?? 0);
+
+            $statistics['qualification_stats'][] = [
+                'qualification_id' => (string)($row['qualification_id'] ?? ''),
+                'qualification_name' => (string)($row['qualification_name'] ?? ''),
+                'total_solved' => $totalSolved,
+                'total_correct' => $totalCorrect,
+                'total_wrong' => $totalWrong,
+                'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+            ];
+        }
+
+        $sqlCourseStats = 'SELECT '
+            . 'c.' . stats_q($cIdCol) . ' AS course_id, '
+            . 'c.' . stats_q($cNameCol) . ' AS course_name, '
+            . 'qf.' . stats_q($qualIdCol) . ' AS qualification_id, '
+            . 'qf.' . stats_q($qualNameCol) . ' AS qualification_name, '
+            . 'COUNT(*) AS total_solved, '
+            . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
+            . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
+            . 'FROM `question_attempt_events` e '
+            . 'INNER JOIN `questions` q ON e.`question_id` = q.' . stats_q($qIdCol) . ' '
+            . 'INNER JOIN `courses` c ON q.' . stats_q($qCourseIdCol) . ' = c.' . stats_q($cIdCol) . ' '
+            . 'INNER JOIN `qualifications` qf ON c.' . stats_q($cQualificationIdCol) . ' = qf.' . stats_q($qualIdCol) . ' '
+            . 'WHERE e.`user_id` = ? '
+            . 'GROUP BY c.' . stats_q($cIdCol) . ', c.' . stats_q($cNameCol) . ', qf.' . stats_q($qualIdCol) . ', qf.' . stats_q($qualNameCol) . ' '
+            . 'ORDER BY total_solved DESC, course_name ASC';
+
+        $stmtCourseStats = $pdo->prepare($sqlCourseStats);
+        $stmtCourseStats->execute([$userId]);
+        $rowsCourseStats = $stmtCourseStats->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        foreach ($rowsCourseStats as $row) {
+            $totalSolved = (int)($row['total_solved'] ?? 0);
+            $totalCorrect = (int)($row['total_correct'] ?? 0);
+            $totalWrong = (int)($row['total_wrong'] ?? 0);
+
+            $statistics['course_stats'][] = [
+                'course_id' => (string)($row['course_id'] ?? ''),
+                'course_name' => (string)($row['course_name'] ?? ''),
+                'qualification_id' => (string)($row['qualification_id'] ?? ''),
+                'qualification_name' => (string)($row['qualification_name'] ?? ''),
+                'total_solved' => $totalSolved,
+                'total_correct' => $totalCorrect,
+                'total_wrong' => $totalWrong,
+                'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+            ];
+        }
     }
 
     // Debug: 0 durumunda query + user_id context logla
