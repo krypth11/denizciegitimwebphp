@@ -108,6 +108,10 @@ include '../includes/sidebar.php';
                             <input type="text" class="form-control" name="option_d" id="option_d" required>
                         </div>
                         <div class="col-md-6">
+                            <label class="form-label">E Şıkkı (Opsiyonel)</label>
+                            <input type="text" class="form-control" name="option_e" id="option_e">
+                        </div>
+                        <div class="col-md-6">
                             <label class="form-label">Doğru Cevap *</label>
                             <select class="form-select" name="correct_answer" id="correct_answer" required>
                                 <option value="">Seçiniz...</option>
@@ -115,6 +119,7 @@ include '../includes/sidebar.php';
                                 <option value="B">B</option>
                                 <option value="C">C</option>
                                 <option value="D">D</option>
+                                <option value="E">E</option>
                             </select>
                         </div>
                         <div class="col-12">
@@ -168,6 +173,7 @@ A) Şık A
 B) Şık B
 C) Şık C
 D) Şık D
+E) Şık E (opsiyonel)
 Açıklama:
 Açıklama metni
 ⸻
@@ -176,12 +182,13 @@ A) ...
 B) ...
 C) ...
 D) ...
+E) ... (opsiyonel)
 Açıklama:
 ...
 ⸻
 Cevap Anahtarı
 1-A
-2-B</pre>
+2-E</pre>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -311,6 +318,7 @@ $(document).ready(function () {
                     ${optionLine('B', q.option_b, q.correct_answer)}
                     ${optionLine('C', q.option_c, q.correct_answer)}
                     ${optionLine('D', q.option_d, q.correct_answer)}
+                    ${q.option_e ? optionLine('E', q.option_e, q.correct_answer) : ''}
                 </div>
             `;
 
@@ -390,6 +398,7 @@ $(document).ready(function () {
             $('#option_b').val(item.option_b || '');
             $('#option_c').val(item.option_c || '');
             $('#option_d').val(item.option_d || '');
+            $('#option_e').val(item.option_e || '');
             $('#correct_answer').val((item.correct_answer || '').toUpperCase());
             $('#explanation').val(item.explanation || '');
         } else {
@@ -415,7 +424,7 @@ $(document).ready(function () {
 
         const answerMap = {};
         if (answerKeyText) {
-            const answerRegex = /(\d+)\s*[-:]\s*([ABCD])/gi;
+            const answerRegex = /(\d+)\s*[-:]\s*([ABCDE])/gi;
             let m;
             while ((m = answerRegex.exec(answerKeyText)) !== null) {
                 answerMap[parseInt(m[1], 10)] = m[2].toUpperCase();
@@ -450,7 +459,7 @@ $(document).ready(function () {
             lines[0] = lines[0].replace(/^\s*\d+\.\s*/, '').trim();
 
             const questionLines = [];
-            const options = { A: '', B: '', C: '', D: '' };
+            const options = { A: '', B: '', C: '', D: '', E: '' };
             const explanationLines = [];
             let explanationMode = false;
             let currentOption = null;
@@ -472,7 +481,7 @@ $(document).ready(function () {
                     continue;
                 }
 
-                const optMatch = line.match(/^([ABCD])[\)\.\-:]\s*(.*)$/i);
+                const optMatch = line.match(/^([ABCDE])[\)\.\-:]\s*(.*)$/i);
                 if (optMatch) {
                     currentOption = optMatch[1].toUpperCase();
                     let optVal = optMatch[2] || '';
@@ -493,7 +502,11 @@ $(document).ready(function () {
             const questionText = normalize(questionLines.join(' '));
             const correct = (answerMap[number] || inferredCorrect || '').toUpperCase();
 
-            const isValid = questionText.length >= 5 && options.A && options.B && options.C && options.D && ['A', 'B', 'C', 'D'].includes(correct);
+            const isValid =
+                questionText.length >= 5 &&
+                options.A && options.B && options.C && options.D &&
+                ['A', 'B', 'C', 'D', 'E'].includes(correct) &&
+                (correct !== 'E' || !!options.E);
             if (!isValid) {
                 result.skipped_count++;
                 continue;
@@ -507,6 +520,7 @@ $(document).ready(function () {
                 option_b: options.B,
                 option_c: options.C,
                 option_d: options.D,
+                option_e: options.E || '',
                 correct_answer: correct,
                 explanation: normalize(explanationLines.join(' ')),
                 status: 'pending'
@@ -565,9 +579,10 @@ $(document).ready(function () {
                                 <div class="col-md-6 mb-2"><label class="form-label">B</label><input class="form-control bulk-draft-field" data-index="${index}" data-field="option_b" value="${esc(q._draft.option_b)}"></div>
                                 <div class="col-md-6 mb-2"><label class="form-label">C</label><input class="form-control bulk-draft-field" data-index="${index}" data-field="option_c" value="${esc(q._draft.option_c)}"></div>
                                 <div class="col-md-6 mb-2"><label class="form-label">D</label><input class="form-control bulk-draft-field" data-index="${index}" data-field="option_d" value="${esc(q._draft.option_d)}"></div>
+                                <div class="col-md-6 mb-2"><label class="form-label">E (Opsiyonel)</label><input class="form-control bulk-draft-field" data-index="${index}" data-field="option_e" value="${esc(q._draft.option_e || '')}"></div>
                             </div>
                             <div class="row">
-                                <div class="col-md-3"><label class="form-label">Doğru Cevap</label><select class="form-select bulk-draft-field" data-index="${index}" data-field="correct_answer"><option ${q._draft.correct_answer==='A'?'selected':''}>A</option><option ${q._draft.correct_answer==='B'?'selected':''}>B</option><option ${q._draft.correct_answer==='C'?'selected':''}>C</option><option ${q._draft.correct_answer==='D'?'selected':''}>D</option></select></div>
+                                <div class="col-md-3"><label class="form-label">Doğru Cevap</label><select class="form-select bulk-draft-field" data-index="${index}" data-field="correct_answer"><option ${q._draft.correct_answer==='A'?'selected':''}>A</option><option ${q._draft.correct_answer==='B'?'selected':''}>B</option><option ${q._draft.correct_answer==='C'?'selected':''}>C</option><option ${q._draft.correct_answer==='D'?'selected':''}>D</option><option ${q._draft.correct_answer==='E'?'selected':''}>E</option></select></div>
                                 <div class="col-md-9"><label class="form-label">Açıklama</label><input class="form-control bulk-draft-field" data-index="${index}" data-field="explanation" value="${esc(q._draft.explanation || '')}"></div>
                             </div>
                             <div class="mt-3 d-flex gap-2">
@@ -603,6 +618,7 @@ $(document).ready(function () {
                             ${optionBox('B', q.option_b)}
                             ${optionBox('C', q.option_c)}
                             ${optionBox('D', q.option_d)}
+                            ${q.option_e ? optionBox('E', q.option_e) : ''}
                         </div>
                         ${q.explanation ? `<div class="small text-muted mt-2">${esc(q.explanation)}</div>` : ''}
                     </div>
@@ -710,8 +726,12 @@ $(document).ready(function () {
         const i = $(this).data('index');
         const d = bulkQuestions[i]._draft;
 
-        if (!d.question_text || !d.option_a || !d.option_b || !d.option_c || !d.option_d || !['A', 'B', 'C', 'D'].includes((d.correct_answer || '').toUpperCase())) {
+        const draftCorrect = (d.correct_answer || '').toUpperCase();
+        if (!d.question_text || !d.option_a || !d.option_b || !d.option_c || !d.option_d || !['A', 'B', 'C', 'D', 'E'].includes(draftCorrect)) {
             return appAlert('Uyarı', 'Düzenleme geçersiz. Zorunlu alanları kontrol edin.', 'warning');
+        }
+        if (draftCorrect === 'E' && !(d.option_e || '').trim()) {
+            return appAlert('Uyarı', 'correct_answer E but option_e empty', 'warning');
         }
 
         Object.assign(bulkQuestions[i], {
@@ -720,7 +740,8 @@ $(document).ready(function () {
             option_b: d.option_b,
             option_c: d.option_c,
             option_d: d.option_d,
-            correct_answer: (d.correct_answer || '').toUpperCase(),
+            option_e: d.option_e || '',
+            correct_answer: draftCorrect,
             explanation: d.explanation || ''
         });
 
@@ -738,6 +759,7 @@ $(document).ready(function () {
             option_b: q.option_b,
             option_c: q.option_c,
             option_d: q.option_d,
+            option_e: q.option_e || '',
             correct_answer: q.correct_answer,
             explanation: q.explanation || ''
         }));
@@ -796,8 +818,12 @@ $(document).ready(function () {
     $('#questionForm').on('submit', async function (e) {
         e.preventDefault();
         const correct = ($('#correct_answer').val() || '').toUpperCase();
-        if (!['A', 'B', 'C', 'D'].includes(correct)) {
-            return appAlert('Uyarı', 'Doğru cevap A/B/C/D olmalıdır.', 'warning');
+        const optionE = ($('#option_e').val() || '').trim();
+        if (!['A', 'B', 'C', 'D', 'E'].includes(correct)) {
+            return appAlert('Uyarı', 'invalid correct_answer', 'warning');
+        }
+        if (correct === 'E' && optionE === '') {
+            return appAlert('Uyarı', 'correct_answer E but option_e empty', 'warning');
         }
 
         const isEdit = !!$('#question_id').val();

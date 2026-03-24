@@ -35,7 +35,7 @@ try {
                 exit;
             }
 
-            if (!in_array($question_type, ['sayısal', 'sözel'], true)) {
+            if (!in_array($question_type, ['sayısal', 'sözel', 'karışık'], true)) {
                 echo json_encode([
                     'success' => false,
                     'message' => 'Geçersiz soru tipi!',
@@ -55,6 +55,15 @@ try {
                 echo json_encode([
                     'success' => false,
                     'message' => 'E doğru cevap için Şık E doldurulmalıdır!',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            if (!$hasOptionE && $correct_answer === 'E') {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'correct_answer E seçildi ancak option_e kolonu bulunamadı.',
+                    'error_code' => 'correct_answer_e_but_option_e_not_supported',
                 ], JSON_UNESCAPED_UNICODE);
                 exit;
             }
@@ -162,7 +171,7 @@ try {
                 exit;
             }
 
-            if (!in_array($question_type, ['sayısal', 'sözel'], true)) {
+            if (!in_array($question_type, ['sayısal', 'sözel', 'karışık'], true)) {
                 echo json_encode([
                     'success' => false,
                     'message' => 'Geçersiz soru tipi!',
@@ -182,6 +191,15 @@ try {
                 echo json_encode([
                     'success' => false,
                     'message' => 'E doğru cevap için Şık E doldurulmalıdır!',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            if (!$hasOptionE && $correct_answer === 'E') {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'correct_answer E seçildi ancak option_e kolonu bulunamadı.',
+                    'error_code' => 'correct_answer_e_but_option_e_not_supported',
                 ], JSON_UNESCAPED_UNICODE);
                 exit;
             }
