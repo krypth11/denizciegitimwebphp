@@ -481,7 +481,7 @@ $(document).ready(function () {
                     continue;
                 }
 
-                const optMatch = line.match(/^([ABCDE])[\)\.\-:]\s*(.*)$/i);
+                const optMatch = line.match(/^[\s\-–—•\*]*([ABCDE])\s*[\)\.\-:]?\s*(.*)$/i);
                 if (optMatch) {
                     currentOption = optMatch[1].toUpperCase();
                     let optVal = optMatch[2] || '';
@@ -817,13 +817,22 @@ $(document).ready(function () {
 
     $('#questionForm').on('submit', async function (e) {
         e.preventDefault();
+        const questionText = ($('#question_text').val() || '').trim();
+        const optionA = ($('#option_a').val() || '').trim();
+        const optionB = ($('#option_b').val() || '').trim();
+        const optionC = ($('#option_c').val() || '').trim();
+        const optionD = ($('#option_d').val() || '').trim();
         const correct = ($('#correct_answer').val() || '').toUpperCase();
         const optionE = ($('#option_e').val() || '').trim();
+
+        if (!questionText || !optionA || !optionB || !optionC || !optionD) {
+            return appAlert('Uyarı', 'Soru metni ile A/B/C/D şıkları zorunludur.', 'warning');
+        }
         if (!['A', 'B', 'C', 'D', 'E'].includes(correct)) {
-            return appAlert('Uyarı', 'invalid correct_answer', 'warning');
+            return appAlert('Uyarı', 'Doğru cevap yalnızca A/B/C/D/E olabilir.', 'warning');
         }
         if (correct === 'E' && optionE === '') {
-            return appAlert('Uyarı', 'correct_answer E but option_e empty', 'warning');
+            return appAlert('Uyarı', 'Doğru cevap E ise E şıkkı boş bırakılamaz.', 'warning');
         }
 
         const isEdit = !!$('#question_id').val();

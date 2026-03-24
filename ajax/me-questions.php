@@ -59,6 +59,67 @@ function meq_q($identifier)
     return '`' . str_replace('`', '', $identifier) . '`';
 }
 
+function meq_topic_matches_category(PDO $pdo, array $s, string $topicId, string $categoryId): bool
+{
+    $topicSql = 'SELECT ' . meq_q($s['t_cat_fk']) . ' AS category_id FROM ' . meq_q($s['t_table'])
+        . ' WHERE ' . meq_q($s['t_id']) . ' = ? LIMIT 1';
+    $topicStmt = $pdo->prepare($topicSql);
+    $topicStmt->execute([$topicId]);
+    $topicRow = $topicStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$topicRow) {
+        return false;
+    }
+
+    return (string)$topicRow['category_id'] === (string)$categoryId;
+}
+
+function meq_normalize_question_item(array $input): array
+{
+    return [
+        'category_id' => trim((string)($input['category_id'] ?? '')),
+        'topic_id' => trim((string)($input['topic_id'] ?? '')),
+        'question_text' => sanitize_input($input['question_text'] ?? ''),
+        'option_a' => sanitize_input($input['option_a'] ?? ''),
+        'option_b' => sanitize_input($input['option_b'] ?? ''),
+        'option_c' => sanitize_input($input['option_c'] ?? ''),
+        'option_d' => sanitize_input($input['option_d'] ?? ''),
+        'option_e' => sanitize_input($input['option_e'] ?? ''),
+        'correct_answer' => strtoupper(trim((string)($input['correct_answer'] ?? ''))),
+        'explanation' => sanitize_input($input['explanation'] ?? ''),
+        'question_type' => sanitize_input($input['question_type'] ?? ''),
+    ];
+}
+
+function meq_validate_question_item(array $q, array $s): array
+{
+    if (
+        $q['category_id'] === '' ||
+        $q['topic_id'] === '' ||
+        $q['question_text'] === '' ||
+        $q['option_a'] === '' ||
+        $q['option_b'] === '' ||
+        $q['option_c'] === '' ||
+        $q['option_d'] === ''
+    ) {
+        return [false, 'Kategori, topic, soru metni ve A/B/C/D şıkları zorunludur.', 'missing_required_fields'];
+    }
+
+    if (!in_array($q['correct_answer'], ['A', 'B', 'C', 'D', 'E'], true)) {
+        return [false, 'Doğru cevap yalnızca A/B/C/D/E olabilir.', 'invalid_correct_answer'];
+    }
+
+    if ($q['correct_answer'] === 'E' && $q['option_e'] === '') {
+        return [false, 'Doğru cevap E ise E şıkkı boş bırakılamaz.', 'correct_answer_e_but_option_e_empty'];
+    }
+
+    if ($q['correct_answer'] === 'E' && !$s['q_opt_e']) {
+        return [false, 'Bu tabloda E şıkkı alanı desteklenmediği için doğru cevap E olarak kaydedilemez.', 'correct_answer_e_but_option_e_not_supported'];
+    }
+
+    return [true, '', ''];
+}
+
 function meq_schema(PDO $pdo)
 {
     if (!meq_table_exists($pdo, MEQ_QUESTION_TABLE)) {
@@ -299,54 +360,29 @@ try {
         }
 
         case 'add_question': {
-            $categoryId = trim((string)($_POST['category_id'] ?? ''));
-            $topicId = trim((string)($_POST['topic_id'] ?? ''));
-            $questionText = sanitize_input($_POST['question_text'] ?? '');
-            $optionA = sanitize_input($_POST['option_a'] ?? '');
-            $optionB = sanitize_input($_POST['option_b'] ?? '');
-            $optionC = sanitize_input($_POST['option_c'] ?? '');
-            $optionD = sanitize_input($_POST['option_d'] ?? '');
-            $optionE = sanitize_input($_POST['option_e'] ?? '');
-            $correct = strtoupper(trim((string)($_POST['correct_answer'] ?? '')));
-            $explanation = sanitize_input($_POST['explanation'] ?? '');
-            $questionType = sanitize_input($_POST['question_type'] ?? '');
-
-            if ($categoryId === '' || $topicId === '' || $questionText === '' || $optionA === '' || $optionB === '' || $optionC === '' || $optionD === '') {
-                meq_json(false, 'Kategori, topic, soru metni ve tüm şıklar zorunludur.', [], 422);
-            }
-            if (!in_array($correct, ['A', 'B', 'C', 'D', 'E'], true)) {
-                meq_json(false, 'Doğru cevap A/B/C/D/E olmalıdır.', [], 422, ['correct_answer' => 'invalid_correct_answer']);
-            }
-            if ($correct === 'E' && $optionE === '') {
-                meq_json(false, 'correct_answer E but option_e empty', [], 422, ['correct_answer' => 'correct_answer_e_but_option_e_empty']);
-            }
-            if ($correct === 'E' && !$s['q_opt_e']) {
-                meq_json(false, 'correct_answer E seçildi ancak option_e kolonu bulunamadı.', [], 422, ['correct_answer' => 'correct_answer_e_but_option_e_not_supported']);
+            $q = meq_normalize_question_item($_POST);
+            [$valid, $validationMessage, $validationCode] = meq_validate_question_item($q, $s);
+            if (!$valid) {
+                meq_json(false, $validationMessage, [], 422, ['validation' => $validationCode]);
             }
 
-            $topicSql = 'SELECT ' . meq_q($s['t_cat_fk']) . ' AS category_id FROM ' . meq_q($s['t_table'])
-                . ' WHERE ' . meq_q($s['t_id']) . ' = ? LIMIT 1';
-            $topicStmt = $pdo->prepare($topicSql);
-            $topicStmt->execute([$topicId]);
-            $topicRow = $topicStmt->fetch(PDO::FETCH_ASSOC);
-            if (!$topicRow) meq_json(false, 'Seçilen topic bulunamadı.', [], 422);
-            if ((string)$topicRow['category_id'] !== (string)$categoryId) {
+            if (!meq_topic_matches_category($pdo, $s, $q['topic_id'], $q['category_id'])) {
                 meq_json(false, 'Seçilen topic bu kategoriye ait değil.', [], 422);
             }
 
             $insert = [
-                $s['q_topic_fk'] => $topicId,
-                $s['q_text'] => $questionText,
-                $s['q_opt_a'] => $optionA,
-                $s['q_opt_b'] => $optionB,
-                $s['q_opt_c'] => $optionC,
-                $s['q_opt_d'] => $optionD,
-                $s['q_correct'] => $correct,
+                $s['q_topic_fk'] => $q['topic_id'],
+                $s['q_text'] => $q['question_text'],
+                $s['q_opt_a'] => $q['option_a'],
+                $s['q_opt_b'] => $q['option_b'],
+                $s['q_opt_c'] => $q['option_c'],
+                $s['q_opt_d'] => $q['option_d'],
+                $s['q_correct'] => $q['correct_answer'],
             ];
-            if ($s['q_cat_fk']) $insert[$s['q_cat_fk']] = $categoryId;
-            if ($s['q_opt_e']) $insert[$s['q_opt_e']] = ($optionE !== '' ? $optionE : null);
-            if ($s['q_explanation']) $insert[$s['q_explanation']] = $explanation;
-            if ($s['q_type']) $insert[$s['q_type']] = $questionType;
+            if ($s['q_cat_fk']) $insert[$s['q_cat_fk']] = $q['category_id'];
+            if ($s['q_opt_e']) $insert[$s['q_opt_e']] = ($q['option_e'] !== '' ? $q['option_e'] : null);
+            if ($s['q_explanation']) $insert[$s['q_explanation']] = $q['explanation'];
+            if ($s['q_type']) $insert[$s['q_type']] = $q['question_type'];
             if ($s['q_created']) $insert[$s['q_created']] = date('Y-m-d H:i:s');
             if ($s['q_updated']) $insert[$s['q_updated']] = date('Y-m-d H:i:s');
 
@@ -358,30 +394,12 @@ try {
 
         case 'update_question': {
             $id = $_POST['id'] ?? '';
-            $categoryId = trim((string)($_POST['category_id'] ?? ''));
-            $topicId = trim((string)($_POST['topic_id'] ?? ''));
-            $questionText = sanitize_input($_POST['question_text'] ?? '');
-            $optionA = sanitize_input($_POST['option_a'] ?? '');
-            $optionB = sanitize_input($_POST['option_b'] ?? '');
-            $optionC = sanitize_input($_POST['option_c'] ?? '');
-            $optionD = sanitize_input($_POST['option_d'] ?? '');
-            $optionE = sanitize_input($_POST['option_e'] ?? '');
-            $correct = strtoupper(trim((string)($_POST['correct_answer'] ?? '')));
-            $explanation = sanitize_input($_POST['explanation'] ?? '');
-            $questionType = sanitize_input($_POST['question_type'] ?? '');
+            $q = meq_normalize_question_item($_POST);
 
             if ($id === '') meq_json(false, 'Soru ID gerekli.', [], 422);
-            if ($categoryId === '' || $topicId === '' || $questionText === '' || $optionA === '' || $optionB === '' || $optionC === '' || $optionD === '') {
-                meq_json(false, 'Kategori, topic, soru metni ve tüm şıklar zorunludur.', [], 422);
-            }
-            if (!in_array($correct, ['A', 'B', 'C', 'D', 'E'], true)) {
-                meq_json(false, 'Doğru cevap A/B/C/D/E olmalıdır.', [], 422, ['correct_answer' => 'invalid_correct_answer']);
-            }
-            if ($correct === 'E' && $optionE === '') {
-                meq_json(false, 'correct_answer E but option_e empty', [], 422, ['correct_answer' => 'correct_answer_e_but_option_e_empty']);
-            }
-            if ($correct === 'E' && !$s['q_opt_e']) {
-                meq_json(false, 'correct_answer E seçildi ancak option_e kolonu bulunamadı.', [], 422, ['correct_answer' => 'correct_answer_e_but_option_e_not_supported']);
+            [$valid, $validationMessage, $validationCode] = meq_validate_question_item($q, $s);
+            if (!$valid) {
+                meq_json(false, $validationMessage, [], 422, ['validation' => $validationCode]);
             }
 
             $existsSql = 'SELECT COUNT(*) FROM ' . meq_q($s['q_table'])
@@ -390,29 +408,23 @@ try {
             $existsStmt->execute([$id]);
             if ((int)$existsStmt->fetchColumn() === 0) meq_json(false, 'Soru bulunamadı.', [], 404);
 
-            $topicSql = 'SELECT ' . meq_q($s['t_cat_fk']) . ' AS category_id FROM ' . meq_q($s['t_table'])
-                . ' WHERE ' . meq_q($s['t_id']) . ' = ? LIMIT 1';
-            $topicStmt = $pdo->prepare($topicSql);
-            $topicStmt->execute([$topicId]);
-            $topicRow = $topicStmt->fetch(PDO::FETCH_ASSOC);
-            if (!$topicRow) meq_json(false, 'Seçilen topic bulunamadı.', [], 422);
-            if ((string)$topicRow['category_id'] !== (string)$categoryId) {
+            if (!meq_topic_matches_category($pdo, $s, $q['topic_id'], $q['category_id'])) {
                 meq_json(false, 'Seçilen topic bu kategoriye ait değil.', [], 422);
             }
 
             $update = [
-                $s['q_topic_fk'] => $topicId,
-                $s['q_text'] => $questionText,
-                $s['q_opt_a'] => $optionA,
-                $s['q_opt_b'] => $optionB,
-                $s['q_opt_c'] => $optionC,
-                $s['q_opt_d'] => $optionD,
-                $s['q_correct'] => $correct,
+                $s['q_topic_fk'] => $q['topic_id'],
+                $s['q_text'] => $q['question_text'],
+                $s['q_opt_a'] => $q['option_a'],
+                $s['q_opt_b'] => $q['option_b'],
+                $s['q_opt_c'] => $q['option_c'],
+                $s['q_opt_d'] => $q['option_d'],
+                $s['q_correct'] => $q['correct_answer'],
             ];
-            if ($s['q_cat_fk']) $update[$s['q_cat_fk']] = $categoryId;
-            if ($s['q_opt_e']) $update[$s['q_opt_e']] = ($optionE !== '' ? $optionE : null);
-            if ($s['q_explanation']) $update[$s['q_explanation']] = $explanation;
-            if ($s['q_type']) $update[$s['q_type']] = $questionType;
+            if ($s['q_cat_fk']) $update[$s['q_cat_fk']] = $q['category_id'];
+            if ($s['q_opt_e']) $update[$s['q_opt_e']] = ($q['option_e'] !== '' ? $q['option_e'] : null);
+            if ($s['q_explanation']) $update[$s['q_explanation']] = $q['explanation'];
+            if ($s['q_type']) $update[$s['q_type']] = $q['question_type'];
             if ($s['q_updated']) $update[$s['q_updated']] = date('Y-m-d H:i:s');
 
             meq_update($pdo, $s['q_table'], $update, $s['q_id'], $id);
@@ -469,60 +481,31 @@ try {
             };
 
             foreach ($items as $item) {
-                $categoryId = trim((string)($item['category_id'] ?? ''));
-                $topicId = trim((string)($item['topic_id'] ?? ''));
-                $questionText = sanitize_input($item['question_text'] ?? '');
-                $optionA = sanitize_input($item['option_a'] ?? '');
-                $optionB = sanitize_input($item['option_b'] ?? '');
-                $optionC = sanitize_input($item['option_c'] ?? '');
-                $optionD = sanitize_input($item['option_d'] ?? '');
-                $optionE = sanitize_input($item['option_e'] ?? '');
-                $correct = strtoupper(trim((string)($item['correct_answer'] ?? '')));
-                $explanation = sanitize_input($item['explanation'] ?? '');
-
-                if (
-                    $categoryId === '' || $topicId === '' || $questionText === '' ||
-                    $optionA === '' || $optionB === '' || $optionC === '' || $optionD === '' ||
-                    !in_array($correct, ['A', 'B', 'C', 'D', 'E'], true)
-                ) {
-                    $addSkip('invalid_correct_answer_or_missing_required_fields', $item);
+                $q = meq_normalize_question_item($item);
+                [$valid, , $validationCode] = meq_validate_question_item($q, $s);
+                if (!$valid) {
+                    $addSkip($validationCode ?: 'validation_failed', $item);
                     continue;
                 }
 
-                if ($correct === 'E' && $optionE === '') {
-                    $addSkip('correct_answer_e_but_option_e_empty', $item);
-                    continue;
-                }
-
-                if ($correct === 'E' && !$s['q_opt_e']) {
-                    $addSkip('correct_answer_e_but_option_e_not_supported', $item);
-                    continue;
-                }
-
-                $topicSql = 'SELECT ' . meq_q($s['t_cat_fk']) . ' AS category_id FROM ' . meq_q($s['t_table'])
-                    . ' WHERE ' . meq_q($s['t_id']) . ' = ? LIMIT 1';
-                $topicStmt = $pdo->prepare($topicSql);
-                $topicStmt->execute([$topicId]);
-                $topicRow = $topicStmt->fetch(PDO::FETCH_ASSOC);
-
-                if (!$topicRow || (string)$topicRow['category_id'] !== (string)$categoryId) {
+                if (!meq_topic_matches_category($pdo, $s, $q['topic_id'], $q['category_id'])) {
                     $addSkip('topic_category_mismatch', $item);
                     continue;
                 }
 
                 $insert = [
-                    $s['q_topic_fk'] => $topicId,
-                    $s['q_text'] => $questionText,
-                    $s['q_opt_a'] => $optionA,
-                    $s['q_opt_b'] => $optionB,
-                    $s['q_opt_c'] => $optionC,
-                    $s['q_opt_d'] => $optionD,
-                    $s['q_correct'] => $correct,
+                    $s['q_topic_fk'] => $q['topic_id'],
+                    $s['q_text'] => $q['question_text'],
+                    $s['q_opt_a'] => $q['option_a'],
+                    $s['q_opt_b'] => $q['option_b'],
+                    $s['q_opt_c'] => $q['option_c'],
+                    $s['q_opt_d'] => $q['option_d'],
+                    $s['q_correct'] => $q['correct_answer'],
                 ];
 
-                if ($s['q_cat_fk']) $insert[$s['q_cat_fk']] = $categoryId;
-                if ($s['q_opt_e']) $insert[$s['q_opt_e']] = ($optionE !== '' ? $optionE : null);
-                if ($s['q_explanation']) $insert[$s['q_explanation']] = $explanation;
+                if ($s['q_cat_fk']) $insert[$s['q_cat_fk']] = $q['category_id'];
+                if ($s['q_opt_e']) $insert[$s['q_opt_e']] = ($q['option_e'] !== '' ? $q['option_e'] : null);
+                if ($s['q_explanation']) $insert[$s['q_explanation']] = $q['explanation'];
                 if ($s['q_created']) $insert[$s['q_created']] = date('Y-m-d H:i:s');
                 if ($s['q_updated']) $insert[$s['q_updated']] = date('Y-m-d H:i:s');
 
