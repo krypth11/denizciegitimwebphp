@@ -865,16 +865,36 @@ $(document).ready(function() {
         if (!ok) return;
 
         $('#saveAiQuestionsBtn').prop('disabled', true).text('Kaydediliyor...');
-        $.post('../ajax/save-ai-questions.php', { questions: JSON.stringify(approved) }, function(r){
-            if(r.success){
-                appAlert('Başarılı', r.message, 'success');
-                setTimeout(() => location.reload(), 350);
-            }
-            else {
+        $.ajax({
+            url: '../ajax/save-ai-questions.php',
+            method: 'POST',
+            dataType: 'json',
+            xhrFields: { withCredentials: true },
+            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            data: { questions: JSON.stringify(approved) },
+            success: function(r){
+                if(r.success){
+                    appAlert('Başarılı', r.message, 'success');
+                    setTimeout(() => location.reload(), 350);
+                    return;
+                }
+
                 appAlert('Hata', r.message, 'error');
                 $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
+            },
+            error: function(xhr){
+                if (xhr.status === 401) {
+                    appAlert('Oturum', 'Oturum süresi dolmuş görünüyor. Lütfen tekrar giriş yapın.', 'warning');
+                    setTimeout(() => {
+                        window.location.href = '/index.php';
+                    }, 700);
+                    return;
+                }
+
+                appAlert('Hata', 'Kaydetme sırasında bir hata oluştu.', 'error');
+                $('#saveAiQuestionsBtn').prop('disabled', false).text(approved.length + ' Soruyu Kaydet');
             }
-        }, 'json');
+        });
     });
 });
 </script>

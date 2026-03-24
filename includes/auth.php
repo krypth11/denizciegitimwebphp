@@ -181,7 +181,6 @@ function is_authenticated_session()
 
 function verify_token()
 {
-    // Eski akışla uyumluluk: artık session bazlı doğrulama esas
     if (is_authenticated_session()) {
         return [
             'user_id' => $_SESSION['user_id'],
@@ -190,12 +189,86 @@ function verify_token()
         ];
     }
 
-    return false;
+    $token = null;
+    $headers = function_exists('getallheaders') ? getallheaders() : [];
+    if (is_array($headers) && !empty($headers['Authorization'])) {
+        $authHeader = trim((string)$headers['Authorization']);
+        if (stripos($authHeader, 'Bearer ') === 0) {
+            $token = trim(substr($authHeader, 7));
+        }
+    }
+
+    if (!$token && !empty($_SERVER['HTTP_AUTHORIZATION'])) {
+        $authHeader = trim((string)$_SERVER['HTTP_AUTHORIZATION']);
+        if (stripos($authHeader, 'Bearer ') === 0) {
+            $token = trim(substr($authHeader, 7));
+        }
+    }
+
+    if (!$token && !empty($_COOKIE['auth_token'])) {
+        $token = (string)$_COOKIE['auth_token'];
+    }
+
+    if (!$token) {
+        return false;
+    }
+
+    $payload = jwt_decode($token);
+    if (!$payload || empty($payload['user_id']) || empty($payload['email'])) {
+        return false;
+    }
+
+    global $pdo;
+    if (!($pdo instanceof PDO)) {
+        return false;
+    }
+
+    try {
+        $upCols = get_table_columns($pdo, 'user_profiles');
+        $sql = 'SELECT id, email, is_admin FROM user_profiles WHERE id = ? LIMIT 1';
+        $params = [$payload['user_id']];
+
+        if (in_array('is_deleted', $upCols, true)) {
+            $sql = 'SELECT id, email, is_admin FROM user_profiles WHERE id = ? AND is_deleted = 0 LIMIT 1';
+        }
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $dbUser = $stmt->fetch();
+        if (!$dbUser) {
+            return false;
+        }
+
+        if (!hash_equals(mb_strtolower((string)$dbUser['email'], 'UTF-8'), mb_strtolower((string)$payload['email'], 'UTF-8'))) {
+            return false;
+        }
+
+        $_SESSION['user_id'] = $dbUser['id'];
+        $_SESSION['email'] = $dbUser['email'];
+        $_SESSION['is_admin'] = (int)($dbUser['is_admin'] ?? 0) === 1 ? 1 : 0;
+        $_SESSION['last_activity'] = time();
+        $_SESSION['user_agent'] = hash('sha256', $_SERVER['HTTP_USER_AGENT'] ?? 'unknown');
+
+        auth_runtime_log('Session JWT fallback ile yeniden oluşturuldu', [
+            'user_id' => $dbUser['id'],
+            'is_admin' => $_SESSION['is_admin'],
+        ]);
+
+        return [
+            'user_id' => $_SESSION['user_id'],
+            'email' => $_SESSION['email'],
+            'is_admin' => (bool)$_SESSION['is_admin'],
+        ];
+    } catch (Throwable $e) {
+        auth_runtime_log('JWT fallback doğrulaması hata verdi', ['error' => $e->getMessage()]);
+        return false;
+    }
 }
 
 function require_auth()
 {
-    if (!is_authenticated_session()) {
+    $user = verify_token();
+    if (!$user) {
         auth_runtime_log('require_auth: oturum yok, login sayfasına yönlendiriliyor');
         if (is_ajax_request()) {
             json_response([
@@ -206,7 +279,7 @@ function require_auth()
         redirect_to('/index.php');
     }
 
-    if (empty($_SESSION['is_admin'])) {
+    if (empty($user['is_admin'])) {
         auth_runtime_log('require_auth: oturum var ama admin değil, logout uygulanıyor');
         logout_user();
         if (is_ajax_request()) {
@@ -221,11 +294,7 @@ function require_auth()
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');
 
-    return [
-        'user_id' => $_SESSION['user_id'],
-        'email' => $_SESSION['email'],
-        'is_admin' => (bool)$_SESSION['is_admin'],
-    ];
+    return $user;
 }
 
 function require_admin()
