@@ -22,6 +22,64 @@ function study_pick_column(array $columns, array $candidates, bool $required = f
     return null;
 }
 
+function study_get_column_meta(PDO $pdo, string $table, string $column): ?array
+{
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+
+    try {
+        $stmt = $pdo->prepare('SHOW COLUMNS FROM `' . str_replace('`', '', $table) . '` LIKE ?');
+        $stmt->execute([$column]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $cache[$key] = is_array($row) ? $row : null;
+    } catch (Throwable $e) {
+        $cache[$key] = null;
+    }
+
+    return $cache[$key];
+}
+
+function study_parse_enum_values(?string $dbType): array
+{
+    $type = strtolower(trim((string)$dbType));
+    if ($type === '' || !str_starts_with($type, 'enum(')) {
+        return [];
+    }
+
+    if (!preg_match_all("/'((?:[^'\\\\]|\\\\.)*)'/", $type, $matches)) {
+        return [];
+    }
+
+    $values = [];
+    foreach ($matches[1] as $raw) {
+        $values[] = strtoupper(str_replace("\\'", "'", $raw));
+    }
+
+    return array_values(array_unique($values));
+}
+
+function study_can_persist_selected_answer(PDO $pdo, array $schema, string $selectedAnswer): bool
+{
+    if (empty($schema['last_selected_answer'])) {
+        return true;
+    }
+
+    $meta = study_get_column_meta($pdo, $schema['table'], $schema['last_selected_answer']);
+    if (!$meta) {
+        return true;
+    }
+
+    $enumValues = study_parse_enum_values($meta['Type'] ?? null);
+    if (!$enumValues) {
+        return true;
+    }
+
+    return in_array(strtoupper($selectedAnswer), $enumValues, true);
+}
+
 function study_get_user_progress_schema(PDO $pdo): array
 {
     $cols = get_table_columns($pdo, 'user_progress');
@@ -402,6 +460,7 @@ function study_upsert_answer_progress(PDO $pdo, string $userId, string $question
 {
     $schema = study_get_user_progress_schema($pdo);
     $existing = study_get_progress_by_user_question($pdo, $schema, $userId, $questionId);
+    $canPersistSelectedAnswer = study_can_persist_selected_answer($pdo, $schema, $selectedAnswer);
 
     if ($existing) {
         $total = (int)($schema['total_answer_count'] ? ($existing[$schema['total_answer_count']] ?? 0) : 0);
@@ -415,7 +474,7 @@ function study_upsert_answer_progress(PDO $pdo, string $userId, string $question
         if ($schema['is_correct']) {
             $updateValues[$schema['is_correct']] = $isCorrect ? 1 : 0;
         }
-        if ($schema['last_selected_answer']) {
+        if ($schema['last_selected_answer'] && $canPersistSelectedAnswer) {
             $updateValues[$schema['last_selected_answer']] = $selectedAnswer;
         }
         if ($schema['total_answer_count']) {
@@ -458,7 +517,7 @@ function study_upsert_answer_progress(PDO $pdo, string $userId, string $question
         if ($schema['is_bookmarked']) {
             $insertValues[$schema['is_bookmarked']] = 0;
         }
-        if ($schema['last_selected_answer']) {
+        if ($schema['last_selected_answer'] && $canPersistSelectedAnswer) {
             $insertValues[$schema['last_selected_answer']] = $selectedAnswer;
         }
         if ($schema['total_answer_count']) {
