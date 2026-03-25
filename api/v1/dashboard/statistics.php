@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once __DIR__ . '/stats_filters.php';
 
 api_require_method('GET');
 
@@ -51,6 +52,120 @@ function stats_normalize_source(?string $source): string
     }
 
     return str_replace(' ', '_', $normalized);
+}
+
+function admin_stats_detect_guest_sql(string $emailExpr, ?string $fullNameExpr): string
+{
+    $nameExpr = $fullNameExpr ? 'LOWER(TRIM(' . $fullNameExpr . '))' : "''";
+    return '(LOWER(' . $emailExpr . ") LIKE '%@guest.local' OR " . $nameExpr . " IN ('misafir kullanıcı', 'misafir kullanici', 'guest user'))";
+}
+
+if (($_GET['scope'] ?? '') === 'admin') {
+    try {
+        $auth = api_require_auth($pdo);
+        $isAdmin = !empty($auth['user']['is_admin']);
+        if (!$isAdmin) {
+            api_error('Admin yetkisi gerekli.', 403);
+        }
+
+        $qCols = get_table_columns($pdo, 'questions');
+        $cCols = get_table_columns($pdo, 'courses');
+        $upCols = get_table_columns($pdo, 'user_profiles');
+        $attemptCols = get_table_columns($pdo, 'question_attempt_events');
+
+        $qCourseCol = stats_first_col($qCols, ['course_id']);
+        $cIdCol = stats_first_col($cCols, ['id']);
+        $cQualificationCol = stats_first_col($cCols, ['qualification_id']);
+
+        $qualificationId = api_validate_optional_id((string)($_GET['qualification_id'] ?? ''), 'qualification_id');
+        $courseId = api_validate_optional_id((string)($_GET['course_id'] ?? ''), 'course_id');
+        $userType = strtolower(trim((string)($_GET['user_type'] ?? 'all')));
+        if (!in_array($userType, ['all', 'guest', 'registered'], true)) {
+            $userType = 'all';
+        }
+
+        $solvedWindow = stats_resolve_date_window($_GET, 'solved_range', 'solved_start_date', 'solved_end_date', '7d');
+
+        // Card 1: Toplam Soru
+        $qWhere = ['1=1'];
+        $qParams = [];
+        $qJoin = '';
+        if ($qCourseCol && $cIdCol && $cQualificationCol) {
+            $qJoin = ' LEFT JOIN `courses` c ON q.`' . $qCourseCol . '` = c.`' . $cIdCol . '`';
+            if ($qualificationId !== '') {
+                $qWhere[] = 'c.`' . $cQualificationCol . '` = ?';
+                $qParams[] = $qualificationId;
+            }
+            if ($courseId !== '') {
+                $qWhere[] = 'q.`' . $qCourseCol . '` = ?';
+                $qParams[] = $courseId;
+            }
+        }
+
+        $sqlQuestions = 'SELECT COUNT(*) FROM `questions` q' . $qJoin . ' WHERE ' . implode(' AND ', $qWhere);
+        $stmtQuestions = $pdo->prepare($sqlQuestions);
+        $stmtQuestions->execute($qParams);
+        $totalQuestions = (int)$stmtQuestions->fetchColumn();
+
+        // Card 2: Çözülen Soru Sayısı
+        $attemptDateCol = stats_first_col($attemptCols, ['attempted_at', 'created_at', 'updated_at']);
+        $solvedCount = 0;
+        if (!empty($attemptCols) && $attemptDateCol) {
+            $sWhere = ['1=1'];
+            $sParams = [];
+            $dateSql = stats_build_date_between_sql('e.`' . $attemptDateCol . '`', $solvedWindow['start_date'], $solvedWindow['end_date'], $sParams);
+            if ($dateSql !== '') {
+                $sWhere[] = $dateSql;
+            }
+
+            $sqlSolved = 'SELECT COUNT(*) FROM `question_attempt_events` e WHERE ' . implode(' AND ', $sWhere);
+            $stmtSolved = $pdo->prepare($sqlSolved);
+            $stmtSolved->execute($sParams);
+            $solvedCount = (int)$stmtSolved->fetchColumn();
+        }
+
+        // Card 3: Toplam Kullanıcı Sayısı
+        $uEmailCol = stats_first_col($upCols, ['email']);
+        $uFullNameCol = stats_first_col($upCols, ['full_name', 'name', 'display_name']);
+        $uDeletedCol = stats_first_col($upCols, ['is_deleted']);
+
+        $uWhere = ['1=1'];
+        $uParams = [];
+        if ($uDeletedCol) {
+            $uWhere[] = '`' . $uDeletedCol . '` = 0';
+        }
+        if ($uEmailCol) {
+            $guestSql = admin_stats_detect_guest_sql('`' . $uEmailCol . '`', $uFullNameCol ? ('`' . $uFullNameCol . '`') : null);
+            if ($userType === 'guest') {
+                $uWhere[] = $guestSql;
+            } elseif ($userType === 'registered') {
+                $uWhere[] = 'NOT ' . $guestSql;
+            }
+        }
+
+        $sqlUsers = 'SELECT COUNT(*) FROM `user_profiles` WHERE ' . implode(' AND ', $uWhere);
+        $stmtUsers = $pdo->prepare($sqlUsers);
+        $stmtUsers->execute($uParams);
+        $totalUsers = (int)$stmtUsers->fetchColumn();
+
+        api_success('Dashboard admin istatistikleri alındı.', [
+            'statistics' => [
+                'total_questions' => $totalQuestions,
+                'solved_questions_count' => $solvedCount,
+                'total_users' => $totalUsers,
+                'filters' => [
+                    'qualification_id' => $qualificationId,
+                    'course_id' => $courseId,
+                    'user_type' => $userType,
+                    'solved_range' => $solvedWindow['range'],
+                    'solved_start_date' => $solvedWindow['start_date'],
+                    'solved_end_date' => $solvedWindow['end_date'],
+                ],
+            ],
+        ]);
+    } catch (Throwable $e) {
+        api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
+    }
 }
 
 try {

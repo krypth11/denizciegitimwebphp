@@ -26,6 +26,63 @@ function dd_rate(int $correct, int $wrong): float
     return $total > 0 ? round(($correct / $total) * 100, 2) : 0.0;
 }
 
+if (($_GET['scope'] ?? '') === 'admin') {
+    try {
+        $auth = api_require_auth($pdo);
+        $isAdmin = !empty($auth['user']['is_admin']);
+        if (!$isAdmin) {
+            api_error('Admin yetkisi gerekli.', 403);
+        }
+
+        $qualificationId = api_validate_optional_id((string)($_GET['qualification_id'] ?? ''), 'qualification_id');
+
+        $qualifications = [];
+        $courses = [];
+
+        $qualCols = get_table_columns($pdo, 'qualifications');
+        $qId = dd_first($qualCols, ['id']);
+        $qName = dd_first($qualCols, ['name', 'title']);
+        $qOrder = dd_first($qualCols, ['order_index']);
+        if ($qId && $qName) {
+            $sql = 'SELECT `' . $qId . '` AS id, `' . $qName . '` AS name'
+                . ($qOrder ? ', `' . $qOrder . '` AS order_index' : ', 0 AS order_index')
+                . ' FROM `qualifications`'
+                . ' ORDER BY order_index ASC, name ASC';
+            $qualifications = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        }
+
+        $courseCols = get_table_columns($pdo, 'courses');
+        $cId = dd_first($courseCols, ['id']);
+        $cName = dd_first($courseCols, ['name', 'title']);
+        $cQual = dd_first($courseCols, ['qualification_id']);
+        $cOrder = dd_first($courseCols, ['order_index']);
+        if ($cId && $cName) {
+            $sql = 'SELECT `' . $cId . '` AS id, `' . $cName . '` AS name'
+                . ($cQual ? ', `' . $cQual . '` AS qualification_id' : ', NULL AS qualification_id')
+                . ($cOrder ? ', `' . $cOrder . '` AS order_index' : ', 0 AS order_index')
+                . ' FROM `courses`';
+            $params = [];
+            if ($qualificationId !== '' && $cQual) {
+                $sql .= ' WHERE `' . $cQual . '` = ?';
+                $params[] = $qualificationId;
+            }
+            $sql .= ' ORDER BY order_index ASC, name ASC';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $courses = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        }
+
+        api_success('Dashboard admin filtre detayları alındı.', [
+            'details' => [
+                'qualifications' => $qualifications,
+                'courses' => $courses,
+            ],
+        ]);
+    } catch (Throwable $e) {
+        api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
+    }
+}
+
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
