@@ -736,11 +736,29 @@ function api_assert_resend_cooldown(PDO $pdo, string $userId, string $purpose): 
 function api_create_email_otp(PDO $pdo, string $userId, string $email, string $purpose): array
 {
     api_assert_resend_cooldown($pdo, $userId, $purpose);
-    api_invalidate_email_otp_codes($pdo, $userId, $purpose);
-
-    $schema = api_get_email_verification_schema($pdo);
     $code = api_generate_email_otp_code();
     $codeHash = api_hash_email_otp($code);
+
+    api_insert_email_otp_record($pdo, $userId, $email, $purpose, $codeHash, true);
+
+    return [
+        'code' => $code,
+    ];
+}
+
+function api_insert_email_otp_record(
+    PDO $pdo,
+    string $userId,
+    string $email,
+    string $purpose,
+    string $codeHash,
+    bool $invalidateExistingFirst = true
+): void {
+    if ($invalidateExistingFirst) {
+        api_invalidate_email_otp_codes($pdo, $userId, $purpose);
+    }
+
+    $schema = api_get_email_verification_schema($pdo);
 
     $columns = [
         '`' . $schema['id'] . '`',
@@ -781,9 +799,6 @@ function api_create_email_otp(PDO $pdo, string $userId, string $email, string $p
         throw new RuntimeException('otp_db_insert_failed: ' . $e->getMessage(), 0, $e);
     }
 
-    return [
-        'code' => $code,
-    ];
 }
 
 function api_get_user_for_email_purpose(PDO $pdo, string $email, string $purpose): ?array
@@ -1155,10 +1170,30 @@ function api_resend_email_otp(PDO $pdo, string $email, string $purpose): array
     }
 
     $targetEmail = strtolower(trim((string)$email));
-    api_create_and_send_email_otp($pdo, (string)$profile['id'], $targetEmail, $purpose);
+    $userId = (string)$profile['id'];
+
+    // Cooldown pass edilirse önce mail gönder, sonra DB'yi güncelle.
+    // Böylece mail fail olursa mevcut aktif kod geçerliliğini korur.
+    api_assert_resend_cooldown($pdo, $userId, $purpose);
+
+    $code = api_generate_email_otp_code();
+    $codeHash = api_hash_email_otp($code);
+
+    api_send_email_otp_mail($targetEmail, $code, $purpose);
+
+    try {
+        $pdo->beginTransaction();
+        api_insert_email_otp_record($pdo, $userId, $targetEmail, $purpose, $codeHash, true);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw new RuntimeException('otp_db_insert_failed: ' . $e->getMessage(), 0, $e);
+    }
 
     return [
-        'user_id' => (string)$profile['id'],
+        'user_id' => $userId,
         'email' => $targetEmail,
         'purpose' => $purpose,
     ];
