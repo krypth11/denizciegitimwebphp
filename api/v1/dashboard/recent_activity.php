@@ -22,6 +22,71 @@ function ra_detect_guest_sql(string $emailExpr, ?string $fullNameExpr): string
     return '(LOWER(' . $emailExpr . ") LIKE '%@guest.local' OR " . $nameExpr . " IN ('misafir kullanıcı', 'misafir kullanici', 'guest user'))";
 }
 
+function ra_fetch_daily_quiz_questions(PDO $pdo, string $userId, string $quizDate, int $max = 50): array
+{
+    $aCols = get_table_columns($pdo, 'question_attempt_events');
+    $qCols = get_table_columns($pdo, 'questions');
+    if (empty($aCols) || empty($qCols)) {
+        return [];
+    }
+
+    $aUser = ra_first_col($aCols, ['user_id']);
+    $aQuestion = ra_first_col($aCols, ['question_id']);
+    $aSelected = ra_first_col($aCols, ['selected_answer', 'answer', 'user_answer']);
+    $aCorrectFlag = ra_first_col($aCols, ['is_correct']);
+    $aAttempted = ra_first_col($aCols, ['attempted_at', 'created_at']);
+    $aSource = ra_first_col($aCols, ['source']);
+
+    $qId = ra_first_col($qCols, ['id']);
+    $qCode = ra_first_col($qCols, ['question_code', 'code']);
+    $qText = ra_first_col($qCols, ['question', 'question_text', 'text', 'content']);
+    $qCorrect = ra_first_col($qCols, ['correct_answer', 'correct_option', 'answer']);
+
+    if (!$aUser || !$aQuestion || !$aAttempted || !$qId) {
+        return [];
+    }
+
+    $sql = 'SELECT e.`' . $aQuestion . '` AS question_id, '
+        . ($qCode ? 'q.`' . $qCode . '`' : 'NULL') . ' AS question_code, '
+        . ($qText ? 'q.`' . $qText . '`' : 'NULL') . ' AS question_text, '
+        . ($aSelected ? 'e.`' . $aSelected . '`' : 'NULL') . ' AS selected_answer, '
+        . ($qCorrect ? 'q.`' . $qCorrect . '`' : 'NULL') . ' AS correct_answer, '
+        . ($aCorrectFlag ? 'e.`' . $aCorrectFlag . '`' : 'NULL') . ' AS is_correct '
+        . 'FROM `question_attempt_events` e '
+        . 'LEFT JOIN `questions` q ON e.`' . $aQuestion . '` = q.`' . $qId . '` '
+        . 'WHERE e.`' . $aUser . '` = ? AND DATE(e.`' . $aAttempted . '`) = ? ';
+
+    $params = [$userId, $quizDate];
+    if ($aSource) {
+        $sql .= 'AND LOWER(TRIM(COALESCE(e.`' . $aSource . "`, ''))) IN ('daily_quiz','daily-quiz','daily quiz') ";
+    }
+
+    $sql .= 'ORDER BY e.`' . $aAttempted . '` ASC LIMIT ' . max(1, min(100, $max));
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $result = [];
+    $order = 1;
+    foreach ($rows as $row) {
+        $selected = strtoupper(trim((string)($row['selected_answer'] ?? '')));
+        $correct = strtoupper(trim((string)($row['correct_answer'] ?? '')));
+        $isCorrect = isset($row['is_correct']) ? ((int)$row['is_correct'] === 1) : ($selected !== '' && $correct !== '' && $selected === $correct);
+
+        $result[] = [
+            'order_no' => $order++,
+            'question_id' => (string)($row['question_id'] ?? ''),
+            'question_code' => $row['question_code'] ?? null,
+            'question_text' => $row['question_text'] ?? null,
+            'selected_answer' => ($selected !== '' ? $selected : null),
+            'correct_answer' => ($correct !== '' ? $correct : null),
+            'is_correct' => $isCorrect,
+        ];
+    }
+
+    return $result;
+}
+
 try {
     $auth = api_require_auth($pdo);
     if (empty($auth['user']['is_admin'])) {
@@ -118,11 +183,19 @@ try {
     $aQuestionId = ra_first_col($aCols, ['question_id']);
     $aCorrect = ra_first_col($aCols, ['is_correct']);
     $aDate = ra_first_col($aCols, ['attempted_at', 'created_at']);
+    $aSelected = ra_first_col($aCols, ['selected_answer', 'answer', 'user_answer']);
 
     $qCols = get_table_columns($pdo, 'questions');
     $qId = ra_first_col($qCols, ['id']);
     $qCourse = ra_first_col($qCols, ['course_id']);
     $qCode = ra_first_col($qCols, ['question_code', 'code']);
+    $qText = ra_first_col($qCols, ['question', 'question_text', 'text', 'content']);
+    $qOptionA = ra_first_col($qCols, ['option_a', 'a_option', 'answer_a']);
+    $qOptionB = ra_first_col($qCols, ['option_b', 'b_option', 'answer_b']);
+    $qOptionC = ra_first_col($qCols, ['option_c', 'c_option', 'answer_c']);
+    $qOptionD = ra_first_col($qCols, ['option_d', 'd_option', 'answer_d']);
+    $qOptionE = ra_first_col($qCols, ['option_e', 'e_option', 'answer_e'],);
+    $qCorrect = ra_first_col($qCols, ['correct_answer', 'correct_option', 'answer']);
 
     $cCols = get_table_columns($pdo, 'courses');
     $cId = ra_first_col($cCols, ['id']);
@@ -137,10 +210,18 @@ try {
         $guestExpr = ra_detect_guest_sql('u.`' . $uEmail . '`', $uFullName ? ('u.`' . $uFullName . '`') : null);
         $sql = 'SELECT e.`' . $aDate . '` AS created_at, e.`' . $aQuestionId . '` AS question_id, '
             . ($aCorrect ? 'e.`' . $aCorrect . '`' : 'NULL') . ' AS is_correct, '
+            . ($aSelected ? 'e.`' . $aSelected . '`' : 'NULL') . ' AS selected_answer, '
             . 'u.`' . $uId . '` AS user_id, u.`' . $uEmail . '` AS email, '
             . ($uFullName ? 'u.`' . $uFullName . '`' : "''") . ' AS full_name, '
             . 'CASE WHEN ' . $guestExpr . " THEN 'guest' ELSE 'registered' END AS user_type, "
             . ($qCode ? 'q.`' . $qCode . '`' : 'NULL') . ' AS question_code, '
+            . ($qText ? 'q.`' . $qText . '`' : 'NULL') . ' AS question_text, '
+            . ($qOptionA ? 'q.`' . $qOptionA . '`' : 'NULL') . ' AS option_a, '
+            . ($qOptionB ? 'q.`' . $qOptionB . '`' : 'NULL') . ' AS option_b, '
+            . ($qOptionC ? 'q.`' . $qOptionC . '`' : 'NULL') . ' AS option_c, '
+            . ($qOptionD ? 'q.`' . $qOptionD . '`' : 'NULL') . ' AS option_d, '
+            . ($qOptionE ? 'q.`' . $qOptionE . '`' : 'NULL') . ' AS option_e, '
+            . ($qCorrect ? 'q.`' . $qCorrect . '`' : 'NULL') . ' AS correct_answer, '
             . ($cName ? 'c.`' . $cName . '`' : 'NULL') . ' AS course_name, '
             . (($qualName && $qualId && $cQual) ? 'qf.`' . $qualName . '`' : 'NULL') . ' AS qualification_name '
             . 'FROM `question_attempt_events` e '
@@ -167,9 +248,18 @@ try {
                 'detail' => [
                     'question_id' => (string)($item['question_id'] ?? ''),
                     'question_code' => $item['question_code'] ?? null,
+                    'question_text' => $item['question_text'] ?? null,
+                    'option_a' => $item['option_a'] ?? null,
+                    'option_b' => $item['option_b'] ?? null,
+                    'option_c' => $item['option_c'] ?? null,
+                    'option_d' => $item['option_d'] ?? null,
+                    'option_e' => $item['option_e'] ?? null,
+                    'correct_answer' => $item['correct_answer'] ?? null,
+                    'selected_answer' => $item['selected_answer'] ?? null,
                     'is_correct' => isset($item['is_correct']) ? ((int)$item['is_correct'] === 1) : null,
                     'qualification_name' => (string)($item['qualification_name'] ?? ''),
                     'course_name' => (string)($item['course_name'] ?? ''),
+                    'attempted_at' => $item['created_at'] ?? null,
                 ],
             ];
         }
@@ -215,8 +305,15 @@ try {
                     'wrong_count' => $wrong,
                     'total_count' => $total,
                     'completed' => ($item['created_at'] ?? null) !== null,
+                    'questions' => [],
                 ],
             ];
+
+            $quizDate = (string)($item['quiz_date'] ?? '');
+            $userId = (string)($item['user_id'] ?? '');
+            if ($quizDate !== '' && $userId !== '') {
+                $rows[count($rows) - 1]['detail']['questions'] = ra_fetch_daily_quiz_questions($pdo, $userId, $quizDate, max(10, $total));
+            }
         }
     }
 

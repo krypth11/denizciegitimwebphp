@@ -203,6 +203,9 @@ include 'includes/sidebar.php';
     let activityInFlight = false;
     let trendsInFlight = false;
     let filtersInFlight = false;
+    let firstStatsLoaded = false;
+    let firstActivitiesLoaded = false;
+    let firstChartLoaded = false;
 
     const qs = (s) => document.querySelector(s);
     const qsa = (s) => Array.from(document.querySelectorAll(s));
@@ -269,6 +272,20 @@ include 'includes/sidebar.php';
         return String(v);
     }
 
+    function setTextIfChanged(selector, value) {
+        const el = qs(selector);
+        if (!el) return;
+        const next = String(value);
+        if (el.textContent !== next) {
+            el.textContent = next;
+        }
+    }
+
+    function normalizeAnswer(v) {
+        const val = String(v || '').trim().toUpperCase();
+        return ['A', 'B', 'C', 'D', 'E'].includes(val) ? val : null;
+    }
+
     function getActiveTypes(containerId) {
         return qsa(`${containerId} .chip.active`).map(x => x.dataset.type);
     }
@@ -311,9 +328,11 @@ include 'includes/sidebar.php';
         if (statisticsInFlight) return;
         statisticsInFlight = true;
 
-        setWidgetLoading('#cardTotalQuestions', true);
-        setWidgetLoading('#cardSolvedQuestions', true);
-        setWidgetLoading('#cardTotalUsers', true);
+        if (!firstStatsLoaded) {
+            setWidgetLoading('#cardTotalQuestions', true);
+            setWidgetLoading('#cardSolvedQuestions', true);
+            setWidgetLoading('#cardTotalUsers', true);
+        }
         setMsg('#totalQuestionsMsg');
         setMsg('#solvedQuestionsMsg');
         setMsg('#totalUsersMsg');
@@ -339,9 +358,9 @@ include 'includes/sidebar.php';
 
             console.log('statistics:', { questionsData, solvedData, usersData });
 
-            qs('#totalQuestionsValue').textContent = formatNumber(questionsData.statistics?.total_questions || 0);
-            qs('#solvedQuestionsValue').textContent = formatNumber(solvedData.statistics?.solved_questions_count || 0);
-            qs('#totalUsersValue').textContent = formatNumber(usersData.statistics?.total_users || 0);
+            setTextIfChanged('#totalQuestionsValue', formatNumber(questionsData.statistics?.total_questions || 0));
+            setTextIfChanged('#solvedQuestionsValue', formatNumber(solvedData.statistics?.solved_questions_count || 0));
+            setTextIfChanged('#totalUsersValue', formatNumber(usersData.statistics?.total_users || 0));
 
             setRefreshNote('#statsRefreshNote');
             setRefreshNote('#solvedRefreshNote');
@@ -351,9 +370,12 @@ include 'includes/sidebar.php';
             setMsg('#solvedQuestionsMsg', e.message, 'error');
             setMsg('#totalUsersMsg', e.message, 'error');
         } finally {
-            setWidgetLoading('#cardTotalQuestions', false);
-            setWidgetLoading('#cardSolvedQuestions', false);
-            setWidgetLoading('#cardTotalUsers', false);
+            if (!firstStatsLoaded) {
+                setWidgetLoading('#cardTotalQuestions', false);
+                setWidgetLoading('#cardSolvedQuestions', false);
+                setWidgetLoading('#cardTotalUsers', false);
+                firstStatsLoaded = true;
+            }
             statisticsInFlight = false;
         }
     }
@@ -391,7 +413,7 @@ include 'includes/sidebar.php';
     }
 
     function activityKey(item) {
-        return [item.type, item.created_at, item.user?.id, item.detail?.question_id, item.detail?.quiz_date].join('|');
+        return [item.type, item.created_at, item.user?.id, item.detail?.question_id, item.detail?.quiz_date, item.detail?.question_code].join('|');
     }
 
     function scoreLabel(percent) {
@@ -407,8 +429,36 @@ include 'includes/sidebar.php';
         `).join('')}</div>`;
     }
 
+    function renderQuestionOptions(detail = {}) {
+        const correct = normalizeAnswer(detail.correct_answer);
+        const selected = normalizeAnswer(detail.selected_answer);
+        const options = [
+            ['A', detail.option_a],
+            ['B', detail.option_b],
+            ['C', detail.option_c],
+            ['D', detail.option_d],
+            ['E', detail.option_e]
+        ].filter(([letter, text]) => letter !== 'E' || (text !== null && text !== undefined && String(text).trim() !== ''));
+
+        if (!options.length) {
+            return '<div class="activity-option-list"><div class="activity-option-item">Şık bilgisi bulunamadı</div></div>';
+        }
+
+        return `<div class="activity-option-list">${options.map(([letter, text]) => {
+            const isCorrect = correct === letter;
+            const isSelected = selected === letter;
+            let cls = 'activity-option-item';
+            if (isCorrect && isSelected) cls += ' activity-option-selected-correct';
+            else if (isCorrect) cls += ' activity-option-correct';
+            else if (isSelected && !isCorrect) cls += ' activity-option-selected-wrong';
+            return `<div class="${cls}"><span>${letter})</span><p>${safe(text, 'Seçenek metni yok')}</p></div>`;
+        }).join('')}</div>`;
+    }
+
     function renderSolvedQuestionDetail(activity) {
         const isCorrect = activity.detail?.is_correct === true;
+        const correctAnswer = normalizeAnswer(activity.detail?.correct_answer);
+        const selectedAnswer = normalizeAnswer(activity.detail?.selected_answer);
         return `
             <div class="activity-detail-modal">
                 <div class="activity-detail-head">
@@ -428,11 +478,20 @@ include 'includes/sidebar.php';
                     ['Ders', safe(activity.detail?.course_name)],
                     ['Soru ID', safe(activity.detail?.question_id)],
                     ['Soru Kodu', safe(activity.detail?.question_code, 'Kod yok')],
-                    ['Çözüm Zamanı', formatDateTime(activity.created_at)]
+                    ['Çözüm Zamanı', formatDateTime(activity.detail?.attempted_at || activity.created_at)]
                 ])}
+                <div class="activity-question-block">
+                    <h6 class="mb-2">Soru Detayı</h6>
+                    <div class="activity-question-text">${safe(activity.detail?.question_text, 'Soru metni bulunamadı')}</div>
+                    ${renderQuestionOptions(activity.detail || {})}
+                    <div class="activity-answer-summary">
+                        <span class="activity-stat-pill">Doğru cevap: ${safe(correctAnswer, 'Doğru cevap bilgisi yok')}</span>
+                        <span class="activity-stat-pill">Kullanıcı seçimi: ${safe(selectedAnswer, 'Seçim kaydı yok')}</span>
+                    </div>
+                </div>
                 <div class="activity-score-box ${isCorrect ? 'activity-result-success' : 'activity-result-danger'}">
-                    <strong>${isCorrect ? 'Başarılı hamle' : 'Tekrar denemeye açık'}</strong>
-                    <small>${isCorrect ? 'Harika! Bu çözüm doğru sonuç verdi.' : 'Bu soru gelişim fırsatı sunuyor. Bir sonraki denemede daha iyi olabilir.'}</small>
+                    <strong>${isCorrect ? 'İsabetli çözüm' : 'Seçim doğru cevaptan farklı'}</strong>
+                    <small>${isCorrect ? 'Harika! Doğru seçenek işaretlendi.' : 'Kısa tekrar ile benzer sorularda isabet artabilir.'}</small>
                 </div>
             </div>`;
     }
@@ -471,6 +530,7 @@ include 'includes/sidebar.php';
         const wrong = Number(activity.detail?.wrong_count || 0);
         const percent = total > 0 ? Math.round((correct / total) * 100) : 0;
         const isCompleted = activity.detail?.completed === true;
+        const qList = Array.isArray(activity.detail?.questions) ? activity.detail.questions : [];
         return `
             <div class="activity-detail-modal">
                 <div class="activity-detail-head">
@@ -482,19 +542,39 @@ include 'includes/sidebar.php';
                     <span class="activity-stat-pill">${activity.user?.user_type === 'guest' ? 'Guest' : 'Kayıtlı'}</span>
                     <span class="activity-stat-pill">Daily Quiz</span>
                 </div>
-                ${buildInfoGrid([
-                    ['Kullanıcı', safe(activity.user?.full_name)],
-                    ['Email', safe(activity.user?.email)],
-                    ['Quiz Tarihi', safe(activity.detail?.quiz_date)],
-                    ['Doğru Sayısı', correct],
-                    ['Yanlış Sayısı', wrong],
-                    ['Toplam Soru', total],
-                    ['Başarı Oranı', `%${percent}`],
-                    ['Aktivite Zamanı', formatDateTime(activity.created_at)]
-                ])}
-                <div class="activity-score-box">
-                    <strong>%${percent} · ${scoreLabel(percent)}</strong>
-                    <div class="activity-progress"><span style="width:${percent}%"></span></div>
+                <div class="activity-quiz-layout">
+                    <div class="activity-quiz-summary">
+                        ${buildInfoGrid([
+                            ['Kullanıcı', safe(activity.user?.full_name)],
+                            ['Email', safe(activity.user?.email)],
+                            ['Quiz Tarihi', safe(activity.detail?.quiz_date)],
+                            ['Doğru Sayısı', correct],
+                            ['Yanlış Sayısı', wrong],
+                            ['Toplam Soru', total],
+                            ['Başarı Oranı', `%${percent}`],
+                            ['Durum', isCompleted ? 'Tamamlandı' : 'Yarım kaldı'],
+                            ['Performans', scoreLabel(percent)],
+                            ['Aktivite Zamanı', formatDateTime(activity.created_at)]
+                        ])}
+                        <div class="activity-score-box">
+                            <strong>%${percent} · ${scoreLabel(percent)}</strong>
+                            <div class="activity-progress"><span style="width:${percent}%"></span></div>
+                        </div>
+                    </div>
+                    <div class="activity-quiz-questions">
+                        <h6>Çözülen Sorular</h6>
+                        ${qList.length ? qList.map(q => `
+                            <div class="activity-quiz-question-item">
+                                <div class="activity-quiz-question-meta">
+                                    <strong>#${safe(q.order_no, '-')}</strong>
+                                    <span>${safe(q.question_code, 'Kod yok')}</span>
+                                    <span class="activity-quiz-question-result ${q.is_correct ? 'activity-result-success' : 'activity-result-danger'}">${q.is_correct ? 'Doğru' : 'Yanlış'}</span>
+                                </div>
+                                <div class="small text-muted" title="${safe(q.question_text, 'Soru metni bulunamadı')}">${safe(q.question_text, 'Soru metni bulunamadı')}</div>
+                                <div class="small">Seçim: <strong>${safe(normalizeAnswer(q.selected_answer), 'Seçim kaydı yok')}</strong> · Doğru: <strong>${safe(normalizeAnswer(q.correct_answer), 'Doğru cevap bilgisi yok')}</strong></div>
+                            </div>
+                        `).join('') : '<div class="text-muted small">Bu quiz için soru listesi detayı bulunamadı</div>'}
+                    </div>
                 </div>
             </div>`;
     }
@@ -552,7 +632,9 @@ include 'includes/sidebar.php';
         const errEl = qs('#activityError');
         const emptyEl = qs('#activityEmpty');
         errEl.classList.add('d-none');
-        listEl.classList.add('is-loading');
+        if (!firstActivitiesLoaded) {
+            listEl.classList.add('is-loading');
+        }
 
         try {
             const params = {
@@ -571,19 +653,27 @@ include 'includes/sidebar.php';
             lastActivitySignature = signature;
 
             activityMap.clear();
-            listEl.innerHTML = '';
             if (!rows.length) {
                 emptyEl.classList.remove('d-none');
                 return;
             }
             emptyEl.classList.add('d-none');
 
-            rows.forEach((item, idx) => {
-                const id = `act-${idx}-${Date.now()}`;
-                activityMap.set(id, item);
-                const row = document.createElement('div');
-                row.className = 'activity-row';
-                row.innerHTML = `
+            const oldNodes = new Map(Array.from(listEl.querySelectorAll('.activity-row')).map((el) => [el.dataset.activityKey, el]));
+            const fragment = document.createDocumentFragment();
+
+            rows.forEach((item) => {
+                const key = activityKey(item);
+                activityMap.set(key, item);
+                const hash = JSON.stringify([item.type, item.title, item.subtitle, item.created_at, item.user?.full_name, item.user?.email, item.detail?.is_correct, item.detail?.correct_count, item.detail?.total_count]);
+                let row = oldNodes.get(key);
+                if (!row) {
+                    row = document.createElement('div');
+                    row.className = 'activity-row';
+                    row.dataset.activityKey = key;
+                }
+                if (row.dataset.hash !== hash) {
+                    row.innerHTML = `
                     <div class="activity-icon"><i class="bi ${activityIcon(item.type)}"></i></div>
                     <div class="activity-row-main">
                         <div class="activity-title-row">
@@ -594,18 +684,28 @@ include 'includes/sidebar.php';
                         <div class="activity-timestamp">${formatDateTime(item.created_at)} · ${(item.user?.full_name || item.user?.email || '-')}</div>
                     </div>
                     <div>
-                        <button class="btn btn-sm btn-outline-secondary activity-view-btn" data-activity-id="${id}" title="Detayı Gör">
+                        <button class="btn btn-sm btn-outline-secondary activity-view-btn" data-activity-key="${key}" title="Detayı Gör">
                             <i class="bi bi-eye"></i>
                         </button>
                     </div>`;
-                listEl.appendChild(row);
+                    row.dataset.hash = hash;
+                }
+
+                oldNodes.delete(key);
+                fragment.appendChild(row);
             });
+
+            oldNodes.forEach((node) => node.remove());
+            listEl.replaceChildren(fragment);
             setActivityRefreshInfo();
         } catch (e) {
             errEl.textContent = e.message;
             errEl.classList.remove('d-none');
         } finally {
-            listEl.classList.remove('is-loading');
+            if (!firstActivitiesLoaded) {
+                listEl.classList.remove('is-loading');
+                firstActivitiesLoaded = true;
+            }
             activityInFlight = false;
         }
     }
@@ -670,21 +770,28 @@ include 'includes/sidebar.php';
                 }));
 
             const ctx = qs('#activityLineChart').getContext('2d');
-            if (activityChart) activityChart.destroy();
-            activityChart = new Chart(ctx, {
-                type: 'line',
-                data: { labels, datasets },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
-                    plugins: { legend: { position: 'bottom' } }
-                }
-            });
+            if (!activityChart) {
+                activityChart = new Chart(ctx, {
+                    type: 'line',
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: false,
+                        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+                        plugins: { legend: { position: 'bottom' } }
+                    }
+                });
+            } else {
+                activityChart.data.labels = labels;
+                activityChart.data.datasets = datasets;
+                activityChart.update('none');
+            }
             setRefreshNote('#chartRefreshInfo');
         } catch (e) {
             setMsg('#chartMsg', e.message, 'error');
         } finally {
+            if (!firstChartLoaded) firstChartLoaded = true;
             trendsInFlight = false;
         }
     }
@@ -759,7 +866,7 @@ include 'includes/sidebar.php';
         qs('#activityList').addEventListener('click', (e) => {
             const btn = e.target.closest('.activity-view-btn');
             if (!btn) return;
-            const item = activityMap.get(btn.dataset.activityId);
+            const item = activityMap.get(btn.dataset.activityKey);
             if (item) openActivityModal(item);
         });
 
