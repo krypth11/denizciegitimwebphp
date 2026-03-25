@@ -921,53 +921,35 @@ function api_verify_email_otp(PDO $pdo, string $email, string $purpose, string $
 
 function api_get_smtp_config(): array
 {
-    $config = [
-        'host' => defined('SMTP_HOST') ? trim((string)SMTP_HOST) : '',
-        'port' => defined('SMTP_PORT') ? (int)SMTP_PORT : 587,
-        'username' => defined('SMTP_USERNAME') ? trim((string)SMTP_USERNAME) : '',
-        'password' => defined('SMTP_PASSWORD') ? (string)SMTP_PASSWORD : '',
-        'encryption' => defined('SMTP_ENCRYPTION') ? strtolower(trim((string)SMTP_ENCRYPTION)) : 'tls',
-        'from_email' => defined('SMTP_FROM_EMAIL') ? trim((string)SMTP_FROM_EMAIL) : '',
-        'from_name' => defined('SMTP_FROM_NAME') ? trim((string)SMTP_FROM_NAME) : 'System',
-    ];
-
-    // Geriye uyumluluk: config/mail.php desteği
+    $mailConfig = [];
     $mailConfigPath = dirname(__DIR__, 2) . '/config/mail.php';
     if (is_file($mailConfigPath)) {
-        $mailConfig = require $mailConfigPath;
-        if (is_array($mailConfig)) {
-            if ($config['host'] === '' && !empty($mailConfig['host'])) {
-                $config['host'] = trim((string)$mailConfig['host']);
-            }
-            if ((int)$config['port'] <= 0 && !empty($mailConfig['port'])) {
-                $config['port'] = (int)$mailConfig['port'];
-            }
-            if ($config['username'] === '' && !empty($mailConfig['username'])) {
-                $config['username'] = trim((string)$mailConfig['username']);
-            }
-            if ($config['password'] === '' && array_key_exists('password', $mailConfig)) {
-                $config['password'] = (string)$mailConfig['password'];
-            }
-
-            $mailSecure = strtolower(trim((string)($mailConfig['secure'] ?? $mailConfig['encryption'] ?? '')));
-            if (($config['encryption'] === '' || $config['encryption'] === 'tls') && $mailSecure !== '') {
-                $config['encryption'] = $mailSecure;
-            }
-
-            if ($config['from_email'] === '' && !empty($mailConfig['from_email'])) {
-                $config['from_email'] = trim((string)$mailConfig['from_email']);
-            }
-            if (($config['from_name'] === '' || $config['from_name'] === 'System') && !empty($mailConfig['from_name'])) {
-                $config['from_name'] = trim((string)$mailConfig['from_name']);
-            }
+        $loaded = require $mailConfigPath;
+        if (is_array($loaded)) {
+            $mailConfig = $loaded;
         }
     }
+
+    $mailSecure = strtolower(trim((string)($mailConfig['secure'] ?? $mailConfig['encryption'] ?? '')));
+
+    $config = [
+        // config/mail.php varsa öncelik ver (testte çalışan ayarlar garanti edilsin)
+        'host' => trim((string)($mailConfig['host'] ?? (defined('SMTP_HOST') ? SMTP_HOST : ''))),
+        'port' => (int)($mailConfig['port'] ?? (defined('SMTP_PORT') ? SMTP_PORT : 587)),
+        'username' => trim((string)($mailConfig['username'] ?? (defined('SMTP_USERNAME') ? SMTP_USERNAME : ''))),
+        'password' => (string)($mailConfig['password'] ?? (defined('SMTP_PASSWORD') ? SMTP_PASSWORD : '')),
+        'encryption' => $mailSecure !== ''
+            ? $mailSecure
+            : strtolower(trim((string)(defined('SMTP_ENCRYPTION') ? SMTP_ENCRYPTION : 'none'))),
+        'from_email' => trim((string)($mailConfig['from_email'] ?? (defined('SMTP_FROM_EMAIL') ? SMTP_FROM_EMAIL : ''))),
+        'from_name' => trim((string)($mailConfig['from_name'] ?? (defined('SMTP_FROM_NAME') ? SMTP_FROM_NAME : 'System'))),
+    ];
 
     if ((int)$config['port'] <= 0) {
         $config['port'] = 587;
     }
     if (!in_array($config['encryption'], ['tls', 'ssl', 'none', ''], true)) {
-        $config['encryption'] = 'tls';
+        $config['encryption'] = 'none';
     }
 
     if ($config['host'] === '' || $config['from_email'] === '') {
@@ -1015,16 +997,15 @@ function api_get_smtp_debug_meta(): array
     if (is_file($mailConfigPath)) {
         $mailConfig = require $mailConfigPath;
         if (is_array($mailConfig)) {
-            if ($host === '' && !empty($mailConfig['host'])) {
+            if (!empty($mailConfig['host'])) {
                 $host = trim((string)$mailConfig['host']);
             }
-            if ($port <= 0 && !empty($mailConfig['port'])) {
+            if (!empty($mailConfig['port'])) {
                 $port = (int)$mailConfig['port'];
             }
-            if ($encryption === '' && !empty($mailConfig['secure'])) {
+            if (!empty($mailConfig['secure'])) {
                 $encryption = strtolower(trim((string)$mailConfig['secure']));
-            }
-            if ($encryption === '' && !empty($mailConfig['encryption'])) {
+            } elseif (!empty($mailConfig['encryption'])) {
                 $encryption = strtolower(trim((string)$mailConfig['encryption']));
             }
         }
@@ -1037,7 +1018,7 @@ function api_get_smtp_debug_meta(): array
     return [
         'smtp_host' => $host,
         'smtp_port' => $port,
-        'smtp_encryption' => ($encryption !== '' ? $encryption : 'tls'),
+        'smtp_encryption' => ($encryption !== '' ? $encryption : 'none'),
     ];
 }
 
@@ -1157,6 +1138,12 @@ function api_create_and_send_email_otp(PDO $pdo, string $userId, string $email, 
         api_send_email_otp_mail($email, (string)$otp['code'], $purpose);
     } catch (Throwable $e) {
         $debug = api_get_smtp_debug_meta();
+        error_log(
+            'SMTP OTP send error: ' . $e->getMessage()
+            . ' | host=' . (string)$debug['smtp_host']
+            . ' | port=' . (string)$debug['smtp_port']
+            . ' | encryption=' . (string)$debug['smtp_encryption']
+        );
         api_send_json([
             'success' => false,
             'message' => 'SMTP gönderim hatası: ' . $e->getMessage(),
