@@ -33,6 +33,11 @@ try {
         api_error('Bu email zaten kullanımda', 409);
     }
 
+    $passwordHash = hash_password($password);
+    if (!is_string($passwordHash) || trim($passwordHash) === '') {
+        api_error('Kayıt sırasında bir sunucu hatası oluştu.', 500);
+    }
+
     try {
         $pdo->beginTransaction();
 
@@ -53,7 +58,7 @@ try {
         $userId = api_create_user_profile($pdo, [
             'full_name' => $fullName,
             'email' => $tempEmail,
-            'password_hash' => null,
+            'password_hash' => $passwordHash,
             'is_admin' => 0,
             'is_guest' => 1,
             'onboarding_completed' => 0,
@@ -63,6 +68,20 @@ try {
             'current_qualification_id' => null,
             'target_qualification_id' => null,
         ]);
+
+        // Internal guard: pending kullanıcıda password hash gerçekten kaydedilmiş olmalı.
+        $profileSchema = api_get_profile_schema($pdo);
+        if (!$profileSchema['password']) {
+            throw new RuntimeException('password_hash kolonu bulunamadı', 500);
+        }
+        $stmtPwd = $pdo->prepare(
+            'SELECT `' . $profileSchema['password'] . '` FROM `' . $profileSchema['table'] . '` WHERE `' . $profileSchema['id'] . '` = ? LIMIT 1'
+        );
+        $stmtPwd->execute([$userId]);
+        $storedPasswordHash = (string)($stmtPwd->fetchColumn() ?? '');
+        if (trim($storedPasswordHash) === '') {
+            throw new RuntimeException('pending signup password_hash boş kaydedildi', 500);
+        }
 
         $token = api_create_user_token($pdo, $userId);
         api_update_last_sign_in($pdo, $userId);
@@ -82,7 +101,7 @@ try {
 
         api_send_json([
             'success' => false,
-            'message' => $e->getMessage(),
+            'message' => 'Kayıt sırasında bir sunucu hatası oluştu.',
             'step' => 'email_otp_send_failed',
             'endpoint' => 'register',
         ], 500);
