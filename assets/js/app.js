@@ -1,5 +1,5 @@
 function resolveThemeMode(preference) {
-    const pref = ['light', 'dark', 'system'].includes(preference) ? preference : 'system';
+    const pref = ['light', 'dark', 'system'].includes(preference) ? preference : 'dark';
     if (pref === 'system') {
         return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
     }
@@ -24,12 +24,12 @@ function applyGlobalTheme(preference, persist = true) {
 window.applyGlobalTheme = applyGlobalTheme;
 
 try {
-    applyGlobalTheme(localStorage.getItem('app_theme') || 'system', false);
+    applyGlobalTheme(localStorage.getItem('app_theme') || 'dark', false);
 
     if (window.matchMedia) {
         const mq = window.matchMedia('(prefers-color-scheme: dark)');
         const onSystemThemeChange = function () {
-            const pref = localStorage.getItem('app_theme') || 'system';
+            const pref = localStorage.getItem('app_theme') || 'dark';
             if (pref === 'system') applyGlobalTheme('system', false);
         };
 
@@ -42,7 +42,7 @@ try {
 
     window.addEventListener('storage', function (e) {
         if (e.key === 'app_theme') {
-            applyGlobalTheme(e.newValue || 'system', false);
+            applyGlobalTheme(e.newValue || 'dark', false);
         }
     });
 } catch (e) {}

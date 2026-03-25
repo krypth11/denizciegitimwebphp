@@ -38,7 +38,7 @@ include '../includes/sidebar.php';
                 <div class="card h-100">
                     <div class="card-header bg-white"><h6 class="mb-0">Tema Ayarları</h6></div>
                     <div class="card-body">
-                        <input type="hidden" name="theme_mode" id="theme_mode" value="system">
+                        <input type="hidden" name="theme_mode" id="theme_mode" value="dark">
                         <div class="theme-toggle" role="group" aria-label="Tema Seçimi">
                             <button type="button" class="theme-toggle-btn" data-theme="light">
                                 <i class="bi bi-sun-fill"></i>
@@ -276,7 +276,7 @@ $(document).ready(function () {
     let isSaving = false;
 
     function normalizeThemePreference(mode) {
-        return ['light', 'dark', 'system'].includes(mode) ? mode : 'system';
+        return ['light', 'dark', 'system'].includes(mode) ? mode : 'dark';
     }
 
     function setThemeToggle(mode) {
@@ -304,7 +304,7 @@ $(document).ready(function () {
     }
 
     function initTheme() {
-        const saved = localStorage.getItem('app_theme') || 'system';
+        const saved = localStorage.getItem('app_theme') || 'dark';
         applyTheme(saved, false);
     }
 
@@ -367,7 +367,7 @@ $(document).ready(function () {
         $('#default_question_count').val(s.default_question_count ?? 10);
         $('#default_question_type').val(s.default_question_type || 'all');
 
-        applyTheme(localStorage.getItem('app_theme') || 'system', false);
+        applyTheme(localStorage.getItem('app_theme') || 'dark', false);
         markCleanSnapshot();
     }
 
@@ -411,7 +411,7 @@ $(document).ready(function () {
             default_question_type: $('#default_question_type').val() || 'all'
         };
 
-        localStorage.setItem('app_theme', $('#theme_mode').val() || 'system');
+        localStorage.setItem('app_theme', $('#theme_mode').val() || 'dark');
 
         isSaving = true;
         const res = await api('save_settings', 'POST', payload);

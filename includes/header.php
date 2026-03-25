@@ -16,8 +16,8 @@ $customCssVersion = file_exists($customCssPath) ? filemtime($customCssPath) : ti
     <script>
         (function () {
             try {
-                var pref = localStorage.getItem('app_theme') || 'system';
-                if (!['light', 'dark', 'system'].includes(pref)) pref = 'system';
+                var pref = localStorage.getItem('app_theme') || 'dark';
+                if (!['light', 'dark', 'system'].includes(pref)) pref = 'dark';
 
                 var resolved = pref;
                 if (pref === 'system') {

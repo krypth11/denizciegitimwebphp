@@ -7,39 +7,6 @@ $user = require_auth();
 $current_page = 'questions';
 $page_title = 'Sorular';
 
-$filter_qualification = $_GET['qualification'] ?? '';
-$filter_course = $_GET['course'] ?? '';
-$filter_type = $_GET['type'] ?? '';
-
-$sql = "
-    SELECT q.*, c.name as course_name, qual.name as qualification_name, c.qualification_id
-    FROM questions q
-    LEFT JOIN courses c ON q.course_id = c.id
-    LEFT JOIN qualifications qual ON c.qualification_id = qual.id
-    WHERE 1=1
-";
-
-$params = [];
-
-if (!empty($filter_qualification)) {
-    $sql .= ' AND c.qualification_id = ?';
-    $params[] = $filter_qualification;
-}
-if (!empty($filter_course)) {
-    $sql .= ' AND q.course_id = ?';
-    $params[] = $filter_course;
-}
-if (!empty($filter_type)) {
-    $sql .= ' AND q.question_type = ?';
-    $params[] = $filter_type;
-}
-
-$sql .= ' ORDER BY q.created_at DESC LIMIT 500';
-
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
-$questions = $stmt->fetchAll();
-
 $qualifications = $pdo->query('SELECT * FROM qualifications ORDER BY order_index, name')->fetchAll();
 $courses = $pdo->query(
     "SELECT c.*, q.name as qualification_name
@@ -78,41 +45,48 @@ include '../includes/sidebar.php';
 
     <div class="card mb-3">
         <div class="card-body">
-            <form method="GET" class="row g-3">
+            <div class="row g-3">
                 <div class="col-md-3">
                     <label class="form-label">Yeterlilik</label>
-                    <select class="form-select" name="qualification" id="filter_qualification">
-                        <option value="">Tüm Yeterlilikler</option>
-                        <?php foreach ($qualifications as $q): ?>
-                            <option value="<?= htmlspecialchars($q['id']) ?>" <?= $filter_qualification === $q['id'] ? 'selected' : '' ?>><?= htmlspecialchars($q['name']) ?></option>
-                        <?php endforeach; ?>
+                    <select class="form-select" id="filterQualification">
+                        <option value="">Tüm yeterlilikler</option>
                     </select>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label class="form-label">Ders</label>
-                    <select class="form-select" name="course" id="filter_course">
-                        <option value="">Tüm Dersler</option>
-                        <?php foreach ($courses as $c): ?>
-                            <option value="<?= htmlspecialchars($c['id']) ?>" data-qualification="<?= htmlspecialchars($c['qualification_id']) ?>" <?= $filter_course === $c['id'] ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?>
-                            </option>
-                        <?php endforeach; ?>
+                    <select class="form-select" id="filterCourse" disabled>
+                        <option value="">Tüm dersler</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Konu</label>
+                    <select class="form-select" id="filterTopic" disabled>
+                        <option value="">Tüm konular</option>
                     </select>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Tip</label>
-                    <select class="form-select" name="type">
+                    <select class="form-select" id="filterType">
                         <option value="">Tümü</option>
-                        <option value="sayısal" <?= $filter_type === 'sayısal' ? 'selected' : '' ?>>Sayısal</option>
-                        <option value="sözel" <?= $filter_type === 'sözel' ? 'selected' : '' ?>>Sözel</option>
-                        <option value="karışık" <?= $filter_type === 'karışık' ? 'selected' : '' ?>>Karışık</option>
+                        <option value="sayısal">Sayısal</option>
+                        <option value="sözel">Sözel</option>
+                        <option value="karışık">Karışık</option>
                     </select>
                 </div>
-                <div class="col-md-3 d-flex align-items-end toolbar-wrap">
-                    <button type="submit" class="btn btn-primary me-2"><i class="bi bi-funnel"></i> Filtrele</button>
-                    <a href="/pages/questions.php" class="btn btn-secondary"><i class="bi bi-x-circle"></i> Temizle</a>
+                <div class="col-md-2">
+                    <label class="form-label">Durum</label>
+                    <select class="form-select" id="filterStatus" disabled>
+                        <option value="">Tümü</option>
+                    </select>
                 </div>
-            </form>
+                <div class="col-md-10">
+                    <label class="form-label">Arama</label>
+                    <input type="search" class="form-control" id="filterSearch" placeholder="Soru metni / şık / açıklama ara...">
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-secondary w-100" id="clearFiltersBtn"><i class="bi bi-x-circle"></i> Filtreyi Temizle</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -129,89 +103,16 @@ include '../includes/sidebar.php';
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($questions as $q): ?>
-                    <tr class="question-row-card desktop-question-row">
-                        <td class="questions-col-select" onclick="event.stopPropagation()"><input type="checkbox" class="question-checkbox" value="<?= htmlspecialchars($q['id']) ?>"></td>
-                        <td class="questions-col-question">
-                            <div class="question-mobile-head">
-                                <strong class="question-title-mobile question-title">
-                                    <?= htmlspecialchars(mb_strlen($q['question_text']) > 220 ? mb_substr($q['question_text'], 0, 220) . '…' : $q['question_text']) ?>
-                                </strong>
-                            </div>
-                            <div class="mt-1">
-                                <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
-                                <?php elseif ($q['question_type'] === 'karışık'): ?><span class="badge bg-warning text-dark">Karışık</span>
-                                <?php else: ?><span class="badge bg-info">Sözel</span><?php endif; ?>
-                            </div>
-                            <div class="question-mobile-meta d-none">
-                                <span><?= htmlspecialchars($q['qualification_name']) ?></span>
-                                <span>/</span>
-                                <span><?= htmlspecialchars($q['course_name']) ?></span>
-                            </div>
-                            <div class="meq-options-grid mt-2">
-                                <div class="meq-option <?= $q['correct_answer'] === 'A' ? 'meq-option-correct' : '' ?>">A) <?= htmlspecialchars(mb_strlen($q['option_a']) > 90 ? mb_substr($q['option_a'], 0, 90) . '…' : $q['option_a']) ?></div>
-                                <div class="meq-option <?= $q['correct_answer'] === 'B' ? 'meq-option-correct' : '' ?>">B) <?= htmlspecialchars(mb_strlen($q['option_b']) > 90 ? mb_substr($q['option_b'], 0, 90) . '…' : $q['option_b']) ?></div>
-                                <div class="meq-option <?= $q['correct_answer'] === 'C' ? 'meq-option-correct' : '' ?>">C) <?= htmlspecialchars(mb_strlen($q['option_c']) > 90 ? mb_substr($q['option_c'], 0, 90) . '…' : $q['option_c']) ?></div>
-                                <div class="meq-option <?= $q['correct_answer'] === 'D' ? 'meq-option-correct' : '' ?>">D) <?= htmlspecialchars(mb_strlen($q['option_d']) > 90 ? mb_substr($q['option_d'], 0, 90) . '…' : $q['option_d']) ?></div>
-                                <?php if (!empty($q['option_e'])): ?>
-                                <div class="meq-option <?= $q['correct_answer'] === 'E' ? 'meq-option-correct' : '' ?>">E) <?= htmlspecialchars(mb_strlen($q['option_e']) > 90 ? mb_substr($q['option_e'], 0, 90) . '…' : $q['option_e']) ?></div>
-                                <?php endif; ?>
-                            </div>
-                        </td>
-                        <td class="questions-col-meta">
-                            <div><?= htmlspecialchars($q['qualification_name']) ?></div>
-                            <small class="text-muted"><?= htmlspecialchars($q['course_name']) ?></small>
-                        </td>
-                        <td class="questions-actions-cell" onclick="event.stopPropagation()">
-                            <div class="table-actions questions-actions-wrap">
-                                <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Düzenle"><i class="bi bi-pencil"></i></button>
-                                <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($q['id']) ?>" title="Sil"><i class="bi bi-trash"></i></button>
-                            </div>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
+                    <tr><td colspan="4" class="text-muted p-3">Yükleniyor...</td></tr>
                 </tbody>
             </table>
+            <div class="text-muted p-2 d-none" id="questionsDesktopEmpty">Kayıt bulunamadı.</div>
             </div>
         </div>
     </div>
 
-    <div class="d-md-none">
-        <?php foreach ($questions as $q): ?>
-            <div class="card mb-3 meq-mobile-card">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start gap-2">
-                        <div class="form-check" onclick="event.stopPropagation()">
-                            <input type="checkbox" class="form-check-input question-checkbox" value="<?= htmlspecialchars($q['id']) ?>">
-                        </div>
-                        <div>
-                            <?php if ($q['question_type'] === 'sayısal'): ?><span class="badge bg-success">Sayısal</span>
-                            <?php elseif ($q['question_type'] === 'karışık'): ?><span class="badge bg-warning text-dark">Karışık</span>
-                            <?php else: ?><span class="badge bg-info">Sözel</span><?php endif; ?>
-                        </div>
-                    </div>
-
-                    <div class="fw-semibold mt-2"><?= htmlspecialchars(mb_strlen($q['question_text']) > 220 ? mb_substr($q['question_text'], 0, 220) . '…' : $q['question_text']) ?></div>
-                    <div class="small text-muted mt-1"><?= htmlspecialchars($q['qualification_name']) ?> / <?= htmlspecialchars($q['course_name']) ?></div>
-
-                    <div class="meq-options-grid mt-2">
-                        <div class="meq-option <?= $q['correct_answer'] === 'A' ? 'meq-option-correct' : '' ?>">A) <?= htmlspecialchars(mb_strlen($q['option_a']) > 90 ? mb_substr($q['option_a'], 0, 90) . '…' : $q['option_a']) ?></div>
-                        <div class="meq-option <?= $q['correct_answer'] === 'B' ? 'meq-option-correct' : '' ?>">B) <?= htmlspecialchars(mb_strlen($q['option_b']) > 90 ? mb_substr($q['option_b'], 0, 90) . '…' : $q['option_b']) ?></div>
-                        <div class="meq-option <?= $q['correct_answer'] === 'C' ? 'meq-option-correct' : '' ?>">C) <?= htmlspecialchars(mb_strlen($q['option_c']) > 90 ? mb_substr($q['option_c'], 0, 90) . '…' : $q['option_c']) ?></div>
-                        <div class="meq-option <?= $q['correct_answer'] === 'D' ? 'meq-option-correct' : '' ?>">D) <?= htmlspecialchars(mb_strlen($q['option_d']) > 90 ? mb_substr($q['option_d'], 0, 90) . '…' : $q['option_d']) ?></div>
-                        <?php if (!empty($q['option_e'])): ?>
-                        <div class="meq-option <?= $q['correct_answer'] === 'E' ? 'meq-option-correct' : '' ?>">E) <?= htmlspecialchars(mb_strlen($q['option_e']) > 90 ? mb_substr($q['option_e'], 0, 90) . '…' : $q['option_e']) ?></div>
-                        <?php endif; ?>
-                    </div>
-
-                    <div class="d-flex justify-content-end gap-2 mt-3">
-                        <button class="btn btn-sm btn-warning edit-btn" data-id="<?= htmlspecialchars($q['id']) ?>"><i class="bi bi-pencil"></i> Düzenle</button>
-                        <button class="btn btn-sm btn-danger delete-btn" data-id="<?= htmlspecialchars($q['id']) ?>"><i class="bi bi-trash"></i> Sil</button>
-                    </div>
-                </div>
-            </div>
-        <?php endforeach; ?>
-    </div>
+    <div class="d-md-none" id="questionsMobileList"></div>
+    <div class="alert alert-light text-muted d-none mt-2" id="questionsMobileEmpty">Kayıt bulunamadı.</div>
 </div>
 
 <!-- Add / Edit modalları -->
@@ -718,21 +619,245 @@ $(document).ready(function() {
         return Promise.resolve(false);
     };
 
-    $('#questionsTable').DataTable({
-        language: { url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/tr.json' },
-        order: [],
-        pageLength: 50,
-        responsive: true,
-        columnDefs: [{ orderable: false, targets: [0, 3] }]
+    const esc = (v) => $('<div>').text(v ?? '').html();
+    const qState = {
+        qualifications: [],
+        courses: [],
+        topics: [],
+        filters: {
+            qualification_id: '',
+            course_id: '',
+            topic_id: '',
+            question_type: '',
+            status: '',
+            search: ''
+        },
+        meta: {
+            has_topic_filter: false,
+            has_status_filter: false,
+            status_options: []
+        }
+    };
+
+    const shortText = (txt, max = 90) => {
+        const t = String(txt || '');
+        return t.length > max ? `${t.slice(0, max)}…` : t;
+    };
+
+    const typeBadge = (type) => {
+        if (type === 'sayısal') return '<span class="badge bg-success">Sayısal</span>';
+        if (type === 'karışık') return '<span class="badge bg-warning text-dark">Karışık</span>';
+        return '<span class="badge bg-info">Sözel</span>';
+    };
+
+    function renderDesktopRows(rows) {
+        const $tb = $('#questionsTable tbody');
+        if (!rows.length) {
+            $tb.html('<tr><td colspan="4" class="text-muted p-3">Kayıt bulunamadı.</td></tr>');
+            return;
+        }
+
+        const html = rows.map((q) => {
+            const optE = q.option_e ? `<div class="meq-option ${q.correct_answer === 'E' ? 'meq-option-correct' : ''}">E) ${esc(shortText(q.option_e))}</div>` : '';
+            return `
+                <tr class="question-row-card desktop-question-row">
+                    <td class="questions-col-select" onclick="event.stopPropagation()"><input type="checkbox" class="question-checkbox" value="${esc(q.id)}"></td>
+                    <td class="questions-col-question">
+                        <div class="question-mobile-head">
+                            <strong class="question-title-mobile question-title">${esc(shortText(q.question_text, 220))}</strong>
+                        </div>
+                        <div class="mt-1">${typeBadge(q.question_type)}</div>
+                        <div class="question-mobile-meta d-none">
+                            <span>${esc(q.qualification_name || '-')}</span><span>/</span><span>${esc(q.course_name || '-')}</span>
+                        </div>
+                        <div class="meq-options-grid mt-2">
+                            <div class="meq-option ${q.correct_answer === 'A' ? 'meq-option-correct' : ''}">A) ${esc(shortText(q.option_a))}</div>
+                            <div class="meq-option ${q.correct_answer === 'B' ? 'meq-option-correct' : ''}">B) ${esc(shortText(q.option_b))}</div>
+                            <div class="meq-option ${q.correct_answer === 'C' ? 'meq-option-correct' : ''}">C) ${esc(shortText(q.option_c))}</div>
+                            <div class="meq-option ${q.correct_answer === 'D' ? 'meq-option-correct' : ''}">D) ${esc(shortText(q.option_d))}</div>
+                            ${optE}
+                        </div>
+                    </td>
+                    <td class="questions-col-meta">
+                        <div>${esc(q.qualification_name || '-')}</div>
+                        <small class="text-muted">${esc(q.course_name || '-')}</small>
+                    </td>
+                    <td class="questions-actions-cell" onclick="event.stopPropagation()">
+                        <div class="table-actions questions-actions-wrap">
+                            <button class="btn btn-sm btn-warning edit-btn" data-id="${esc(q.id)}" title="Düzenle"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-sm btn-danger delete-btn" data-id="${esc(q.id)}" title="Sil"><i class="bi bi-trash"></i></button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        $tb.html(html);
+    }
+
+    function renderMobileRows(rows) {
+        const $list = $('#questionsMobileList');
+        if (!rows.length) {
+            $list.empty();
+            $('#questionsMobileEmpty').removeClass('d-none');
+            return;
+        }
+        $('#questionsMobileEmpty').addClass('d-none');
+
+        const html = rows.map((q) => {
+            const optE = q.option_e ? `<div class="meq-option ${q.correct_answer === 'E' ? 'meq-option-correct' : ''}">E) ${esc(shortText(q.option_e))}</div>` : '';
+            return `
+                <div class="card mb-3 meq-mobile-card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div class="form-check" onclick="event.stopPropagation()">
+                                <input type="checkbox" class="form-check-input question-checkbox" value="${esc(q.id)}">
+                            </div>
+                            <div>${typeBadge(q.question_type)}</div>
+                        </div>
+                        <div class="fw-semibold mt-2">${esc(shortText(q.question_text, 220))}</div>
+                        <div class="small text-muted mt-1">${esc(q.qualification_name || '-')} / ${esc(q.course_name || '-')}</div>
+                        <div class="meq-options-grid mt-2">
+                            <div class="meq-option ${q.correct_answer === 'A' ? 'meq-option-correct' : ''}">A) ${esc(shortText(q.option_a))}</div>
+                            <div class="meq-option ${q.correct_answer === 'B' ? 'meq-option-correct' : ''}">B) ${esc(shortText(q.option_b))}</div>
+                            <div class="meq-option ${q.correct_answer === 'C' ? 'meq-option-correct' : ''}">C) ${esc(shortText(q.option_c))}</div>
+                            <div class="meq-option ${q.correct_answer === 'D' ? 'meq-option-correct' : ''}">D) ${esc(shortText(q.option_d))}</div>
+                            ${optE}
+                        </div>
+                        <div class="d-flex justify-content-end gap-2 mt-3">
+                            <button class="btn btn-sm btn-warning edit-btn" data-id="${esc(q.id)}"><i class="bi bi-pencil"></i> Düzenle</button>
+                            <button class="btn btn-sm btn-danger delete-btn" data-id="${esc(q.id)}"><i class="bi bi-trash"></i> Sil</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        $list.html(html);
+    }
+
+    function renderStatusOptions() {
+        const $status = $('#filterStatus');
+        $status.html('<option value="">Tümü</option>');
+        if (!qState.meta.has_status_filter) {
+            $status.prop('disabled', true);
+            return;
+        }
+        (qState.meta.status_options || []).forEach((s) => {
+            $status.append(`<option value="${esc(s.value)}">${esc(s.label || s.value)}</option>`);
+        });
+        $status.prop('disabled', false).val(qState.filters.status || '');
+    }
+
+    async function loadQualifications() {
+        const res = await window.appAjax({ url: '../ajax/questions.php?action=list_qualifications' });
+        if (!res.success) return;
+        qState.qualifications = res.data?.qualifications || [];
+        const $q = $('#filterQualification');
+        $q.html('<option value="">Tüm yeterlilikler</option>');
+        qState.qualifications.forEach((row) => {
+            $q.append(`<option value="${esc(row.id)}">${esc(row.name)}</option>`);
+        });
+    }
+
+    async function loadCourses() {
+        const query = qState.filters.qualification_id ? `&qualification_id=${encodeURIComponent(qState.filters.qualification_id)}` : '';
+        const res = await window.appAjax({ url: `../ajax/questions.php?action=list_courses${query}` });
+        if (!res.success) return;
+        qState.courses = res.data?.courses || [];
+        const $c = $('#filterCourse');
+        $c.html('<option value="">Tüm dersler</option>');
+        qState.courses.forEach((row) => $c.append(`<option value="${esc(row.id)}">${esc(row.name)}</option>`));
+        $c.prop('disabled', qState.courses.length === 0).val(qState.filters.course_id || '');
+    }
+
+    async function loadTopics() {
+        const $t = $('#filterTopic');
+        if (!qState.filters.course_id) {
+            qState.topics = [];
+            $t.html('<option value="">Tüm konular</option>').prop('disabled', true);
+            qState.filters.topic_id = '';
+            return;
+        }
+        const res = await window.appAjax({ url: `../ajax/questions.php?action=list_topics&course_id=${encodeURIComponent(qState.filters.course_id)}` });
+        if (!res.success) return;
+        qState.meta.has_topic_filter = !!(res.data?.meta?.has_topic_filter);
+        qState.topics = res.data?.topics || [];
+        $t.html('<option value="">Tüm konular</option>');
+        qState.topics.forEach((row) => $t.append(`<option value="${esc(row.id)}">${esc(row.name)}</option>`));
+        $t.prop('disabled', !qState.meta.has_topic_filter || qState.topics.length === 0).val(qState.filters.topic_id || '');
+    }
+
+    async function loadQuestions() {
+        const params = new URLSearchParams({ action: 'list_questions' });
+        Object.entries(qState.filters).forEach(([k, v]) => { if (v) params.append(k, v); });
+        const res = await window.appAjax({ url: `../ajax/questions.php?${params.toString()}` });
+        if (!res.success) {
+            renderDesktopRows([]);
+            renderMobileRows([]);
+            return;
+        }
+        qState.meta = { ...qState.meta, ...(res.data?.meta || {}) };
+        renderStatusOptions();
+        const rows = res.data?.questions || [];
+        renderDesktopRows(rows);
+        renderMobileRows(rows);
+        $('#selectAll').prop('checked', false);
+        toggleBulk();
+    }
+
+    const debouncedLoad = (() => {
+        let timer = null;
+        return () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => loadQuestions(), 280);
+        };
+    })();
+
+    $('#filterQualification').on('change', async function () {
+        qState.filters.qualification_id = $(this).val() || '';
+        qState.filters.course_id = '';
+        qState.filters.topic_id = '';
+        await loadCourses();
+        await loadTopics();
+        await loadQuestions();
     });
 
-    $('#filter_qualification').on('change', function() {
-        const qualId = $(this).val();
-        $('#filter_course option').each(function() {
-            const optQual = $(this).data('qualification');
-            if (!qualId || !optQual || optQual === qualId) $(this).show(); else $(this).hide();
-        });
-        $('#filter_course').val('');
+    $('#filterCourse').on('change', async function () {
+        qState.filters.course_id = $(this).val() || '';
+        qState.filters.topic_id = '';
+        await loadTopics();
+        await loadQuestions();
+    });
+
+    $('#filterTopic').on('change', function () {
+        qState.filters.topic_id = $(this).val() || '';
+        loadQuestions();
+    });
+
+    $('#filterType').on('change', function () {
+        qState.filters.question_type = $(this).val() || '';
+        loadQuestions();
+    });
+
+    $('#filterStatus').on('change', function () {
+        qState.filters.status = $(this).val() || '';
+        loadQuestions();
+    });
+
+    $('#filterSearch').on('input', function () {
+        qState.filters.search = ($(this).val() || '').trim();
+        debouncedLoad();
+    });
+
+    $('#clearFiltersBtn').on('click', async function (e) {
+        e.preventDefault();
+        qState.filters = { qualification_id: '', course_id: '', topic_id: '', question_type: '', status: '', search: '' };
+        $('#filterQualification').val('');
+        $('#filterType').val('');
+        $('#filterStatus').val('');
+        $('#filterSearch').val('');
+        await loadCourses();
+        await loadTopics();
+        await loadQuestions();
     });
 
     $('#ai_qualification_id').on('change', function() {
@@ -859,7 +984,7 @@ $(document).ready(function() {
             }
         }, 'json');
     });
-    $('.edit-btn').on('click', function(){
+    $(document).on('click', '.edit-btn', function(){
         const id=$(this).data('id');
         $.getJSON('../ajax/questions.php?action=get&id='+id, function(r){
             if(!r.success) return appAlert('Hata', r.message, 'error');
@@ -886,7 +1011,7 @@ $(document).ready(function() {
             }
         }, 'json');
     });
-    $('.delete-btn').on('click', async function(){
+    $(document).on('click', '.delete-btn', async function(){
         const id=$(this).data('id');
         const ok = await appConfirm('Silme Onayı', 'Bu soruyu silmek istediğinizden emin misiniz?', {
             type: 'warning',
@@ -1058,6 +1183,13 @@ $(document).ready(function() {
             }
         });
     });
+
+    (async function initQuestionsPage() {
+        await loadQualifications();
+        await loadCourses();
+        await loadTopics();
+        await loadQuestions();
+    })();
 });
 </script>
 JAVASCRIPT;
