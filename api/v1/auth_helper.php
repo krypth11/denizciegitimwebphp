@@ -993,7 +993,7 @@ function api_smtp_expect($socket, array $allowedCodes): string
 
     $code = (int)substr(trim($response), 0, 3);
     if (!in_array($code, $allowedCodes, true)) {
-        throw new RuntimeException('SMTP response hatası: ' . trim($response));
+        throw new RuntimeException('SMTP unexpected response: ' . trim($response));
     }
 
     return $response;
@@ -1005,10 +1005,48 @@ function api_smtp_cmd($socket, string $cmd, array $allowedCodes): string
     return api_smtp_expect($socket, $allowedCodes);
 }
 
+function api_get_smtp_debug_meta(): array
+{
+    $host = defined('SMTP_HOST') ? trim((string)SMTP_HOST) : '';
+    $port = defined('SMTP_PORT') ? (int)SMTP_PORT : 0;
+    $encryption = defined('SMTP_ENCRYPTION') ? strtolower(trim((string)SMTP_ENCRYPTION)) : '';
+
+    $mailConfigPath = dirname(__DIR__, 2) . '/config/mail.php';
+    if (is_file($mailConfigPath)) {
+        $mailConfig = require $mailConfigPath;
+        if (is_array($mailConfig)) {
+            if ($host === '' && !empty($mailConfig['host'])) {
+                $host = trim((string)$mailConfig['host']);
+            }
+            if ($port <= 0 && !empty($mailConfig['port'])) {
+                $port = (int)$mailConfig['port'];
+            }
+            if ($encryption === '' && !empty($mailConfig['secure'])) {
+                $encryption = strtolower(trim((string)$mailConfig['secure']));
+            }
+            if ($encryption === '' && !empty($mailConfig['encryption'])) {
+                $encryption = strtolower(trim((string)$mailConfig['encryption']));
+            }
+        }
+    }
+
+    if ($port <= 0) {
+        $port = 587;
+    }
+
+    return [
+        'smtp_host' => $host,
+        'smtp_port' => $port,
+        'smtp_encryption' => ($encryption !== '' ? $encryption : 'tls'),
+    ];
+}
+
 function api_send_email_smtp(string $toEmail, string $subject, string $bodyText): void
 {
     $cfg = api_get_smtp_config();
     $transportHost = $cfg['encryption'] === 'ssl' ? ('ssl://' . $cfg['host']) : $cfg['host'];
+
+    $step = 'connect_failed';
     $socket = @stream_socket_client(
         $transportHost . ':' . $cfg['port'],
         $errno,
@@ -1018,30 +1056,44 @@ function api_send_email_smtp(string $toEmail, string $subject, string $bodyText)
     );
 
     if (!$socket) {
-        throw new RuntimeException('SMTP bağlantı hatası: ' . $errstr);
+        throw new RuntimeException('SMTP connect failed: ' . ($errstr !== '' ? $errstr : ('errno=' . $errno)));
     }
 
-    stream_set_timeout($socket, 15);
-    api_smtp_expect($socket, [220]);
-    api_smtp_cmd($socket, 'EHLO ' . ($_SERVER['SERVER_NAME'] ?? 'localhost'), [250]);
+    try {
+        stream_set_timeout($socket, 15);
 
-    if ($cfg['encryption'] === 'tls') {
-        api_smtp_cmd($socket, 'STARTTLS', [220]);
-        if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
-            throw new RuntimeException('SMTP TLS başlatılamadı.');
-        }
+        $step = 'greeting_failed';
+        api_smtp_expect($socket, [220]);
+
+        $step = 'ehlo_failed';
         api_smtp_cmd($socket, 'EHLO ' . ($_SERVER['SERVER_NAME'] ?? 'localhost'), [250]);
-    }
 
-    if ($cfg['username'] !== '') {
-        api_smtp_cmd($socket, 'AUTH LOGIN', [334]);
-        api_smtp_cmd($socket, base64_encode($cfg['username']), [334]);
-        api_smtp_cmd($socket, base64_encode($cfg['password']), [235]);
-    }
+        if ($cfg['encryption'] === 'tls') {
+            $step = 'starttls_failed';
+            api_smtp_cmd($socket, 'STARTTLS', [220]);
+            if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+                throw new RuntimeException('SMTP STARTTLS failed: TLS negotiation başarısız.');
+            }
 
-    api_smtp_cmd($socket, 'MAIL FROM:<' . $cfg['from_email'] . '>', [250]);
-    api_smtp_cmd($socket, 'RCPT TO:<' . $toEmail . '>', [250, 251]);
-    api_smtp_cmd($socket, 'DATA', [354]);
+            $step = 'ehlo_failed';
+            api_smtp_cmd($socket, 'EHLO ' . ($_SERVER['SERVER_NAME'] ?? 'localhost'), [250]);
+        }
+
+        if ($cfg['username'] !== '') {
+            $step = 'auth_failed';
+            api_smtp_cmd($socket, 'AUTH LOGIN', [334]);
+            api_smtp_cmd($socket, base64_encode($cfg['username']), [334]);
+            api_smtp_cmd($socket, base64_encode($cfg['password']), [235]);
+        }
+
+        $step = 'mail_from_failed';
+        api_smtp_cmd($socket, 'MAIL FROM:<' . $cfg['from_email'] . '>', [250]);
+
+        $step = 'rcpt_to_failed';
+        api_smtp_cmd($socket, 'RCPT TO:<' . $toEmail . '>', [250, 251]);
+
+        $step = 'data_failed';
+        api_smtp_cmd($socket, 'DATA', [354]);
 
     $headers = [
         'From: ' . $cfg['from_name'] . ' <' . $cfg['from_email'] . '>',
@@ -1052,11 +1104,31 @@ function api_send_email_smtp(string $toEmail, string $subject, string $bodyText)
         'Content-Transfer-Encoding: 8bit',
     ];
 
-    $data = implode("\r\n", $headers) . "\r\n\r\n" . str_replace("\n.", "\n..", $bodyText) . "\r\n.";
-    fwrite($socket, $data . "\r\n");
-    api_smtp_expect($socket, [250]);
-    api_smtp_cmd($socket, 'QUIT', [221]);
-    fclose($socket);
+        $data = implode("\r\n", $headers) . "\r\n\r\n" . str_replace("\n.", "\n..", $bodyText) . "\r\n.";
+        fwrite($socket, $data . "\r\n");
+        api_smtp_expect($socket, [250]);
+
+        $step = 'quit';
+        api_smtp_cmd($socket, 'QUIT', [221]);
+        fclose($socket);
+    } catch (Throwable $e) {
+        if (is_resource($socket)) {
+            @fclose($socket);
+        }
+
+        $prefixMap = [
+            'greeting_failed' => 'SMTP greeting failed: ',
+            'ehlo_failed' => 'SMTP EHLO failed: ',
+            'starttls_failed' => 'SMTP STARTTLS failed: ',
+            'auth_failed' => 'SMTP auth failed: ',
+            'mail_from_failed' => 'SMTP MAIL FROM failed: ',
+            'rcpt_to_failed' => 'SMTP RCPT TO failed: ',
+            'data_failed' => 'SMTP DATA failed: ',
+            'quit' => 'SMTP QUIT failed: ',
+        ];
+        $prefix = $prefixMap[$step] ?? 'SMTP send failed: ';
+        throw new RuntimeException($prefix . $e->getMessage());
+    }
 }
 
 function api_send_email_otp_mail(string $email, string $code, string $purpose): void
@@ -1079,7 +1151,15 @@ function api_create_and_send_email_otp(PDO $pdo, string $userId, string $email, 
     try {
         api_send_email_otp_mail($email, (string)$otp['code'], $purpose);
     } catch (Throwable $e) {
-        api_error('SMTP gönderim hatası.', 500);
+        $debug = api_get_smtp_debug_meta();
+        api_send_json([
+            'success' => false,
+            'message' => 'SMTP gönderim hatası: ' . $e->getMessage(),
+            'smtp_debug_message' => $e->getMessage(),
+            'smtp_host' => $debug['smtp_host'],
+            'smtp_port' => $debug['smtp_port'],
+            'smtp_encryption' => $debug['smtp_encryption'],
+        ], 500);
     }
 }
 
