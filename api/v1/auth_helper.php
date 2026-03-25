@@ -931,6 +931,45 @@ function api_get_smtp_config(): array
         'from_name' => defined('SMTP_FROM_NAME') ? trim((string)SMTP_FROM_NAME) : 'System',
     ];
 
+    // Geriye uyumluluk: config/mail.php desteği
+    $mailConfigPath = dirname(__DIR__, 2) . '/config/mail.php';
+    if (is_file($mailConfigPath)) {
+        $mailConfig = require $mailConfigPath;
+        if (is_array($mailConfig)) {
+            if ($config['host'] === '' && !empty($mailConfig['host'])) {
+                $config['host'] = trim((string)$mailConfig['host']);
+            }
+            if ((int)$config['port'] <= 0 && !empty($mailConfig['port'])) {
+                $config['port'] = (int)$mailConfig['port'];
+            }
+            if ($config['username'] === '' && !empty($mailConfig['username'])) {
+                $config['username'] = trim((string)$mailConfig['username']);
+            }
+            if ($config['password'] === '' && array_key_exists('password', $mailConfig)) {
+                $config['password'] = (string)$mailConfig['password'];
+            }
+
+            $mailSecure = strtolower(trim((string)($mailConfig['secure'] ?? $mailConfig['encryption'] ?? '')));
+            if (($config['encryption'] === '' || $config['encryption'] === 'tls') && $mailSecure !== '') {
+                $config['encryption'] = $mailSecure;
+            }
+
+            if ($config['from_email'] === '' && !empty($mailConfig['from_email'])) {
+                $config['from_email'] = trim((string)$mailConfig['from_email']);
+            }
+            if (($config['from_name'] === '' || $config['from_name'] === 'System') && !empty($mailConfig['from_name'])) {
+                $config['from_name'] = trim((string)$mailConfig['from_name']);
+            }
+        }
+    }
+
+    if ((int)$config['port'] <= 0) {
+        $config['port'] = 587;
+    }
+    if (!in_array($config['encryption'], ['tls', 'ssl', 'none', ''], true)) {
+        $config['encryption'] = 'tls';
+    }
+
     if ($config['host'] === '' || $config['from_email'] === '') {
         api_error('SMTP gönderim hatası: SMTP yapılandırması eksik.', 500);
     }
