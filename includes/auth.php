@@ -157,7 +157,8 @@ function is_authenticated_session()
     }
 
     $lastActivity = (int)($_SESSION['last_activity'] ?? 0);
-    if ($lastActivity > 0 && (time() - $lastActivity) > SESSION_TIMEOUT) {
+    $isAdminSession = !empty($_SESSION['is_admin']) && (int)$_SESSION['is_admin'] === 1;
+    if (!$isAdminSession && $lastActivity > 0 && (time() - $lastActivity) > SESSION_TIMEOUT) {
         auth_runtime_log('Session doğrulama başarısız: timeout', [
             'last_activity' => $lastActivity,
             'timeout' => SESSION_TIMEOUT,

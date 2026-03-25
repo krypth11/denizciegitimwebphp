@@ -875,6 +875,17 @@ include 'includes/sidebar.php';
         }, dashboardState.polling.interval);
     }
 
+    function startSessionKeepAlive() {
+        setInterval(() => {
+            if (document.hidden) return;
+            fetch('/api/v1/auth/keep_alive.php', {
+                method: 'GET',
+                credentials: 'same-origin',
+                cache: 'no-store'
+            }).catch(() => {});
+        }, 60000);
+    }
+
     function bindEvents() {
         qs('#qQualificationFilter').addEventListener('change', async (e) => {
             dashboardState.question.qualification_id = e.target.value;
@@ -953,6 +964,7 @@ include 'includes/sidebar.php';
             loadChart()
         ]);
         startPolling();
+        startSessionKeepAlive();
 
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {

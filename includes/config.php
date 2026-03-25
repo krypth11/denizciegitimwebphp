@@ -40,10 +40,24 @@ define('EMAIL_OTP_MAX_ATTEMPTS', 5);
 // Session
 if (session_status() === PHP_SESSION_NONE) {
     $isSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+    ini_set('session.gc_maxlifetime', '86400');
+    ini_set('session.cookie_lifetime', '86400');
+    ini_set('session.gc_probability', '1');
+    ini_set('session.gc_divisor', '100');
     ini_set('session.use_strict_mode', '1');
     ini_set('session.cookie_httponly', '1');
     ini_set('session.cookie_secure', $isSecure ? '1' : '0');
     ini_set('session.cookie_samesite', 'Lax');
+
+    session_set_cookie_params([
+        'lifetime' => 86400,
+        'path' => '/',
+        'domain' => '',
+        'secure' => $isSecure,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+
     session_start();
 }
 
