@@ -93,7 +93,7 @@ try {
         api_error('Admin yetkisi gerekli.', 403);
     }
 
-    $allowedTypes = ['registrations', 'daily_quiz', 'solved_questions', 'profile_updates'];
+    $allowedTypes = ['registrations', 'daily_quiz', 'solved_questions'];
     $types = stats_parse_types_from_query($allowedTypes);
     $limit = api_get_int_query('limit', 25, 10, 100);
 
@@ -317,41 +317,6 @@ try {
         }
     }
 
-    $profileUpdatesSourceAvailable = (bool)($uCreated && $uUpdated);
-    if (in_array('profile_updates', $types, true) && $uId && $uUpdated && $uCreated && $uEmail) {
-        $guestExpr = ra_detect_guest_sql('u.`' . $uEmail . '`', $uFullName ? ('u.`' . $uFullName . '`') : null);
-        $where = ['u.`' . $uUpdated . '` > u.`' . $uCreated . '`'];
-        if ($uDeleted) {
-            $where[] = 'u.`' . $uDeleted . '` = 0';
-        }
-        $sql = 'SELECT u.`' . $uUpdated . '` AS created_at, u.`' . $uId . '` AS user_id, '
-            . 'u.`' . $uEmail . '` AS email, '
-            . ($uFullName ? 'u.`' . $uFullName . '`' : "''") . ' AS full_name, '
-            . 'CASE WHEN ' . $guestExpr . " THEN 'guest' ELSE 'registered' END AS user_type "
-            . 'FROM `user_profiles` u WHERE ' . implode(' AND ', $where)
-            . ' ORDER BY u.`' . $uUpdated . '` DESC LIMIT ' . (int)$limit;
-
-        $list = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        foreach ($list as $item) {
-            $rows[] = [
-                'type' => 'profile_updates',
-                'title' => 'Profil güncellemesi',
-                'subtitle' => 'Profil alanlarında değişiklik yapıldı',
-                'created_at' => $item['created_at'] ?? null,
-                'user' => [
-                    'id' => (string)($item['user_id'] ?? ''),
-                    'email' => (string)($item['email'] ?? ''),
-                    'full_name' => (string)($item['full_name'] ?? ''),
-                    'user_type' => (string)($item['user_type'] ?? 'registered'),
-                ],
-                'detail' => [
-                    'changed_fields' => [],
-                    'source' => 'user_profiles.updated_at > user_profiles.created_at',
-                ],
-            ];
-        }
-    }
-
     usort($rows, static function (array $a, array $b): int {
         return strtotime((string)($b['created_at'] ?? '1970-01-01')) <=> strtotime((string)($a['created_at'] ?? '1970-01-01'));
     });
@@ -362,7 +327,6 @@ try {
         'meta' => [
             'types' => $types,
             'limit' => $limit,
-            'profile_updates_source_available' => $profileUpdatesSourceAvailable,
         ],
     ]);
 } catch (Throwable $e) {

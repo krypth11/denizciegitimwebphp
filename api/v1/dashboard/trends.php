@@ -69,7 +69,7 @@ if (($_GET['scope'] ?? '') === 'admin') {
             $window = stats_resolve_date_window(['range' => '30d'], 'range', 'start_date', 'end_date', '30d');
         }
 
-        $types = stats_parse_types_from_query(['registrations', 'solved_questions', 'daily_quiz_completed', 'profile_updates']);
+        $types = stats_parse_types_from_query(['registrations', 'solved_questions', 'daily_quiz_completed']);
         [$dateKeys, $labels] = trends_labels_from_dates((string)$window['start_date'], (string)$window['end_date']);
         $dateIndex = array_flip($dateKeys);
 
@@ -77,14 +77,12 @@ if (($_GET['scope'] ?? '') === 'admin') {
             'registrations' => trends_series_empty($labels),
             'solved_questions' => trends_series_empty($labels),
             'daily_quiz_completed' => trends_series_empty($labels),
-            'profile_updates' => trends_series_empty($labels),
         ];
 
         $totals = [
             'registrations' => 0,
             'solved_questions' => 0,
             'daily_quiz_completed' => 0,
-            'profile_updates' => 0,
         ];
 
         $uCols = get_table_columns($pdo, 'user_profiles');
@@ -148,25 +146,6 @@ if (($_GET['scope'] ?? '') === 'admin') {
             }
         }
 
-        $profileUpdatesSourceAvailable = (bool)$uUpdated;
-        if (in_array('profile_updates', $types, true) && $uUpdated && $uCreated) {
-            $where = ['DATE(`' . $uUpdated . '`) BETWEEN ? AND ?', '`' . $uUpdated . '` > `' . $uCreated . '`'];
-            $params = [$window['start_date'], $window['end_date']];
-            if ($uDeleted) {
-                $where[] = '`' . $uDeleted . '` = 0';
-            }
-            $sql = 'SELECT DATE(`' . $uUpdated . '`) AS d, COUNT(*) AS c FROM `user_profiles` WHERE ' . implode(' AND ', $where) . ' GROUP BY DATE(`' . $uUpdated . '`)';
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($params);
-            foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
-                $d = (string)($row['d'] ?? '');
-                if (!isset($dateIndex[$d])) continue;
-                $v = (int)($row['c'] ?? 0);
-                $series['profile_updates'][$dateIndex[$d]] = $v;
-                $totals['profile_updates'] += $v;
-            }
-        }
-
         api_success('Dashboard admin trend verisi alındı.', [
             'trends' => [
                 'labels' => $labels,
@@ -177,9 +156,6 @@ if (($_GET['scope'] ?? '') === 'admin') {
                     'start_date' => $window['start_date'],
                     'end_date' => $window['end_date'],
                     'types' => $types,
-                ],
-                'meta' => [
-                    'profile_updates_source_available' => $profileUpdatesSourceAvailable,
                 ],
             ],
         ]);

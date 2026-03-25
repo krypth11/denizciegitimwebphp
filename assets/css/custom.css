@@ -1016,6 +1016,50 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--text-main);
 }
 
+.date-chip-group .chip {
+    min-height: 30px;
+}
+
+.dashboard-date-filter {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+
+.date-range-display {
+    width: 100%;
+    min-height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    color: var(--text-main);
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 13px;
+}
+
+.date-range-display:hover,
+.date-range-display:focus {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+}
+
+.date-range-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-soft);
+}
+
+#qCourseFilter:disabled {
+    background: var(--bg-soft);
+    color: var(--text-muted);
+    cursor: not-allowed;
+}
+
 .activity-list {
     max-height: 420px;
     overflow: auto;
@@ -1427,6 +1471,10 @@ h1, h2, h3, h4, h5, h6 {
 
     .activity-quiz-questions {
         max-height: 280px;
+    }
+
+    .date-range-panel {
+        grid-template-columns: 1fr;
     }
 
     .chart-wrap {

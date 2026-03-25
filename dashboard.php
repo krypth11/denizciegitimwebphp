@@ -36,8 +36,8 @@ include 'includes/sidebar.php';
                         </div>
                         <div class="col-12 col-md-6 col-lg-12 col-xl-6">
                             <label class="form-label mb-1">Ders</label>
-                            <select class="form-select form-select-sm" id="qCourseFilter">
-                                <option value="">Tümü</option>
+                            <select class="form-select form-select-sm" id="qCourseFilter" disabled>
+                                <option value="">Önce yeterlilik seçin</option>
                             </select>
                         </div>
                     </div>
@@ -56,23 +56,18 @@ include 'includes/sidebar.php';
                         <h6 class="mb-0">Çözülen Soru Sayısı</h6>
                         <span class="badge bg-success-subtle text-success">Attempt Events</span>
                     </div>
-                    <div class="row g-2">
-                        <div class="col-12 col-md-4 col-lg-12 col-xl-4">
-                            <label class="form-label mb-1">Hazır Aralık</label>
-                            <select class="form-select form-select-sm" id="solvedRangeFilter">
-                                <option value="1d">1 gün</option>
-                                <option value="3d">3 gün</option>
-                                <option value="7d" selected>7 gün</option>
-                                <option value="15d">15 gün</option>
-                                <option value="30d">30 gün</option>
-                            </select>
+                    <div class="dashboard-date-filter" id="solvedDateFilter">
+                        <div class="dashboard-chip-group date-chip-group" id="solvedRangeChips">
+                            <button type="button" class="chip" data-range="1d">1 Gün</button>
+                            <button type="button" class="chip" data-range="3d">3 Gün</button>
+                            <button type="button" class="chip active" data-range="7d">7 Gün</button>
+                            <button type="button" class="chip" data-range="15d">15 Gün</button>
+                            <button type="button" class="chip" data-range="30d">30 Gün</button>
                         </div>
-                        <div class="col-6 col-md-4 col-lg-6 col-xl-4">
-                            <label class="form-label mb-1">Başlangıç</label>
+                        <label class="form-label mb-1">Tarih seçiniz</label>
+                        <button type="button" class="date-range-display" id="solvedDateDisplay">Tarih seçiniz</button>
+                        <div class="date-range-panel d-none" id="solvedDatePanel">
                             <input type="date" class="form-control form-control-sm" id="solvedStartDate">
-                        </div>
-                        <div class="col-6 col-md-4 col-lg-6 col-xl-4">
-                            <label class="form-label mb-1">Bitiş</label>
                             <input type="date" class="form-control form-control-sm" id="solvedEndDate">
                         </div>
                     </div>
@@ -118,7 +113,6 @@ include 'includes/sidebar.php';
                     <button type="button" class="chip active" data-type="registrations">Kaydolan Kullanıcılar</button>
                     <button type="button" class="chip active" data-type="daily_quiz">Daily Quiz</button>
                     <button type="button" class="chip active" data-type="solved_questions">Çözülen Sorular</button>
-                    <button type="button" class="chip active" data-type="profile_updates">Profil İşlemleri</button>
                 </div>
                 <select class="form-select form-select-sm w-auto" id="activityLimit">
                     <option value="10">10</option>
@@ -142,15 +136,20 @@ include 'includes/sidebar.php';
                 <small class="text-muted">Filtreler değişince otomatik güncellenir · <span id="chartRefreshInfo">Son güncelleme: -</span></small>
             </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
-                <select class="form-select form-select-sm w-auto" id="chartRangeFilter">
-                    <option value="1d">1 gün</option>
-                    <option value="3d">3 gün</option>
-                    <option value="7d" selected>7 gün</option>
-                    <option value="15d">15 gün</option>
-                    <option value="30d">30 gün</option>
-                </select>
-                <input type="date" class="form-control form-control-sm" id="chartStartDate" style="max-width: 150px;">
-                <input type="date" class="form-control form-control-sm" id="chartEndDate" style="max-width: 150px;">
+                <div class="dashboard-date-filter" id="chartDateFilter">
+                    <div class="dashboard-chip-group date-chip-group" id="chartRangeChips">
+                        <button type="button" class="chip" data-range="1d">1 Gün</button>
+                        <button type="button" class="chip" data-range="3d">3 Gün</button>
+                        <button type="button" class="chip active" data-range="7d">7 Gün</button>
+                        <button type="button" class="chip" data-range="15d">15 Gün</button>
+                        <button type="button" class="chip" data-range="30d">30 Gün</button>
+                    </div>
+                    <button type="button" class="date-range-display" id="chartDateDisplay">Tarih seçiniz</button>
+                    <div class="date-range-panel d-none" id="chartDatePanel">
+                        <input type="date" class="form-control form-control-sm" id="chartStartDate">
+                        <input type="date" class="form-control form-control-sm" id="chartEndDate">
+                    </div>
+                </div>
             </div>
         </div>
         <div class="card-body">
@@ -158,7 +157,6 @@ include 'includes/sidebar.php';
                 <button type="button" class="chip active" data-type="registrations">Kaydolan Kullanıcılar</button>
                 <button type="button" class="chip active" data-type="solved_questions">Çözülen Sorular</button>
                 <button type="button" class="chip active" data-type="daily_quiz_completed">Daily Quiz Tamamlananlar</button>
-                <button type="button" class="chip active" data-type="profile_updates">Profil İşlemleri</button>
             </div>
             <div class="row g-2 mb-3" id="chartTotals"></div>
             <div class="chart-wrap">
@@ -189,8 +187,8 @@ include 'includes/sidebar.php';
         question: { qualification_id: '', course_id: '' },
         solved: { range: '7d', start_date: '', end_date: '' },
         users: { user_type: 'all' },
-        activity: { types: ['registrations', 'daily_quiz', 'solved_questions', 'profile_updates'], limit: 25 },
-        chart: { range: '7d', start_date: '', end_date: '', types: ['registrations', 'solved_questions', 'daily_quiz_completed', 'profile_updates'] },
+        activity: { types: ['registrations', 'daily_quiz', 'solved_questions'], limit: 25 },
+        chart: { range: '7d', start_date: '', end_date: '', types: ['registrations', 'solved_questions', 'daily_quiz_completed'] },
         refs: { qualifications: [], courses: [] },
         polling: { timer: null, interval: 1000 }
     };
@@ -286,6 +284,100 @@ include 'includes/sidebar.php';
         return ['A', 'B', 'C', 'D', 'E'].includes(val) ? val : null;
     }
 
+    function formatDateRangeLabel(startDate, endDate) {
+        if (!startDate || !endDate) return 'Tarih seçiniz';
+        const f = (iso) => {
+            const [y, m, d] = String(iso).split('-');
+            if (!y || !m || !d) return iso;
+            return `${d}.${m}.${y}`;
+        };
+        return `${f(startDate)} - ${f(endDate)}`;
+    }
+
+    function rangeDays(range) {
+        return Number(String(range).replace('d', '')) || 7;
+    }
+
+    function toIsoDate(dt) {
+        return dt.toISOString().slice(0, 10);
+    }
+
+    function applyPresetRange(stateObj, range) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const days = Math.max(1, rangeDays(range));
+        const start = new Date(today);
+        start.setDate(start.getDate() - (days - 1));
+        stateObj.range = range;
+        stateObj.start_date = toIsoDate(start);
+        stateObj.end_date = toIsoDate(today);
+    }
+
+    function detectRangePreset(startDate, endDate) {
+        if (!startDate || !endDate) return null;
+        const s = new Date(startDate + 'T00:00:00');
+        const e = new Date(endDate + 'T00:00:00');
+        if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e < s) return null;
+        const diff = Math.floor((e - s) / 86400000) + 1;
+        return ['1d', '3d', '7d', '15d', '30d'].find((r) => rangeDays(r) === diff) || null;
+    }
+
+    function syncDateFilterUI(prefix, stateObj) {
+        const startEl = qs(`#${prefix}StartDate`);
+        const endEl = qs(`#${prefix}EndDate`);
+        const displayEl = qs(`#${prefix}DateDisplay`);
+        if (startEl) startEl.value = stateObj.start_date || '';
+        if (endEl) endEl.value = stateObj.end_date || '';
+        if (displayEl) displayEl.textContent = formatDateRangeLabel(stateObj.start_date, stateObj.end_date);
+
+        const matched = detectRangePreset(stateObj.start_date, stateObj.end_date);
+        qsa(`#${prefix}RangeChips .chip`).forEach((chip) => {
+            chip.classList.toggle('active', matched === chip.dataset.range);
+        });
+    }
+
+    function initDateFilter(prefix, stateObj, onChange) {
+        applyPresetRange(stateObj, stateObj.range || '7d');
+        syncDateFilterUI(prefix, stateObj);
+
+        const panel = qs(`#${prefix}DatePanel`);
+        const display = qs(`#${prefix}DateDisplay`);
+        const startEl = qs(`#${prefix}StartDate`);
+        const endEl = qs(`#${prefix}EndDate`);
+
+        display?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            panel?.classList.toggle('d-none');
+        });
+
+        qsa(`#${prefix}RangeChips .chip`).forEach((chip) => {
+            chip.addEventListener('click', async () => {
+                applyPresetRange(stateObj, chip.dataset.range || '7d');
+                syncDateFilterUI(prefix, stateObj);
+                panel?.classList.add('d-none');
+                await onChange();
+            });
+        });
+
+        [startEl, endEl].forEach((el) => {
+            el?.addEventListener('change', async () => {
+                stateObj.start_date = startEl?.value || '';
+                stateObj.end_date = endEl?.value || '';
+                const matched = detectRangePreset(stateObj.start_date, stateObj.end_date);
+                if (matched) stateObj.range = matched;
+                syncDateFilterUI(prefix, stateObj);
+                await onChange();
+            });
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!panel || !display) return;
+            if (panel.classList.contains('d-none')) return;
+            if (panel.contains(e.target) || display.contains(e.target)) return;
+            panel.classList.add('d-none');
+        });
+    }
+
     function getActiveTypes(containerId) {
         return qsa(`${containerId} .chip.active`).map(x => x.dataset.type);
     }
@@ -301,7 +393,7 @@ include 'includes/sidebar.php';
             const qSelect = qs('#qQualificationFilter');
             const cSelect = qs('#qCourseFilter');
             qSelect.innerHTML = '<option value="">Tümü</option>';
-            cSelect.innerHTML = '<option value="">Tümü</option>';
+            cSelect.innerHTML = '';
 
             dashboardState.refs.qualifications.forEach(item => {
                 const opt = document.createElement('option');
@@ -310,15 +402,23 @@ include 'includes/sidebar.php';
                 qSelect.appendChild(opt);
             });
 
-            dashboardState.refs.courses.forEach(item => {
-                const opt = document.createElement('option');
-                opt.value = item.id;
-                opt.textContent = item.name;
-                cSelect.appendChild(opt);
-            });
-
             qSelect.value = dashboardState.question.qualification_id;
-            cSelect.value = dashboardState.question.course_id;
+
+            if (!dashboardState.question.qualification_id) {
+                dashboardState.question.course_id = '';
+                cSelect.disabled = true;
+                cSelect.innerHTML = '<option value="">Önce yeterlilik seçin</option>';
+            } else {
+                cSelect.disabled = false;
+                cSelect.innerHTML = '<option value="">Tümü</option>';
+                dashboardState.refs.courses.forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item.id;
+                    opt.textContent = item.name;
+                    cSelect.appendChild(opt);
+                });
+                cSelect.value = dashboardState.question.course_id;
+            }
         } finally {
             filtersInFlight = false;
         }
@@ -384,8 +484,7 @@ include 'includes/sidebar.php';
         const map = {
             registrations: 'Kayıt',
             daily_quiz: 'Daily Quiz',
-            solved_questions: 'Soru Çözümü',
-            profile_updates: 'Profil'
+            solved_questions: 'Soru Çözümü'
         };
         return map[type] || type;
     }
@@ -394,8 +493,7 @@ include 'includes/sidebar.php';
         const map = {
             registrations: 'bi-person-plus',
             daily_quiz: 'bi-lightning-charge',
-            solved_questions: 'bi-bullseye',
-            profile_updates: 'bi-person-badge'
+            solved_questions: 'bi-bullseye'
         };
         return map[type] || 'bi-activity';
     }
@@ -408,7 +506,6 @@ include 'includes/sidebar.php';
         }
         if (item.type === 'registrations') return `Yeni kayıt: ${name}`;
         if (item.type === 'daily_quiz') return `Daily Quiz tamamlandı: ${item.detail?.correct_count ?? 0}/${item.detail?.total_count ?? 0} doğru`;
-        if (item.type === 'profile_updates') return `Profil güncellendi: ${name}`;
         return safe(item.title, 'Aktivite');
     }
 
@@ -579,37 +676,11 @@ include 'includes/sidebar.php';
             </div>`;
     }
 
-    function renderProfileUpdateDetail(activity) {
-        return `
-            <div class="activity-detail-modal">
-                <div class="activity-detail-head">
-                    <i class="bi bi-person-badge"></i>
-                    <div><h6>Profil Güncellendi</h6><p>Kullanıcı profilinde değişiklik yapıldı</p></div>
-                </div>
-                <div class="activity-badges">
-                    <span class="activity-stat-pill">Profil İşlemi</span>
-                    <span class="activity-stat-pill">${activity.user?.user_type === 'guest' ? 'Guest' : 'Kayıtlı'}</span>
-                </div>
-                ${buildInfoGrid([
-                    ['Kullanıcı', safe(activity.user?.full_name)],
-                    ['Email', safe(activity.user?.email)],
-                    ['Güncelleme Zamanı', formatDateTime(activity.created_at)],
-                    ['Kaynak Mantığı', 'user_profiles.updated_at > created_at'],
-                    ['Alan Bazlı Log', 'Alan bazlı değişiklik kaydı tutulmuyor']
-                ])}
-                <div class="activity-score-box">
-                    <strong>Profilini güncel tuttu</strong>
-                    <small>Hesap bilgileri üzerinde düzenleme yapıldı.</small>
-                </div>
-            </div>`;
-    }
-
     function renderActivityDetail(activity) {
         if (!activity) return '<div class="activity-detail-modal"><p>Detay bulunamadı.</p></div>';
         if (activity.type === 'solved_questions') return renderSolvedQuestionDetail(activity);
         if (activity.type === 'registrations') return renderRegistrationDetail(activity);
         if (activity.type === 'daily_quiz') return renderDailyQuizDetail(activity);
-        if (activity.type === 'profile_updates') return renderProfileUpdateDetail(activity);
         return `
             <div class="activity-detail-modal">
                 <div class="activity-detail-head"><i class="bi bi-activity"></i><div><h6>Aktivite Detayı</h6><p>Bu aktivite için özel görünüm bulunamadı.</p></div></div>
@@ -715,10 +786,9 @@ include 'includes/sidebar.php';
         const items = [
             ['Toplam Kayıt', totals.registrations || 0],
             ['Toplam Çözülen Soru', totals.solved_questions || 0],
-            ['Toplam Daily Quiz', totals.daily_quiz_completed || 0],
-            ['Toplam Profil İşlemi', totals.profile_updates || 0]
+            ['Toplam Daily Quiz', totals.daily_quiz_completed || 0]
         ];
-        box.innerHTML = items.map(([k, v]) => `<div class="col-6 col-lg-3"><div class="chart-total-box"><small>${k}</small><strong>${formatNumber(v)}</strong></div></div>`).join('');
+        box.innerHTML = items.map(([k, v]) => `<div class="col-6 col-lg-4"><div class="chart-total-box"><small>${k}</small><strong>${formatNumber(v)}</strong></div></div>`).join('');
     }
 
     async function loadChart() {
@@ -751,7 +821,6 @@ include 'includes/sidebar.php';
                 { key: 'registrations', label: 'Kayıt', color: '#5B9BD5', dash: [] },
                 { key: 'solved_questions', label: 'Çözülen Sorular', color: '#6AA786', dash: [] },
                 { key: 'daily_quiz_completed', label: 'Daily Quiz', color: '#C89B54', dash: [6, 4] },
-                { key: 'profile_updates', label: 'Profil İşlemleri', color: '#B86B7F', dash: [4, 4] },
             ];
 
             const datasets = datasetsMeta
@@ -819,21 +888,8 @@ include 'includes/sidebar.php';
             await loadStatistics();
         });
 
-        qs('#solvedRangeFilter').addEventListener('change', async (e) => {
-            dashboardState.solved.range = e.target.value;
-            if (!dashboardState.solved.start_date || !dashboardState.solved.end_date) {
-                dashboardState.solved.start_date = '';
-                dashboardState.solved.end_date = '';
-            }
+        initDateFilter('solved', dashboardState.solved, async () => {
             await loadStatistics();
-        });
-
-        ['#solvedStartDate', '#solvedEndDate'].forEach(id => {
-            qs(id).addEventListener('change', async () => {
-                dashboardState.solved.start_date = qs('#solvedStartDate').value;
-                dashboardState.solved.end_date = qs('#solvedEndDate').value;
-                await loadStatistics();
-            });
         });
 
         qsa('#userTypeToggle button').forEach(btn => {
@@ -870,21 +926,8 @@ include 'includes/sidebar.php';
             if (item) openActivityModal(item);
         });
 
-        qs('#chartRangeFilter').addEventListener('change', async (e) => {
-            dashboardState.chart.range = e.target.value;
-            if (!dashboardState.chart.start_date || !dashboardState.chart.end_date) {
-                dashboardState.chart.start_date = '';
-                dashboardState.chart.end_date = '';
-            }
+        initDateFilter('chart', dashboardState.chart, async () => {
             await loadChart();
-        });
-
-        ['#chartStartDate', '#chartEndDate'].forEach(id => {
-            qs(id).addEventListener('change', async () => {
-                dashboardState.chart.start_date = qs('#chartStartDate').value;
-                dashboardState.chart.end_date = qs('#chartEndDate').value;
-                await loadChart();
-            });
         });
 
         qsa('#chartTypes .chip').forEach(btn => {
