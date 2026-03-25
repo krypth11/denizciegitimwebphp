@@ -77,6 +77,23 @@ function users_select_clause(array $schema)
     return implode(', ', $select);
 }
 
+function users_detect_type($email, $fullName)
+{
+    $email = strtolower(trim((string)$email));
+    $name = trim((string)$fullName);
+    $nameLower = function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
+
+    if ($email !== '' && str_ends_with($email, '@guest.local')) {
+        return 'guest';
+    }
+
+    if (in_array($nameLower, ['misafir kullanıcı', 'misafir kullanici', 'guest user'], true)) {
+        return 'guest';
+    }
+
+    return 'registered';
+}
+
 function users_admin_count(PDO $pdo, array $schema)
 {
     $sql = "SELECT COUNT(*) FROM `{$schema['table']}` WHERE `{$schema['is_admin']}` = 1";
@@ -141,12 +158,15 @@ try {
             $users = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
             $normalized = array_map(function ($u) {
+                $fullName = (string)($u['full_name'] ?? '');
+                $email = (string)($u['email'] ?? '');
                 return [
                     'id' => (string)($u['id'] ?? ''),
-                    'full_name' => (string)($u['full_name'] ?? ''),
-                    'email' => (string)($u['email'] ?? ''),
+                    'full_name' => $fullName,
+                    'email' => $email,
                     'is_admin' => ((int)($u['is_admin'] ?? 0) === 1) ? 1 : 0,
                     'is_deleted' => ((int)($u['is_deleted'] ?? 0) === 1) ? 1 : 0,
+                    'user_type' => users_detect_type($email, $fullName),
                     'created_at' => $u['created_at'] ?? null,
                     'updated_at' => $u['updated_at'] ?? null,
                     'last_sign_in_at' => $u['last_sign_in_at'] ?? null,

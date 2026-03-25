@@ -38,11 +38,11 @@ include '../includes/sidebar.php';
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label">Durum</label>
+                    <label class="form-label">Kullanıcı Tipi</label>
                     <select class="form-select" id="statusFilter">
-                        <option value="active">Aktif</option>
-                        <option value="passive">Pasif</option>
                         <option value="all">Tümü</option>
+                        <option value="guest">Guest</option>
+                        <option value="registered">Kayıtlı Kullanıcı</option>
                     </select>
                 </div>
             </div>
@@ -58,7 +58,7 @@ include '../includes/sidebar.php';
                             <th>Ad Soyad</th>
                             <th>Email</th>
                             <th>Rol</th>
-                            <th>Durum</th>
+                            <th>Kullanıcı Tipi</th>
                             <th>Oluşturulma</th>
                             <th>Son Giriş</th>
                             <th>İşlemler</th>
@@ -175,10 +175,10 @@ $(document).ready(function () {
             : '<span class="badge text-bg-secondary">Kullanıcı</span>';
     }
 
-    function statusBadge(isDeleted) {
-        return isDeleted
-            ? '<span class="badge text-bg-danger">Pasif</span>'
-            : '<span class="badge text-bg-success">Aktif</span>';
+    function userTypeBadge(userType) {
+        return userType === 'guest'
+            ? '<span class="badge text-bg-warning">Guest</span>'
+            : '<span class="badge text-bg-primary">Kayıtlı</span>';
     }
 
     function fmtDate(value) {
@@ -193,11 +193,17 @@ $(document).ready(function () {
         $tb.empty();
         $mobile.empty();
 
-        const empty = !users.length;
+        const statusFilter = $('#statusFilter').val() || 'all';
+        const visibleUsers = users.filter(u => {
+            if (statusFilter === 'all') return true;
+            return (u.user_type || 'registered') === statusFilter;
+        });
+
+        const empty = !visibleUsers.length;
         $('#usersDesktopEmpty').toggleClass('d-none', !empty);
         $('#usersMobileEmpty').toggleClass('d-none', !empty);
 
-        users.forEach(u => {
+        visibleUsers.forEach(u => {
             const isSelf = String(u.id) === String(currentUserId);
             const disableDelete = isSelf ? 'disabled' : '';
             const selfText = isSelf ? '<span class="badge text-bg-light border ms-1">Siz</span>' : '';
@@ -207,7 +213,7 @@ $(document).ready(function () {
                     <td><span class="fw-semibold">${esc(u.full_name || '-')}</span>${selfText}</td>
                     <td>${esc(u.email || '-')}</td>
                     <td>${roleBadge(u.is_admin === 1)}</td>
-                    <td>${statusBadge(u.is_deleted === 1)}</td>
+                    <td>${userTypeBadge(u.user_type)}</td>
                     <td><small class="text-muted">${fmtDate(u.created_at)}</small></td>
                     <td><small class="text-muted">${fmtDate(u.last_sign_in_at)}</small></td>
                     <td>
@@ -229,7 +235,7 @@ $(document).ready(function () {
                             </div>
                             <div class="d-flex gap-1">
                                 ${roleBadge(u.is_admin === 1)}
-                                ${statusBadge(u.is_deleted === 1)}
+                                ${userTypeBadge(u.user_type)}
                             </div>
                         </div>
                         <div class="small text-muted mt-2">Oluşturulma: ${fmtDate(u.created_at)}</div>
@@ -319,7 +325,7 @@ $(document).ready(function () {
     $('#clearFiltersBtn').on('click', async function () {
         $('#userSearchInput').val('');
         $('#roleFilter').val('all');
-        $('#statusFilter').val('active');
+        $('#statusFilter').val('all');
         await loadUsers();
     });
 
