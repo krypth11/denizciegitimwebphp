@@ -84,24 +84,29 @@ function api_get_user_schema(PDO $pdo): array
     ];
 }
 
-function api_ensure_tokens_table(PDO $pdo): void
+function api_assert_tokens_table_ready(PDO $pdo): void
 {
-    $sql = "CREATE TABLE IF NOT EXISTS api_tokens (
-        id CHAR(36) NOT NULL,
-        user_id VARCHAR(191) NOT NULL,
-        token_hash CHAR(64) NOT NULL,
-        name VARCHAR(100) NULL,
-        expires_at DATETIME NULL,
-        last_used_at DATETIME NULL,
-        created_at DATETIME NOT NULL,
-        revoked_at DATETIME NULL,
-        PRIMARY KEY (id),
-        UNIQUE KEY uq_api_tokens_hash (token_hash),
-        KEY idx_api_tokens_user_id (user_id),
-        KEY idx_api_tokens_revoked_at (revoked_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+    $columns = get_table_columns($pdo, 'api_tokens');
+    if (!$columns) {
+        throw new RuntimeException('api_tokens tablosu eksik, migration çalıştırılmalı');
+    }
 
-    $pdo->exec($sql);
+    $required = ['id', 'user_id', 'token_hash', 'expires_at', 'last_used_at', 'created_at', 'revoked_at'];
+    $missing = [];
+    foreach ($required as $col) {
+        if (!in_array($col, $columns, true)) {
+            $missing[] = $col;
+        }
+    }
+
+    if (!empty($missing)) {
+        throw new RuntimeException(
+            'api_tokens tablosu şeması uyumsuz. Beklenen kolonlar: '
+            . implode(', ', $required)
+            . '. Eksikler: '
+            . implode(', ', $missing)
+        );
+    }
 }
 
 function api_find_user_by_email(PDO $pdo, string $email): ?array
@@ -186,7 +191,7 @@ function api_update_last_sign_in(PDO $pdo, string $userId): void
 
 function api_create_user_token(PDO $pdo, string $userId): string
 {
-    api_ensure_tokens_table($pdo);
+    api_assert_tokens_table_ready($pdo);
 
     $token = api_generate_token_plain();
     $hash = api_hash_token($token);
@@ -201,7 +206,7 @@ function api_create_user_token(PDO $pdo, string $userId): string
 
 function api_resolve_auth(PDO $pdo): ?array
 {
-    api_ensure_tokens_table($pdo);
+    api_assert_tokens_table_ready($pdo);
 
     $token = api_get_bearer_token();
     if (!$token) {
@@ -249,7 +254,7 @@ function api_require_auth(PDO $pdo): array
 
 function api_revoke_hashed_token(PDO $pdo, string $tokenHash): void
 {
-    api_ensure_tokens_table($pdo);
+    api_assert_tokens_table_ready($pdo);
 
     $sql = 'UPDATE api_tokens SET revoked_at = NOW() WHERE token_hash = ? AND revoked_at IS NULL';
     $stmt = $pdo->prepare($sql);
