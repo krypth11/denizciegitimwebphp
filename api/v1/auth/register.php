@@ -28,32 +28,46 @@ try {
         api_error('password en az 6 karakter olmalıdır.', 422);
     }
 
-    if (api_email_exists($pdo, $email)) {
+    if (api_email_exists_anywhere($pdo, $email)) {
         api_error('Bu email zaten kayıtlı.', 409);
     }
 
-    $tempEmail = generate_uuid() . '@pending.local';
-
-    $userId = api_create_user_profile($pdo, [
-        'full_name' => $fullName,
-        'email' => $tempEmail,
-        'password_hash' => null,
-        'is_admin' => 0,
-        'is_guest' => 1,
-        'onboarding_completed' => 0,
-        'email_verified' => 0,
-        'email_verified_at' => null,
-        'pending_email' => $email,
-        'current_qualification_id' => null,
-        'target_qualification_id' => null,
-    ]);
-
-    $token = api_create_user_token($pdo, $userId);
-    api_update_last_sign_in($pdo, $userId);
-
     try {
+        $pdo->beginTransaction();
+
+        // Yarış durumlarını engellemek için duplicate kontrolünü transaction içinde tekrarla.
+        if (api_email_exists_anywhere($pdo, $email)) {
+            $pdo->rollBack();
+            api_error('Bu email zaten kayıtlı.', 409);
+        }
+
+        $tempEmail = generate_uuid() . '@pending.local';
+
+        $userId = api_create_user_profile($pdo, [
+            'full_name' => $fullName,
+            'email' => $tempEmail,
+            'password_hash' => null,
+            'is_admin' => 0,
+            'is_guest' => 1,
+            'onboarding_completed' => 0,
+            'email_verified' => 0,
+            'email_verified_at' => null,
+            'pending_email' => $email,
+            'current_qualification_id' => null,
+            'target_qualification_id' => null,
+        ]);
+
+        $token = api_create_user_token($pdo, $userId);
+        api_update_last_sign_in($pdo, $userId);
+
         api_create_and_send_email_otp($pdo, $userId, $email, 'signup');
+
+        $pdo->commit();
     } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
         api_send_json([
             'success' => false,
             'message' => $e->getMessage(),

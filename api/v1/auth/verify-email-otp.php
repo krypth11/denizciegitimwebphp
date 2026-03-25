@@ -35,5 +35,9 @@ try {
         'user' => $user,
     ]);
 } catch (Throwable $e) {
+    $code = (int)$e->getCode();
+    if ($code >= 400 && $code < 500) {
+        api_error($e->getMessage(), $code);
+    }
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
 }

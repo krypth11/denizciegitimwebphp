@@ -39,8 +39,7 @@ try {
         api_error('Bu hesap zaten kayıtlı kullanıcıdır.', 409);
     }
 
-    $existing = api_find_user_by_email($pdo, $email);
-    if ($existing && (string)$existing['id'] !== $userId) {
+    if (api_email_exists_anywhere($pdo, $email, $userId)) {
         api_error('Bu email zaten kayıtlı.', 409);
     }
 

@@ -403,10 +403,34 @@ function api_qualification_exists(PDO $pdo, string $qualificationId): bool
 
 function api_email_exists(PDO $pdo, string $email): bool
 {
+    return api_email_exists_anywhere($pdo, $email, null);
+}
+
+function api_email_exists_anywhere(PDO $pdo, string $email, ?string $excludeUserId = null): bool
+{
     $schema = api_get_profile_schema($pdo);
-    $sql = 'SELECT COUNT(*) FROM `' . $schema['table'] . '` WHERE LOWER(`' . $schema['email'] . '`) = LOWER(?)';
+    $email = strtolower(trim($email));
+    if ($email === '') {
+        return false;
+    }
+
+    $where = ['LOWER(`' . $schema['email'] . '`) = LOWER(?)'];
+    $params = [$email];
+
+    if ($schema['pending_email']) {
+        $where[] = 'LOWER(`' . $schema['pending_email'] . '`) = LOWER(?)';
+        $params[] = $email;
+    }
+
+    $sql = 'SELECT COUNT(*) FROM `' . $schema['table'] . '` WHERE (' . implode(' OR ', $where) . ')';
+
+    if ($excludeUserId !== null && $excludeUserId !== '') {
+        $sql .= ' AND `' . $schema['id'] . '` <> ?';
+        $params[] = $excludeUserId;
+    }
+
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$email]);
+    $stmt->execute($params);
     return ((int)$stmt->fetchColumn()) > 0;
 }
 
@@ -855,8 +879,7 @@ function api_email_verification_apply(PDO $pdo, string $userId, string $purpose)
             api_error('Doğrulanacak bekleyen email bulunamadı.', 422);
         }
 
-        $existing = api_find_user_by_email($pdo, $pending);
-        if ($existing && (string)$existing['id'] !== $userId) {
+        if (api_email_exists_anywhere($pdo, $pending, $userId)) {
             api_error('Bu email zaten kayıtlı.', 409);
         }
 
@@ -890,8 +913,7 @@ function api_email_verification_apply(PDO $pdo, string $userId, string $purpose)
             api_error('Doğrulanacak bekleyen email bulunamadı.', 422);
         }
 
-        $existing = api_find_user_by_email($pdo, $pending);
-        if ($existing && (string)$existing['id'] !== $userId) {
+        if (api_email_exists_anywhere($pdo, $pending, $userId)) {
             api_error('Bu email zaten kayıtlı.', 409);
         }
 
