@@ -1027,11 +1027,27 @@ h1, h2, h3, h4, h5, h6 {
 
 .activity-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px;
     align-items: center;
     border-bottom: 1px solid var(--border-soft);
     padding: 12px;
+}
+
+.activity-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    color: var(--text-soft);
+}
+
+.activity-icon i {
+    font-size: 15px;
 }
 
 .activity-row:last-child {
@@ -1057,6 +1073,163 @@ h1, h2, h3, h4, h5, h6 {
     border: 1px solid var(--border);
     color: var(--text-soft);
     white-space: nowrap;
+}
+
+.activity-timestamp {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.activity-view-btn {
+    transition: all .15s ease;
+}
+
+.activity-view-btn:hover,
+.activity-view-btn:focus {
+    border-color: var(--primary);
+    color: var(--text-main);
+    background: var(--primary-soft);
+}
+
+.activity-refresh-note {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+    background: #7fb291;
+    box-shadow: 0 0 0 3px rgba(127, 178, 145, .18);
+    vertical-align: middle;
+}
+
+.activity-detail-modal {
+    display: grid;
+    gap: 12px;
+}
+
+.activity-detail-head {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+}
+
+.activity-detail-head i {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-soft);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.activity-detail-head h6 {
+    margin: 0 0 4px;
+}
+
+.activity-detail-head p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.activity-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.activity-stat-pill {
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-soft);
+    color: var(--text-soft);
+    font-size: 12px;
+    padding: 5px 10px;
+}
+
+.activity-info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.activity-info-item {
+    border: 1px solid var(--border);
+    background: var(--bg-soft);
+    border-radius: 10px;
+    padding: 8px 10px;
+    min-width: 0;
+}
+
+.activity-info-item span {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.activity-info-item strong {
+    display: block;
+    font-size: 13px;
+    color: var(--text-main);
+    overflow-wrap: anywhere;
+}
+
+.activity-score-box {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-soft);
+    padding: 10px;
+    display: grid;
+    gap: 6px;
+}
+
+.activity-score-box strong {
+    font-size: 14px;
+}
+
+.activity-score-box small {
+    color: var(--text-muted);
+}
+
+.activity-progress {
+    height: 8px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--bg-soft-2);
+}
+
+.activity-progress span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--primary), #7fb291);
+}
+
+.activity-result-success {
+    border-color: rgba(127, 178, 145, 0.55);
+    background: rgba(127, 178, 145, 0.12);
+    color: #6a947a;
+}
+
+.activity-result-danger {
+    border-color: rgba(192, 116, 132, 0.5);
+    background: rgba(192, 116, 132, 0.12);
+    color: #ac6472;
+}
+
+[data-theme="dark"] .activity-result-success {
+    color: #9dc9ad;
+}
+
+[data-theme="dark"] .activity-result-danger {
+    color: #d19aa6;
 }
 
 .chart-wrap {
@@ -1099,6 +1272,16 @@ h1, h2, h3, h4, h5, h6 {
     }
 
     .activity-row {
+        grid-template-columns: auto 1fr;
+    }
+
+    .activity-row > div:last-child {
+        grid-column: 1 / -1;
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .activity-info-grid {
         grid-template-columns: 1fr;
     }
 

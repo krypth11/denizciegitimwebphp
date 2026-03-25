@@ -41,12 +41,16 @@ try {
     $uCreated = ra_first_col($uCols, ['created_at']);
     $uUpdated = ra_first_col($uCols, ['updated_at']);
     $uDeleted = ra_first_col($uCols, ['is_deleted']);
+    $uCurrentQualification = ra_first_col($uCols, ['current_qualification_id', 'qualification_id']);
+    $uEmailVerified = ra_first_col($uCols, ['email_verified']);
 
     if (in_array('registrations', $types, true) && $uId && $uCreated && $uEmail) {
         $guestExpr = ra_detect_guest_sql('u.`' . $uEmail . '`', $uFullName ? ('u.`' . $uFullName . '`') : null);
         $sql = 'SELECT u.`' . $uId . '` AS user_id, u.`' . $uEmail . '` AS email, '
             . ($uFullName ? 'u.`' . $uFullName . '`' : "''") . ' AS full_name, '
             . 'u.`' . $uCreated . '` AS created_at, '
+            . ($uCurrentQualification ? 'u.`' . $uCurrentQualification . '`' : 'NULL') . ' AS current_qualification_id, '
+            . ($uEmailVerified ? 'u.`' . $uEmailVerified . '`' : 'NULL') . ' AS email_verified, '
             . 'CASE WHEN ' . $guestExpr . " THEN 'guest' ELSE 'registered' END AS user_type "
             . 'FROM `user_profiles` u '
             . ($uDeleted ? 'WHERE u.`' . $uDeleted . '` = 0 ' : '')
@@ -67,8 +71,45 @@ try {
                 ],
                 'detail' => [
                     'registration_at' => $item['created_at'] ?? null,
+                    'qualification_name' => null,
+                    'email_verified' => isset($item['email_verified']) ? ((int)$item['email_verified'] === 1) : null,
                 ],
             ];
+        }
+
+        if ($uCurrentQualification) {
+            $qualMap = [];
+            foreach ($rows as $rowIndex => $rowItem) {
+                if (($rowItem['type'] ?? '') !== 'registrations') {
+                    continue;
+                }
+                $qid = (string)($list[$rowIndex]['current_qualification_id'] ?? '');
+                if ($qid !== '') {
+                    $qualMap[$qid] = true;
+                }
+            }
+
+            if (!empty($qualMap)) {
+                $ids = array_keys($qualMap);
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $qStmt = $pdo->prepare('SELECT id, name FROM qualifications WHERE id IN (' . $placeholders . ')');
+                $qStmt->execute($ids);
+                $qRows = $qStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                $nameById = [];
+                foreach ($qRows as $qr) {
+                    $nameById[(string)$qr['id']] = (string)($qr['name'] ?? '');
+                }
+
+                foreach ($rows as $rowIndex => $rowItem) {
+                    if (($rowItem['type'] ?? '') !== 'registrations') {
+                        continue;
+                    }
+                    $qid = (string)($list[$rowIndex]['current_qualification_id'] ?? '');
+                    if ($qid !== '' && isset($nameById[$qid])) {
+                        $rows[$rowIndex]['detail']['qualification_name'] = $nameById[$qid];
+                    }
+                }
+            }
         }
     }
 

@@ -43,6 +43,7 @@ include 'includes/sidebar.php';
                     </div>
                     <div class="dashboard-metric-value" id="totalQuestionsValue">-</div>
                     <small class="text-muted" id="totalQuestionsHint">Filtreye göre toplam soru adedi</small>
+                    <small class="activity-refresh-note" id="statsRefreshNote">Son güncelleme: -</small>
                     <div class="widget-message" id="totalQuestionsMsg"></div>
                 </div>
             </div>
@@ -77,6 +78,7 @@ include 'includes/sidebar.php';
                     </div>
                     <div class="dashboard-metric-value" id="solvedQuestionsValue">-</div>
                     <small class="text-muted" id="solvedQuestionsHint">Seçili zaman aralığındaki toplam attempt</small>
+                    <small class="activity-refresh-note" id="solvedRefreshNote">Son güncelleme: -</small>
                     <div class="widget-message" id="solvedQuestionsMsg"></div>
                 </div>
             </div>
@@ -98,6 +100,7 @@ include 'includes/sidebar.php';
 
                     <div class="dashboard-metric-value" id="totalUsersValue">-</div>
                     <small class="text-muted" id="totalUsersHint">is_deleted=0 kayıtları baz alınır</small>
+                    <small class="activity-refresh-note" id="usersRefreshNote">Son güncelleme: -</small>
                     <div class="widget-message" id="totalUsersMsg"></div>
                 </div>
             </div>
@@ -108,7 +111,7 @@ include 'includes/sidebar.php';
         <div class="card-header d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2">
             <div>
                 <h5 class="mb-0">Son Aktiviteler</h5>
-                <small class="text-muted" id="activityRefreshInfo">Otomatik yenileme: 25sn</small>
+                <small class="text-muted" id="activityRefreshInfo"><span class="live-dot"></span> Canlı · Son güncelleme: - · Otomatik yenileme: 1sn</small>
             </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
                 <div class="dashboard-chip-group" id="activityTypes">
@@ -136,7 +139,7 @@ include 'includes/sidebar.php';
         <div class="card-header d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2">
             <div>
                 <h5 class="mb-0">Aktivite Grafiği</h5>
-                <small class="text-muted">Filtreler değişince otomatik güncellenir</small>
+                <small class="text-muted">Filtreler değişince otomatik güncellenir · <span id="chartRefreshInfo">Son güncelleme: -</span></small>
             </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
                 <select class="form-select form-select-sm w-auto" id="chartRangeFilter">
@@ -174,7 +177,7 @@ include 'includes/sidebar.php';
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
             </div>
             <div class="modal-body">
-                <pre class="mb-0 small" id="activityDetailBody" style="white-space: pre-wrap;"></pre>
+                <div id="activityDetailBody"></div>
             </div>
         </div>
     </div>
@@ -189,11 +192,17 @@ include 'includes/sidebar.php';
         activity: { types: ['registrations', 'daily_quiz', 'solved_questions', 'profile_updates'], limit: 25 },
         chart: { range: '7d', start_date: '', end_date: '', types: ['registrations', 'solved_questions', 'daily_quiz_completed', 'profile_updates'] },
         refs: { qualifications: [], courses: [] },
-        polling: { timer: null, busy: false }
+        polling: { timer: null, interval: 1000 }
     };
 
     let activityChart = null;
     const activityMap = new Map();
+    let lastActivitySignature = '';
+    let lastChartSignature = '';
+    let statisticsInFlight = false;
+    let activityInFlight = false;
+    let trendsInFlight = false;
+    let filtersInFlight = false;
 
     const qs = (s) => document.querySelector(s);
     const qsa = (s) => Array.from(document.querySelectorAll(s));
@@ -239,77 +248,113 @@ include 'includes/sidebar.php';
         return d.toLocaleString('tr-TR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
     }
 
+    function nowTimeLabel() {
+        return new Date().toLocaleTimeString('tr-TR', { hour12: false });
+    }
+
+    function setRefreshNote(elId) {
+        const el = qs(elId);
+        if (!el) return;
+        el.textContent = `Son güncelleme: ${nowTimeLabel()}`;
+    }
+
+    function setActivityRefreshInfo() {
+        const el = qs('#activityRefreshInfo');
+        if (!el) return;
+        el.innerHTML = `<span class="live-dot"></span> Canlı · Son güncelleme: ${nowTimeLabel()} · Otomatik yenileme: 1sn`;
+    }
+
+    function safe(v, fallback = '-') {
+        if (v === null || v === undefined || String(v).trim() === '') return fallback;
+        return String(v);
+    }
+
     function getActiveTypes(containerId) {
         return qsa(`${containerId} .chip.active`).map(x => x.dataset.type);
     }
 
     async function loadFilters() {
-        const data = await jsonGet('/api/v1/dashboard/details.php', { scope: 'admin', qualification_id: dashboardState.question.qualification_id || '' });
-        dashboardState.refs.qualifications = data.details?.qualifications || [];
-        dashboardState.refs.courses = data.details?.courses || [];
+        if (filtersInFlight) return;
+        filtersInFlight = true;
+        try {
+            const data = await jsonGet('/api/v1/dashboard/details.php', { scope: 'admin', qualification_id: dashboardState.question.qualification_id || '' });
+            dashboardState.refs.qualifications = data.details?.qualifications || [];
+            dashboardState.refs.courses = data.details?.courses || [];
 
-        const qSelect = qs('#qQualificationFilter');
-        const cSelect = qs('#qCourseFilter');
-        qSelect.innerHTML = '<option value="">Tümü</option>';
-        cSelect.innerHTML = '<option value="">Tümü</option>';
+            const qSelect = qs('#qQualificationFilter');
+            const cSelect = qs('#qCourseFilter');
+            qSelect.innerHTML = '<option value="">Tümü</option>';
+            cSelect.innerHTML = '<option value="">Tümü</option>';
 
-        dashboardState.refs.qualifications.forEach(item => {
-            const opt = document.createElement('option');
-            opt.value = item.id;
-            opt.textContent = item.name;
-            qSelect.appendChild(opt);
-        });
+            dashboardState.refs.qualifications.forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item.id;
+                opt.textContent = item.name;
+                qSelect.appendChild(opt);
+            });
 
-        dashboardState.refs.courses.forEach(item => {
-            const opt = document.createElement('option');
-            opt.value = item.id;
-            opt.textContent = item.name;
-            cSelect.appendChild(opt);
-        });
+            dashboardState.refs.courses.forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item.id;
+                opt.textContent = item.name;
+                cSelect.appendChild(opt);
+            });
 
-        qSelect.value = dashboardState.question.qualification_id;
-        cSelect.value = dashboardState.question.course_id;
+            qSelect.value = dashboardState.question.qualification_id;
+            cSelect.value = dashboardState.question.course_id;
+        } finally {
+            filtersInFlight = false;
+        }
     }
 
-    async function loadStatsCard(mode) {
-        const params = { scope: 'admin' };
+    async function loadStatistics() {
+        if (statisticsInFlight) return;
+        statisticsInFlight = true;
 
-        if (mode === 'questions') {
-            setWidgetLoading('#cardTotalQuestions', true);
-            setMsg('#totalQuestionsMsg');
-            params.qualification_id = dashboardState.question.qualification_id;
-            params.course_id = dashboardState.question.course_id;
-        } else if (mode === 'solved') {
-            setWidgetLoading('#cardSolvedQuestions', true);
-            setMsg('#solvedQuestionsMsg');
-            params.solved_range = dashboardState.solved.range;
-            params.solved_start_date = dashboardState.solved.start_date;
-            params.solved_end_date = dashboardState.solved.end_date;
-        } else if (mode === 'users') {
-            setWidgetLoading('#cardTotalUsers', true);
-            setMsg('#totalUsersMsg');
-            params.user_type = dashboardState.users.user_type;
-        }
+        setWidgetLoading('#cardTotalQuestions', true);
+        setWidgetLoading('#cardSolvedQuestions', true);
+        setWidgetLoading('#cardTotalUsers', true);
+        setMsg('#totalQuestionsMsg');
+        setMsg('#solvedQuestionsMsg');
+        setMsg('#totalUsersMsg');
 
         try {
-            const data = await jsonGet('/api/v1/dashboard/statistics.php', params);
-            console.log('statistics:', data);
-            const s = data.statistics || {};
-            if (mode === 'questions') {
-                qs('#totalQuestionsValue').textContent = formatNumber(s.total_questions || 0);
-            } else if (mode === 'solved') {
-                qs('#solvedQuestionsValue').textContent = formatNumber(s.solved_questions_count || 0);
-            } else if (mode === 'users') {
-                qs('#totalUsersValue').textContent = formatNumber(s.total_users || 0);
-            }
+            const [questionsData, solvedData, usersData] = await Promise.all([
+                jsonGet('/api/v1/dashboard/statistics.php', {
+                    scope: 'admin',
+                    qualification_id: dashboardState.question.qualification_id,
+                    course_id: dashboardState.question.course_id
+                }),
+                jsonGet('/api/v1/dashboard/statistics.php', {
+                    scope: 'admin',
+                    solved_range: dashboardState.solved.range,
+                    solved_start_date: dashboardState.solved.start_date,
+                    solved_end_date: dashboardState.solved.end_date
+                }),
+                jsonGet('/api/v1/dashboard/statistics.php', {
+                    scope: 'admin',
+                    user_type: dashboardState.users.user_type
+                })
+            ]);
+
+            console.log('statistics:', { questionsData, solvedData, usersData });
+
+            qs('#totalQuestionsValue').textContent = formatNumber(questionsData.statistics?.total_questions || 0);
+            qs('#solvedQuestionsValue').textContent = formatNumber(solvedData.statistics?.solved_questions_count || 0);
+            qs('#totalUsersValue').textContent = formatNumber(usersData.statistics?.total_users || 0);
+
+            setRefreshNote('#statsRefreshNote');
+            setRefreshNote('#solvedRefreshNote');
+            setRefreshNote('#usersRefreshNote');
         } catch (e) {
-            if (mode === 'questions') setMsg('#totalQuestionsMsg', e.message, 'error');
-            if (mode === 'solved') setMsg('#solvedQuestionsMsg', e.message, 'error');
-            if (mode === 'users') setMsg('#totalUsersMsg', e.message, 'error');
+            setMsg('#totalQuestionsMsg', e.message, 'error');
+            setMsg('#solvedQuestionsMsg', e.message, 'error');
+            setMsg('#totalUsersMsg', e.message, 'error');
         } finally {
-            if (mode === 'questions') setWidgetLoading('#cardTotalQuestions', false);
-            if (mode === 'solved') setWidgetLoading('#cardSolvedQuestions', false);
-            if (mode === 'users') setWidgetLoading('#cardTotalUsers', false);
+            setWidgetLoading('#cardTotalQuestions', false);
+            setWidgetLoading('#cardSolvedQuestions', false);
+            setWidgetLoading('#cardTotalUsers', false);
+            statisticsInFlight = false;
         }
     }
 
@@ -323,16 +368,185 @@ include 'includes/sidebar.php';
         return map[type] || type;
     }
 
+    function activityIcon(type) {
+        const map = {
+            registrations: 'bi-person-plus',
+            daily_quiz: 'bi-lightning-charge',
+            solved_questions: 'bi-bullseye',
+            profile_updates: 'bi-person-badge'
+        };
+        return map[type] || 'bi-activity';
+    }
+
+    function activitySentence(item) {
+        const name = safe(item.user?.full_name, safe(item.user?.email, 'Kullanıcı'));
+        if (item.type === 'solved_questions') {
+            const ok = item.detail?.is_correct === true;
+            return `${name} bir soruyu ${ok ? 'doğru' : 'yanlış'} çözdü`;
+        }
+        if (item.type === 'registrations') return `Yeni kayıt: ${name}`;
+        if (item.type === 'daily_quiz') return `Daily Quiz tamamlandı: ${item.detail?.correct_count ?? 0}/${item.detail?.total_count ?? 0} doğru`;
+        if (item.type === 'profile_updates') return `Profil güncellendi: ${name}`;
+        return safe(item.title, 'Aktivite');
+    }
+
+    function activityKey(item) {
+        return [item.type, item.created_at, item.user?.id, item.detail?.question_id, item.detail?.quiz_date].join('|');
+    }
+
+    function scoreLabel(percent) {
+        if (percent >= 90) return 'Mükemmel Seri';
+        if (percent >= 70) return 'Güçlü Performans';
+        if (percent >= 50) return 'Dengeli İlerleme';
+        return 'Tekrar Faydalı Olur';
+    }
+
+    function buildInfoGrid(items = []) {
+        return `<div class="activity-info-grid">${items.map(([k, v]) => `
+            <div class="activity-info-item"><span>${k}</span><strong>${safe(v)}</strong></div>
+        `).join('')}</div>`;
+    }
+
+    function renderSolvedQuestionDetail(activity) {
+        const isCorrect = activity.detail?.is_correct === true;
+        return `
+            <div class="activity-detail-modal">
+                <div class="activity-detail-head">
+                    <i class="bi bi-bullseye"></i>
+                    <div><h6>Soru Çözüm Detayı</h6><p>${safe(activity.user?.full_name, safe(activity.user?.email))} tarafından çözüldü</p></div>
+                </div>
+                <div class="activity-badges">
+                    <span class="activity-stat-pill ${isCorrect ? 'activity-result-success' : 'activity-result-danger'}">${isCorrect ? 'Doğru' : 'Yanlış'}</span>
+                    <span class="activity-stat-pill">${activity.user?.user_type === 'guest' ? 'Guest' : 'Kayıtlı'}</span>
+                    <span class="activity-stat-pill">Soru Çözümü</span>
+                    <span class="activity-stat-pill">${isCorrect ? '+1 isabet' : 'Gelişim alanı'}</span>
+                </div>
+                ${buildInfoGrid([
+                    ['Kullanıcı', safe(activity.user?.full_name)],
+                    ['Email', safe(activity.user?.email)],
+                    ['Yeterlilik', safe(activity.detail?.qualification_name)],
+                    ['Ders', safe(activity.detail?.course_name)],
+                    ['Soru ID', safe(activity.detail?.question_id)],
+                    ['Soru Kodu', safe(activity.detail?.question_code, 'Kod yok')],
+                    ['Çözüm Zamanı', formatDateTime(activity.created_at)]
+                ])}
+                <div class="activity-score-box ${isCorrect ? 'activity-result-success' : 'activity-result-danger'}">
+                    <strong>${isCorrect ? 'Başarılı hamle' : 'Tekrar denemeye açık'}</strong>
+                    <small>${isCorrect ? 'Harika! Bu çözüm doğru sonuç verdi.' : 'Bu soru gelişim fırsatı sunuyor. Bir sonraki denemede daha iyi olabilir.'}</small>
+                </div>
+            </div>`;
+    }
+
+    function renderRegistrationDetail(activity) {
+        const isGuest = activity.user?.user_type === 'guest';
+        return `
+            <div class="activity-detail-modal">
+                <div class="activity-detail-head">
+                    <i class="bi bi-person-plus"></i>
+                    <div><h6>Yeni Kullanıcı Kaydı</h6><p>Sisteme yeni bir kullanıcı katıldı</p></div>
+                </div>
+                <div class="activity-badges">
+                    <span class="activity-stat-pill">${isGuest ? 'Guest' : 'Kayıtlı'}</span>
+                    <span class="activity-stat-pill">Aktif kayıt</span>
+                    <span class="activity-stat-pill">Yeni üye</span>
+                </div>
+                ${buildInfoGrid([
+                    ['Ad Soyad', safe(activity.user?.full_name)],
+                    ['Email', safe(activity.user?.email)],
+                    ['Kullanıcı Tipi', isGuest ? 'Guest' : 'Kayıtlı'],
+                    ['Kayıt Zamanı', formatDateTime(activity.detail?.registration_at || activity.created_at)],
+                    ['Yeterlilik', safe(activity.detail?.qualification_name)],
+                    ['Email Durumu', activity.detail?.email_verified === true ? 'Doğrulandı' : 'Doğrulanmamış / Bilinmiyor']
+                ])}
+                <div class="activity-score-box">
+                    <strong>Yeni katılım</strong>
+                    <small>${isGuest ? 'Kullanıcı şu an deneme aşamasında.' : 'Platform büyümeye devam ediyor.'}</small>
+                </div>
+            </div>`;
+    }
+
+    function renderDailyQuizDetail(activity) {
+        const total = Number(activity.detail?.total_count || 0);
+        const correct = Number(activity.detail?.correct_count || 0);
+        const wrong = Number(activity.detail?.wrong_count || 0);
+        const percent = total > 0 ? Math.round((correct / total) * 100) : 0;
+        const isCompleted = activity.detail?.completed === true;
+        return `
+            <div class="activity-detail-modal">
+                <div class="activity-detail-head">
+                    <i class="bi bi-lightning-charge"></i>
+                    <div><h6>Daily Quiz Tamamlandı</h6><p>Kullanıcının günlük quiz performansı</p></div>
+                </div>
+                <div class="activity-badges">
+                    <span class="activity-stat-pill ${isCompleted ? 'activity-result-success' : 'activity-result-danger'}">${isCompleted ? 'Tamamlandı' : 'Yarım kaldı'}</span>
+                    <span class="activity-stat-pill">${activity.user?.user_type === 'guest' ? 'Guest' : 'Kayıtlı'}</span>
+                    <span class="activity-stat-pill">Daily Quiz</span>
+                </div>
+                ${buildInfoGrid([
+                    ['Kullanıcı', safe(activity.user?.full_name)],
+                    ['Email', safe(activity.user?.email)],
+                    ['Quiz Tarihi', safe(activity.detail?.quiz_date)],
+                    ['Doğru Sayısı', correct],
+                    ['Yanlış Sayısı', wrong],
+                    ['Toplam Soru', total],
+                    ['Başarı Oranı', `%${percent}`],
+                    ['Aktivite Zamanı', formatDateTime(activity.created_at)]
+                ])}
+                <div class="activity-score-box">
+                    <strong>%${percent} · ${scoreLabel(percent)}</strong>
+                    <div class="activity-progress"><span style="width:${percent}%"></span></div>
+                </div>
+            </div>`;
+    }
+
+    function renderProfileUpdateDetail(activity) {
+        return `
+            <div class="activity-detail-modal">
+                <div class="activity-detail-head">
+                    <i class="bi bi-person-badge"></i>
+                    <div><h6>Profil Güncellendi</h6><p>Kullanıcı profilinde değişiklik yapıldı</p></div>
+                </div>
+                <div class="activity-badges">
+                    <span class="activity-stat-pill">Profil İşlemi</span>
+                    <span class="activity-stat-pill">${activity.user?.user_type === 'guest' ? 'Guest' : 'Kayıtlı'}</span>
+                </div>
+                ${buildInfoGrid([
+                    ['Kullanıcı', safe(activity.user?.full_name)],
+                    ['Email', safe(activity.user?.email)],
+                    ['Güncelleme Zamanı', formatDateTime(activity.created_at)],
+                    ['Kaynak Mantığı', 'user_profiles.updated_at > created_at'],
+                    ['Alan Bazlı Log', 'Alan bazlı değişiklik kaydı tutulmuyor']
+                ])}
+                <div class="activity-score-box">
+                    <strong>Profilini güncel tuttu</strong>
+                    <small>Hesap bilgileri üzerinde düzenleme yapıldı.</small>
+                </div>
+            </div>`;
+    }
+
+    function renderActivityDetail(activity) {
+        if (!activity) return '<div class="activity-detail-modal"><p>Detay bulunamadı.</p></div>';
+        if (activity.type === 'solved_questions') return renderSolvedQuestionDetail(activity);
+        if (activity.type === 'registrations') return renderRegistrationDetail(activity);
+        if (activity.type === 'daily_quiz') return renderDailyQuizDetail(activity);
+        if (activity.type === 'profile_updates') return renderProfileUpdateDetail(activity);
+        return `
+            <div class="activity-detail-modal">
+                <div class="activity-detail-head"><i class="bi bi-activity"></i><div><h6>Aktivite Detayı</h6><p>Bu aktivite için özel görünüm bulunamadı.</p></div></div>
+                ${buildInfoGrid([['Tip', safe(activity.type)], ['Zaman', formatDateTime(activity.created_at)]])}
+            </div>`;
+    }
+
     function openActivityModal(item) {
         qs('#activityDetailTitle').textContent = item.title || 'Aktivite Detayı';
-        qs('#activityDetailBody').textContent = JSON.stringify(item, null, 2);
+        qs('#activityDetailBody').innerHTML = renderActivityDetail(item);
         const modal = bootstrap.Modal.getOrCreateInstance(qs('#activityDetailModal'));
         modal.show();
     }
 
     async function loadActivities() {
-        if (dashboardState.polling.busy) return;
-        dashboardState.polling.busy = true;
+        if (activityInFlight) return;
+        activityInFlight = true;
 
         const listEl = qs('#activityList');
         const errEl = qs('#activityError');
@@ -349,6 +563,12 @@ include 'includes/sidebar.php';
             const data = await jsonGet('/api/v1/dashboard/recent_activity.php', params);
             console.log('activities:', data);
             const rows = data.activities || [];
+            const signature = rows.map(activityKey).join('||');
+            if (signature === lastActivitySignature) {
+                setActivityRefreshInfo();
+                return;
+            }
+            lastActivitySignature = signature;
 
             activityMap.clear();
             listEl.innerHTML = '';
@@ -364,13 +584,14 @@ include 'includes/sidebar.php';
                 const row = document.createElement('div');
                 row.className = 'activity-row';
                 row.innerHTML = `
+                    <div class="activity-icon"><i class="bi ${activityIcon(item.type)}"></i></div>
                     <div class="activity-row-main">
                         <div class="activity-title-row">
                             <span class="activity-type-badge">${activityTypeLabel(item.type)}</span>
-                            <strong class="text-truncate">${item.title || '-'}</strong>
+                            <strong class="text-truncate">${activitySentence(item)}</strong>
                         </div>
                         <div class="small text-muted text-truncate">${item.subtitle || ''}</div>
-                        <div class="small text-muted">${formatDateTime(item.created_at)} · ${(item.user?.full_name || item.user?.email || '-')}</div>
+                        <div class="activity-timestamp">${formatDateTime(item.created_at)} · ${(item.user?.full_name || item.user?.email || '-')}</div>
                     </div>
                     <div>
                         <button class="btn btn-sm btn-outline-secondary activity-view-btn" data-activity-id="${id}" title="Detayı Gör">
@@ -379,12 +600,13 @@ include 'includes/sidebar.php';
                     </div>`;
                 listEl.appendChild(row);
             });
+            setActivityRefreshInfo();
         } catch (e) {
             errEl.textContent = e.message;
             errEl.classList.remove('d-none');
         } finally {
             listEl.classList.remove('is-loading');
-            dashboardState.polling.busy = false;
+            activityInFlight = false;
         }
     }
 
@@ -400,6 +622,8 @@ include 'includes/sidebar.php';
     }
 
     async function loadChart() {
+        if (trendsInFlight) return;
+        trendsInFlight = true;
         setMsg('#chartMsg');
         const params = {
             scope: 'admin',
@@ -415,6 +639,12 @@ include 'includes/sidebar.php';
             const trends = data.trends || {};
             const labels = trends.labels || [];
             const series = trends.series || {};
+            const signature = JSON.stringify([labels, series, trends.totals || {}]);
+            if (signature === lastChartSignature) {
+                setRefreshNote('#chartRefreshInfo');
+                return;
+            }
+            lastChartSignature = signature;
             renderChartTotals(trends.totals || {});
 
             const datasetsMeta = [
@@ -451,14 +681,22 @@ include 'includes/sidebar.php';
                     plugins: { legend: { position: 'bottom' } }
                 }
             });
+            setRefreshNote('#chartRefreshInfo');
         } catch (e) {
             setMsg('#chartMsg', e.message, 'error');
+        } finally {
+            trendsInFlight = false;
         }
     }
 
     function startPolling() {
         if (dashboardState.polling.timer) clearInterval(dashboardState.polling.timer);
-        dashboardState.polling.timer = setInterval(loadActivities, 25000);
+        dashboardState.polling.timer = setInterval(() => {
+            if (document.hidden) return;
+            loadStatistics();
+            loadActivities();
+            loadChart();
+        }, dashboardState.polling.interval);
     }
 
     function bindEvents() {
@@ -466,12 +704,12 @@ include 'includes/sidebar.php';
             dashboardState.question.qualification_id = e.target.value;
             dashboardState.question.course_id = '';
             await loadFilters();
-            await loadStatsCard('questions');
+            await loadStatistics();
         });
 
         qs('#qCourseFilter').addEventListener('change', async (e) => {
             dashboardState.question.course_id = e.target.value;
-            await loadStatsCard('questions');
+            await loadStatistics();
         });
 
         qs('#solvedRangeFilter').addEventListener('change', async (e) => {
@@ -480,14 +718,14 @@ include 'includes/sidebar.php';
                 dashboardState.solved.start_date = '';
                 dashboardState.solved.end_date = '';
             }
-            await loadStatsCard('solved');
+            await loadStatistics();
         });
 
         ['#solvedStartDate', '#solvedEndDate'].forEach(id => {
             qs(id).addEventListener('change', async () => {
                 dashboardState.solved.start_date = qs('#solvedStartDate').value;
                 dashboardState.solved.end_date = qs('#solvedEndDate').value;
-                await loadStatsCard('solved');
+                await loadStatistics();
             });
         });
 
@@ -496,7 +734,7 @@ include 'includes/sidebar.php';
                 qsa('#userTypeToggle button').forEach(x => x.classList.remove('active'));
                 btn.classList.add('active');
                 dashboardState.users.user_type = btn.dataset.type;
-                await loadStatsCard('users');
+                await loadStatistics();
             });
         });
 
@@ -560,13 +798,19 @@ include 'includes/sidebar.php';
         bindEvents();
         await loadFilters();
         await Promise.all([
-            loadStatsCard('questions'),
-            loadStatsCard('solved'),
-            loadStatsCard('users'),
+            loadStatistics(),
             loadActivities(),
             loadChart()
         ]);
         startPolling();
+
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                loadStatistics();
+                loadActivities();
+                loadChart();
+            }
+        });
     }
 
     init();
