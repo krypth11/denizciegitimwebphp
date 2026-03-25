@@ -206,10 +206,15 @@ function api_create_user_token(PDO $pdo, string $userId): string
 
 function api_resolve_auth(PDO $pdo): ?array
 {
-    api_assert_tokens_table_ready($pdo);
-
     $token = api_get_bearer_token();
     if (!$token) {
+        return null;
+    }
+
+    // Token tablosu yoksa API bearer auth doğrulanamaz; fallback katmanına bırak.
+    try {
+        api_assert_tokens_table_ready($pdo);
+    } catch (Throwable $e) {
         return null;
     }
 
@@ -242,9 +247,36 @@ function api_resolve_auth(PDO $pdo): ?array
     ];
 }
 
+function api_resolve_web_auth(PDO $pdo): ?array
+{
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+
+    $sessionUser = verify_token();
+    if (!$sessionUser || empty($sessionUser['user_id'])) {
+        return null;
+    }
+
+    $user = api_find_user_by_id($pdo, (string)$sessionUser['user_id']);
+    if (!$user) {
+        return null;
+    }
+
+    return [
+        'token_hash' => null,
+        'user' => $user,
+        'source' => 'web_session',
+    ];
+}
+
 function api_require_auth(PDO $pdo): array
 {
     $auth = api_resolve_auth($pdo);
+    if (!$auth) {
+        $auth = api_resolve_web_auth($pdo);
+    }
+
     if (!$auth) {
         api_error('Yetkisiz erişim.', 401);
     }

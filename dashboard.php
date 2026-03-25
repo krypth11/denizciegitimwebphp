@@ -293,6 +293,7 @@ include 'includes/sidebar.php';
 
         try {
             const data = await jsonGet('/api/v1/dashboard/statistics.php', params);
+            console.log('statistics:', data);
             const s = data.statistics || {};
             if (mode === 'questions') {
                 qs('#totalQuestionsValue').textContent = formatNumber(s.total_questions || 0);
@@ -340,9 +341,13 @@ include 'includes/sidebar.php';
         listEl.classList.add('is-loading');
 
         try {
-            const params = { limit: dashboardState.activity.limit };
-            dashboardState.activity.types.forEach(t => params['types[]'] = dashboardState.activity.types);
+            const params = {
+                scope: 'admin',
+                limit: dashboardState.activity.limit,
+                types: dashboardState.activity.types.join(',')
+            };
             const data = await jsonGet('/api/v1/dashboard/recent_activity.php', params);
+            console.log('activities:', data);
             const rows = data.activities || [];
 
             activityMap.clear();
@@ -401,11 +406,12 @@ include 'includes/sidebar.php';
             range: dashboardState.chart.range,
             start_date: dashboardState.chart.start_date,
             end_date: dashboardState.chart.end_date,
+            types: dashboardState.chart.types.join(',')
         };
-        params['types[]'] = dashboardState.chart.types;
 
         try {
             const data = await jsonGet('/api/v1/dashboard/trends.php', params);
+            console.log('trends:', data);
             const trends = data.trends || {};
             const labels = trends.labels || [];
             const series = trends.series || {};
