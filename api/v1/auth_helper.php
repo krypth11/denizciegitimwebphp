@@ -1173,13 +1173,11 @@ function api_resend_email_otp(PDO $pdo, string $email, string $purpose): array
     $userId = (string)$profile['id'];
 
     // Cooldown pass edilirse önce mail gönder, sonra DB'yi güncelle.
-    // Böylece mail fail olursa mevcut aktif kod geçerliliğini korur.
+    // Önce DB'ye yaz, sonra mail gönder.
     api_assert_resend_cooldown($pdo, $userId, $purpose);
 
     $code = api_generate_email_otp_code();
     $codeHash = api_hash_email_otp($code);
-
-    api_send_email_otp_mail($targetEmail, $code, $purpose);
 
     try {
         $pdo->beginTransaction();
@@ -1190,6 +1188,12 @@ function api_resend_email_otp(PDO $pdo, string $email, string $purpose): array
             $pdo->rollBack();
         }
         throw new RuntimeException('otp_db_insert_failed: ' . $e->getMessage(), 0, $e);
+    }
+
+    try {
+        api_send_email_otp_mail($targetEmail, $code, $purpose);
+    } catch (Throwable $e) {
+        throw new RuntimeException('smtp_send_failed: ' . $e->getMessage(), 0, $e);
     }
 
     return [
