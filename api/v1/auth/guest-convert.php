@@ -45,7 +45,16 @@ try {
     }
 
     api_convert_guest_to_registered($pdo, $userId, $fullName, $email, $password);
-    api_create_and_send_email_otp($pdo, $userId, $email, 'guest_convert');
+    try {
+        api_create_and_send_email_otp($pdo, $userId, $email, 'guest_convert');
+    } catch (Throwable $e) {
+        api_send_json([
+            'success' => false,
+            'message' => $e->getMessage(),
+            'step' => 'email_otp_send_failed',
+            'endpoint' => 'guest_convert',
+        ], 500);
+    }
 
     // Token stabil kalsın diye mevcut tokenı koruyoruz; yine de responsea verelim
     $bearerToken = api_get_bearer_token();

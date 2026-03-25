@@ -49,7 +49,16 @@ try {
     $token = api_create_user_token($pdo, $userId);
     api_update_last_sign_in($pdo, $userId);
 
-    api_create_and_send_email_otp($pdo, $userId, $email, 'signup');
+    try {
+        api_create_and_send_email_otp($pdo, $userId, $email, 'signup');
+    } catch (Throwable $e) {
+        api_send_json([
+            'success' => false,
+            'message' => $e->getMessage(),
+            'step' => 'email_otp_send_failed',
+            'endpoint' => 'register',
+        ], 500);
+    }
 
     api_success('Kayıt başarılı.', [
         'requires_email_verification' => true,

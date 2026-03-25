@@ -774,8 +774,12 @@ function api_create_email_otp(PDO $pdo, string $userId, string $email, string $p
     }
 
     $sql = 'INSERT INTO `' . $schema['table'] . '` (' . implode(', ', $columns) . ') VALUES (' . implode(', ', $holders) . ')';
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+    } catch (Throwable $e) {
+        throw new RuntimeException('otp_db_insert_failed: ' . $e->getMessage(), 0, $e);
+    }
 
     return [
         'code' => $code,
@@ -953,7 +957,7 @@ function api_get_smtp_config(): array
     }
 
     if ($config['host'] === '' || $config['from_email'] === '') {
-        api_error('SMTP gönderim hatası: SMTP yapılandırması eksik.', 500);
+        throw new RuntimeException('config_missing: SMTP yapılandırması eksik.');
     }
 
     return $config;
@@ -1037,7 +1041,7 @@ function api_send_email_smtp(string $toEmail, string $subject, string $bodyText)
     );
 
     if (!$socket) {
-        throw new RuntimeException('SMTP connect failed: ' . ($errstr !== '' ? $errstr : ('errno=' . $errno)));
+        throw new RuntimeException('smtp_connect_failed: ' . ($errstr !== '' ? $errstr : ('errno=' . $errno)));
     }
 
     try {
@@ -1052,13 +1056,13 @@ function api_send_email_smtp(string $toEmail, string $subject, string $bodyText)
 
         if ($cfg['encryption'] === 'tls') {
             if (!$supportsStartTls) {
-                throw new RuntimeException('SMTP STARTTLS failed: sunucu STARTTLS advertise etmiyor.');
+                throw new RuntimeException('smtp_starttls_failed: sunucu STARTTLS advertise etmiyor.');
             }
 
             $step = 'starttls_failed';
             api_smtp_cmd($socket, 'STARTTLS', [220]);
             if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
-                throw new RuntimeException('SMTP STARTTLS failed: TLS negotiation başarısız.');
+                throw new RuntimeException('smtp_starttls_failed: TLS negotiation başarısız.');
             }
 
             $step = 'ehlo_failed';
@@ -1103,16 +1107,16 @@ function api_send_email_smtp(string $toEmail, string $subject, string $bodyText)
         }
 
         $prefixMap = [
-            'greeting_failed' => 'SMTP greeting failed: ',
-            'ehlo_failed' => 'SMTP EHLO failed: ',
-            'starttls_failed' => 'SMTP STARTTLS failed: ',
-            'auth_failed' => 'SMTP auth failed: ',
-            'mail_from_failed' => 'SMTP MAIL FROM failed: ',
-            'rcpt_to_failed' => 'SMTP RCPT TO failed: ',
-            'data_failed' => 'SMTP DATA failed: ',
-            'quit' => 'SMTP QUIT failed: ',
+            'greeting_failed' => 'smtp_greeting_failed: ',
+            'ehlo_failed' => 'smtp_ehlo_failed: ',
+            'starttls_failed' => 'smtp_starttls_failed: ',
+            'auth_failed' => 'smtp_auth_failed: ',
+            'mail_from_failed' => 'smtp_mail_from_failed: ',
+            'rcpt_to_failed' => 'smtp_rcpt_to_failed: ',
+            'data_failed' => 'smtp_data_failed: ',
+            'quit' => 'smtp_quit_failed: ',
         ];
-        $prefix = $prefixMap[$step] ?? 'SMTP send failed: ';
+        $prefix = $prefixMap[$step] ?? 'smtp_send_failed: ';
         throw new RuntimeException($prefix . $e->getMessage());
     }
 }
@@ -1134,25 +1138,7 @@ function api_send_email_otp_mail(string $email, string $code, string $purpose): 
 function api_create_and_send_email_otp(PDO $pdo, string $userId, string $email, string $purpose): void
 {
     $otp = api_create_email_otp($pdo, $userId, $email, $purpose);
-    try {
-        api_send_email_otp_mail($email, (string)$otp['code'], $purpose);
-    } catch (Throwable $e) {
-        $debug = api_get_smtp_debug_meta();
-        error_log(
-            'SMTP OTP send error: ' . $e->getMessage()
-            . ' | host=' . (string)$debug['smtp_host']
-            . ' | port=' . (string)$debug['smtp_port']
-            . ' | encryption=' . (string)$debug['smtp_encryption']
-        );
-        api_send_json([
-            'success' => false,
-            'message' => 'SMTP gönderim hatası: ' . $e->getMessage(),
-            'smtp_debug_message' => $e->getMessage(),
-            'smtp_host' => $debug['smtp_host'],
-            'smtp_port' => $debug['smtp_port'],
-            'smtp_encryption' => $debug['smtp_encryption'],
-        ], 500);
-    }
+    api_send_email_otp_mail($email, (string)$otp['code'], $purpose);
 }
 
 function api_resend_email_otp(PDO $pdo, string $email, string $purpose): array
