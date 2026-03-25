@@ -441,6 +441,11 @@ function api_email_exists_anywhere(PDO $pdo, string $email, ?string $excludeUser
 
 function api_find_active_user_by_email(PDO $pdo, string $email): ?array
 {
+    return api_find_active_real_user_by_email($pdo, $email);
+}
+
+function api_find_active_real_user_by_email(PDO $pdo, string $email): ?array
+{
     $schema = api_get_profile_schema($pdo);
     $email = strtolower(trim($email));
     if ($email === '') {
@@ -450,9 +455,11 @@ function api_find_active_user_by_email(PDO $pdo, string $email): ?array
     $where = ['LOWER(`' . $schema['email'] . '`) = LOWER(?)'];
     $params = [$email];
 
-    // signup pending kullanıcıları aktif hesap sayma
+    // Pending/geçici kullanıcıları aktif hesap sayma
     $where[] = 'LOWER(`' . $schema['email'] . '`) NOT LIKE ?';
     $params[] = '%@pending.local';
+    $where[] = 'LOWER(`' . $schema['email'] . '`) NOT LIKE ?';
+    $params[] = '%@guest.local';
 
     if ($schema['is_deleted']) {
         $where[] = '`' . $schema['is_deleted'] . '` = 0';
@@ -1085,26 +1092,17 @@ function api_get_latest_active_otp_record_by_email_purpose(PDO $pdo, string $ema
     return $row ?: null;
 }
 
+function api_find_latest_active_email_otp(PDO $pdo, string $email, string $purpose): ?array
+{
+    return api_get_latest_active_otp_record_by_email_purpose($pdo, $email, $purpose);
+}
+
 function api_email_verification_apply(PDO $pdo, string $userId, string $purpose): void
 {
     $schema = api_get_profile_schema($pdo);
     $profile = api_find_profile_by_user_id($pdo, $userId);
     if (!$profile) {
         api_error('Kullanıcı bulunamadı.', 404);
-    }
-
-    $updates = [];
-    if ($schema['email_verified']) {
-        $updates[$schema['email_verified']] = 1;
-    }
-
-    if ($schema['email_verified_at']) {
-        api_update_profile_fields($pdo, $userId, $updates);
-        $sql = 'UPDATE `' . $schema['table'] . '` SET `' . $schema['email_verified_at'] . '` = NOW() WHERE `' . $schema['id'] . '` = ?';
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$userId]);
-    } else {
-        api_update_profile_fields($pdo, $userId, $updates);
     }
 
     if ($purpose === 'signup') {
@@ -1139,6 +1137,7 @@ function api_email_verification_apply(PDO $pdo, string $userId, string $purpose)
         $values[] = $userId;
         $stmt = $pdo->prepare($sql);
         $stmt->execute($values);
+        return;
     }
 
     if ($purpose === 'guest_convert') {
@@ -1173,6 +1172,19 @@ function api_email_verification_apply(PDO $pdo, string $userId, string $purpose)
         $values[] = $userId;
         $stmt = $pdo->prepare($sql);
         $stmt->execute($values);
+        return;
+    }
+
+    // Gelecekte başka purpose eklenirse temel verified güncellemesi
+    $updates = [];
+    if ($schema['email_verified']) {
+        $updates[$schema['email_verified']] = 1;
+    }
+    api_update_profile_fields($pdo, $userId, $updates);
+    if ($schema['email_verified_at']) {
+        $sql = 'UPDATE `' . $schema['table'] . '` SET `' . $schema['email_verified_at'] . '` = NOW() WHERE `' . $schema['id'] . '` = ?';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
     }
 }
 
@@ -1183,7 +1195,7 @@ function api_verify_email_otp(PDO $pdo, string $email, string $purpose, string $
         api_error('Geçersiz doğrulama amacı.', 422);
     }
 
-    $record = api_get_latest_active_otp_record_by_email_purpose($pdo, $email, $purpose);
+    $record = api_find_latest_active_email_otp($pdo, $email, $purpose);
     if (!$record) {
         api_error('Aktif OTP kaydı bulunamadı.', 404);
     }
