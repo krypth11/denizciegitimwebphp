@@ -1066,9 +1066,14 @@ function api_send_email_smtp(string $toEmail, string $subject, string $bodyText)
         api_smtp_expect($socket, [220]);
 
         $step = 'ehlo_failed';
-        api_smtp_cmd($socket, 'EHLO ' . ($_SERVER['SERVER_NAME'] ?? 'localhost'), [250]);
+        $ehloResponse = api_smtp_cmd($socket, 'EHLO ' . ($_SERVER['SERVER_NAME'] ?? 'localhost'), [250]);
+        $supportsStartTls = (stripos($ehloResponse, 'STARTTLS') !== false);
 
         if ($cfg['encryption'] === 'tls') {
+            if (!$supportsStartTls) {
+                throw new RuntimeException('SMTP STARTTLS failed: sunucu STARTTLS advertise etmiyor.');
+            }
+
             $step = 'starttls_failed';
             api_smtp_cmd($socket, 'STARTTLS', [220]);
             if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
