@@ -1094,7 +1094,12 @@ function api_send_email_smtp(string $toEmail, string $subject, string $bodyText)
         'Content-Transfer-Encoding: 8bit',
     ];
 
-        $data = implode("\r\n", $headers) . "\r\n\r\n" . str_replace("\n.", "\n..", $bodyText) . "\r\n.";
+        $normalizedBody = str_replace(["\r\n", "\r"], "\n", $bodyText);
+        $normalizedBody = str_replace("\n", "\r\n", $normalizedBody);
+        // Dot-stuffing: satır başındaki '.' karakterlerini kaçır
+        $normalizedBody = preg_replace('/(^|\r\n)\./', '$1..', $normalizedBody) ?? $normalizedBody;
+
+        $data = implode("\r\n", $headers) . "\r\n\r\n" . $normalizedBody . "\r\n.";
         fwrite($socket, $data . "\r\n");
         api_smtp_expect($socket, [250]);
 
@@ -1126,10 +1131,10 @@ function api_send_email_otp_mail(string $email, string $code, string $purpose): 
     $purposeText = $purpose === 'guest_convert' ? 'hesap tamamlama' : 'kayıt doğrulama';
     $expiryMin = (int)round((defined('EMAIL_OTP_EXPIRY_SECONDS') ? EMAIL_OTP_EXPIRY_SECONDS : 600) / 60);
     $subject = 'Denizci Eğitim - Email Doğrulama Kodu';
-    $body = "Merhaba,\n\n"
-        . "{$purposeText} işlemi için doğrulama kodunuz: {$code}\n"
-        . "Bu kod {$expiryMin} dakika geçerlidir ve tek kullanımlıktır.\n"
-        . "Kodu siz talep etmediyseniz bu emaili dikkate almayın.\n\n"
+    $body = "Merhaba,\r\n\r\n"
+        . "{$purposeText} işlemi için doğrulama kodunuz: {$code}\r\n"
+        . "Bu kod {$expiryMin} dakika geçerlidir ve tek kullanımlıktır.\r\n"
+        . "Kodu siz talep etmediyseniz bu emaili dikkate almayın.\r\n\r\n"
         . "Denizci Eğitim";
 
     api_send_email_smtp($email, $subject, $body);
