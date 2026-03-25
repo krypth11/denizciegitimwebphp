@@ -28,17 +28,24 @@ try {
         api_error('password en az 6 karakter olmalıdır.', 422);
     }
 
-    if (api_email_exists_anywhere($pdo, $email)) {
-        api_error('Bu email zaten kayıtlı.', 409);
+    $activeUser = api_find_active_user_by_email($pdo, $email);
+    if ($activeUser) {
+        api_error('Bu email zaten kullanımda', 409);
     }
 
     try {
         $pdo->beginTransaction();
 
-        // Yarış durumlarını engellemek için duplicate kontrolünü transaction içinde tekrarla.
-        if (api_email_exists_anywhere($pdo, $email)) {
-            $pdo->rollBack();
-            api_error('Bu email zaten kayıtlı.', 409);
+        // Yarış durumları için transaction içinde aktif kullanıcı kontrolünü tekrarla.
+        $activeUserTx = api_find_active_user_by_email($pdo, $email);
+        if ($activeUserTx) {
+            throw new RuntimeException('Bu email zaten kullanımda', 409);
+        }
+
+        // Sadece signup pending kaydı varsa sessizce temizle ve akışı sıfırdan başlat.
+        $pendingSignup = api_find_pending_signup_by_email($pdo, $email);
+        if ($pendingSignup && !empty($pendingSignup['id'])) {
+            api_delete_pending_signup($pdo, (string)$pendingSignup['id']);
         }
 
         $tempEmail = generate_uuid() . '@pending.local';
@@ -66,6 +73,11 @@ try {
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
+        }
+
+        $code = (int)$e->getCode();
+        if ($code >= 400 && $code < 500) {
+            api_error($e->getMessage(), $code);
         }
 
         api_send_json([

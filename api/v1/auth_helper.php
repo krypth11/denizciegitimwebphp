@@ -439,6 +439,125 @@ function api_email_exists_anywhere(PDO $pdo, string $email, ?string $excludeUser
     return ((int)$stmt->fetchColumn()) > 0;
 }
 
+function api_find_active_user_by_email(PDO $pdo, string $email): ?array
+{
+    $schema = api_get_profile_schema($pdo);
+    $email = strtolower(trim($email));
+    if ($email === '') {
+        return null;
+    }
+
+    $where = ['LOWER(`' . $schema['email'] . '`) = LOWER(?)'];
+    $params = [$email];
+
+    // signup pending kullanıcıları aktif hesap sayma
+    $where[] = 'LOWER(`' . $schema['email'] . '`) NOT LIKE ?';
+    $params[] = '%@pending.local';
+
+    if ($schema['is_deleted']) {
+        $where[] = '`' . $schema['is_deleted'] . '` = 0';
+    }
+
+    $orderBy = '1 DESC';
+    if ($schema['email_verified']) {
+        $orderBy = '`' . $schema['email_verified'] . '` DESC';
+    }
+
+    $sql = 'SELECT `' . $schema['id'] . '` AS id, `' . $schema['email'] . '` AS email'
+        . ($schema['email_verified'] ? ', `' . $schema['email_verified'] . '` AS email_verified' : ', 0 AS email_verified')
+        . ' FROM `' . $schema['table'] . '`'
+        . ' WHERE ' . implode(' AND ', $where)
+        . ' ORDER BY ' . $orderBy . ' LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+
+    return [
+        'id' => (string)($row['id'] ?? ''),
+        'email' => (string)($row['email'] ?? ''),
+        'email_verified' => ((int)($row['email_verified'] ?? 0) === 1),
+    ];
+}
+
+function api_find_pending_signup_by_email(PDO $pdo, string $email): ?array
+{
+    $schema = api_get_profile_schema($pdo);
+    $email = strtolower(trim($email));
+    if ($email === '' || !$schema['pending_email']) {
+        return null;
+    }
+
+    $where = [
+        'LOWER(`' . $schema['pending_email'] . '`) = LOWER(?)',
+        'LOWER(`' . $schema['email'] . '`) LIKE ?',
+    ];
+    $params = [$email, '%@pending.local'];
+
+    if ($schema['email_verified']) {
+        $where[] = '`' . $schema['email_verified'] . '` = 0';
+    }
+    if ($schema['is_deleted']) {
+        $where[] = '`' . $schema['is_deleted'] . '` = 0';
+    }
+
+    $sql = 'SELECT `' . $schema['id'] . '` AS id, `' . $schema['email'] . '` AS email, `' . $schema['pending_email'] . '` AS pending_email'
+        . ' FROM `' . $schema['table'] . '`'
+        . ' WHERE ' . implode(' AND ', $where)
+        . ' ORDER BY `' . $schema['id'] . '` DESC LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $row ?: null;
+}
+
+function api_delete_pending_signup(PDO $pdo, string $userId): void
+{
+    $schema = api_get_profile_schema($pdo);
+    $userId = trim($userId);
+    if ($userId === '') {
+        return;
+    }
+
+    $startedTx = false;
+    if (!$pdo->inTransaction()) {
+        $pdo->beginTransaction();
+        $startedTx = true;
+    }
+
+    try {
+        $otpSchema = api_get_email_verification_schema($pdo);
+        $stmtOtp = $pdo->prepare('DELETE FROM `' . $otpSchema['table'] . '` WHERE `' . $otpSchema['user_id'] . '` = ?');
+        $stmtOtp->execute([$userId]);
+
+        // api_tokens şeması hazırsa tokenları da temizle
+        try {
+            api_assert_tokens_table_ready($pdo);
+            $stmtTokens = $pdo->prepare('DELETE FROM api_tokens WHERE user_id = ?');
+            $stmtTokens->execute([$userId]);
+        } catch (Throwable $e) {
+            // token tablosu eksikliği cleanup akışını kırmamalı
+        }
+
+        $stmtUser = $pdo->prepare('DELETE FROM `' . $schema['table'] . '` WHERE `' . $schema['id'] . '` = ?');
+        $stmtUser->execute([$userId]);
+
+        if ($startedTx && $pdo->inTransaction()) {
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        if ($startedTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
 function api_create_user_profile(PDO $pdo, array $input): string
 {
     $schema = api_get_profile_schema($pdo);
