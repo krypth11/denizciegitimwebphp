@@ -32,16 +32,18 @@ try {
         api_error('Bu email zaten kayıtlı.', 409);
     }
 
+    $tempEmail = generate_uuid() . '@pending.local';
+
     $userId = api_create_user_profile($pdo, [
         'full_name' => $fullName,
-        'email' => $email,
-        'password_hash' => hash_password($password),
+        'email' => $tempEmail,
+        'password_hash' => null,
         'is_admin' => 0,
-        'is_guest' => 0,
+        'is_guest' => 1,
         'onboarding_completed' => 0,
         'email_verified' => 0,
         'email_verified_at' => null,
-        'pending_email' => null,
+        'pending_email' => $email,
         'current_qualification_id' => null,
         'target_qualification_id' => null,
     ]);

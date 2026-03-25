@@ -809,7 +809,7 @@ function api_get_user_for_email_purpose(PDO $pdo, string $email, string $purpose
         return null;
     }
 
-    if ($purpose === 'guest_convert' && $schema['pending_email']) {
+    if (in_array($purpose, ['signup', 'guest_convert'], true) && $schema['pending_email']) {
         $sql = 'SELECT `' . $schema['id'] . '` AS id FROM `' . $schema['table'] . '` '
             . 'WHERE LOWER(`' . $schema['pending_email'] . '`) = LOWER(?) LIMIT 1';
     } else {
@@ -847,6 +847,41 @@ function api_email_verification_apply(PDO $pdo, string $userId, string $purpose)
         $stmt->execute([$userId]);
     } else {
         api_update_profile_fields($pdo, $userId, $updates);
+    }
+
+    if ($purpose === 'signup') {
+        $pending = strtolower(trim((string)($profile['pending_email'] ?? '')));
+        if ($pending === '') {
+            api_error('Doğrulanacak bekleyen email bulunamadı.', 422);
+        }
+
+        $existing = api_find_user_by_email($pdo, $pending);
+        if ($existing && (string)$existing['id'] !== $userId) {
+            api_error('Bu email zaten kayıtlı.', 409);
+        }
+
+        $set = ['`' . $schema['email'] . '` = ?'];
+        $values = [$pending];
+        if ($schema['pending_email']) {
+            $set[] = '`' . $schema['pending_email'] . '` = NULL';
+        }
+        if ($schema['is_guest']) {
+            $set[] = '`' . $schema['is_guest'] . '` = 0';
+        }
+        if ($schema['email_verified']) {
+            $set[] = '`' . $schema['email_verified'] . '` = 1';
+        }
+        if ($schema['email_verified_at']) {
+            $set[] = '`' . $schema['email_verified_at'] . '` = NOW()';
+        }
+        if ($schema['updated_at']) {
+            $set[] = '`' . $schema['updated_at'] . '` = NOW()';
+        }
+
+        $sql = 'UPDATE `' . $schema['table'] . '` SET ' . implode(', ', $set) . ' WHERE `' . $schema['id'] . '` = ?';
+        $values[] = $userId;
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($values);
     }
 
     if ($purpose === 'guest_convert') {

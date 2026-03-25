@@ -44,7 +44,23 @@ try {
         api_error('Bu email zaten kayıtlı.', 409);
     }
 
-    api_convert_guest_to_registered($pdo, $userId, $fullName, $email, $password);
+    $profileSchema = api_get_profile_schema($pdo);
+    $updates = [];
+
+    if ($profileSchema['full_name']) {
+        $updates[$profileSchema['full_name']] = $fullName;
+    }
+
+    if ($profileSchema['pending_email']) {
+        $updates[$profileSchema['pending_email']] = $email;
+    }
+
+    if ($profileSchema['password']) {
+        $updates[$profileSchema['password']] = hash_password($password);
+    }
+
+    api_update_profile_fields($pdo, $userId, $updates);
+
     try {
         api_create_and_send_email_otp($pdo, $userId, $email, 'guest_convert');
     } catch (Throwable $e) {
