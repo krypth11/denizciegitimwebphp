@@ -45,11 +45,15 @@ try {
     }
 
     api_convert_guest_to_registered($pdo, $userId, $fullName, $email, $password);
+    api_create_and_send_email_otp($pdo, $userId, $email, 'guest_convert');
 
     // Token stabil kalsın diye mevcut tokenı koruyoruz; yine de responsea verelim
     $bearerToken = api_get_bearer_token();
 
-    api_success('Hesap başarıyla tamamlandı.', [
+    api_success('Hesap tamamlama için email doğrulama gerekli.', [
+        'requires_email_verification' => true,
+        'verification_purpose' => 'guest_convert',
+        'email' => $email,
         'user' => api_build_auth_user_payload($pdo, $userId),
         'token' => $bearerToken,
     ]);

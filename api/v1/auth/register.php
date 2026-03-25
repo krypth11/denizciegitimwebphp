@@ -39,6 +39,9 @@ try {
         'is_admin' => 0,
         'is_guest' => 0,
         'onboarding_completed' => 0,
+        'email_verified' => 0,
+        'email_verified_at' => null,
+        'pending_email' => null,
         'current_qualification_id' => null,
         'target_qualification_id' => null,
     ]);
@@ -46,7 +49,12 @@ try {
     $token = api_create_user_token($pdo, $userId);
     api_update_last_sign_in($pdo, $userId);
 
+    api_create_and_send_email_otp($pdo, $userId, $email, 'signup');
+
     api_success('Kayıt başarılı.', [
+        'requires_email_verification' => true,
+        'verification_purpose' => 'signup',
+        'email' => $email,
         'token' => $token,
         'user' => api_build_auth_user_payload($pdo, $userId),
     ]);

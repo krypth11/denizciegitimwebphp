@@ -23,6 +23,20 @@ define('JWT_SECRET', 'dEnIzCi_EgItIm_2026_sEcReT_kEy_ChAnGe_Me');
 define('JWT_EXPIRY', 86400); // 24 saat
 define('SESSION_TIMEOUT', 1800); // 30 dakika
 
+// Email / OTP ayarları (environment üzerinden yönet)
+define('SMTP_HOST', getenv('SMTP_HOST') ?: '');
+define('SMTP_PORT', (int)(getenv('SMTP_PORT') ?: 587));
+define('SMTP_USERNAME', getenv('SMTP_USERNAME') ?: '');
+define('SMTP_PASSWORD', getenv('SMTP_PASSWORD') ?: '');
+define('SMTP_ENCRYPTION', strtolower((string)(getenv('SMTP_ENCRYPTION') ?: 'tls'))); // tls|ssl|none
+define('SMTP_FROM_EMAIL', getenv('SMTP_FROM_EMAIL') ?: '');
+define('SMTP_FROM_NAME', getenv('SMTP_FROM_NAME') ?: SITE_NAME);
+
+define('EMAIL_OTP_LENGTH', 6);
+define('EMAIL_OTP_EXPIRY_SECONDS', 600); // 10 dk
+define('EMAIL_OTP_RESEND_COOLDOWN_SECONDS', 60); // 60 sn
+define('EMAIL_OTP_MAX_ATTEMPTS', 5);
+
 // Session
 if (session_status() === PHP_SESSION_NONE) {
     $isSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');

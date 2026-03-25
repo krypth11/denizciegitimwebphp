@@ -289,6 +289,9 @@ function api_get_profile_schema(PDO $pdo): array
         'current_qualification_id' => $pick(['current_qualification_id', 'qualification_id'], false),
         'target_qualification_id' => $pick(['target_qualification_id'], false),
         'onboarding_completed' => $pick(['onboarding_completed', 'is_onboarding_completed'], false),
+        'email_verified' => $pick(['email_verified'], false),
+        'email_verified_at' => $pick(['email_verified_at'], false),
+        'pending_email' => $pick(['pending_email'], false),
         'created_at' => $pick(['created_at', 'created_on'], false),
         'updated_at' => $pick(['updated_at', 'updated_on'], false),
     ];
@@ -307,6 +310,9 @@ function api_find_profile_by_user_id(PDO $pdo, string $userId): ?array
         $schema['current_qualification_id'] ? "`{$schema['current_qualification_id']}` AS current_qualification_id" : 'NULL AS current_qualification_id',
         $schema['target_qualification_id'] ? "`{$schema['target_qualification_id']}` AS target_qualification_id" : 'NULL AS target_qualification_id',
         $schema['onboarding_completed'] ? "`{$schema['onboarding_completed']}` AS onboarding_completed" : '0 AS onboarding_completed',
+        $schema['email_verified'] ? "`{$schema['email_verified']}` AS email_verified" : '0 AS email_verified',
+        $schema['email_verified_at'] ? "`{$schema['email_verified_at']}` AS email_verified_at" : 'NULL AS email_verified_at',
+        $schema['pending_email'] ? "`{$schema['pending_email']}` AS pending_email" : 'NULL AS pending_email',
         $schema['created_at'] ? "`{$schema['created_at']}` AS created_at" : 'NULL AS created_at',
         $schema['updated_at'] ? "`{$schema['updated_at']}` AS updated_at" : 'NULL AS updated_at',
     ];
@@ -354,6 +360,9 @@ function api_find_profile_by_user_id(PDO $pdo, string $userId): ?array
         'current_qualification_id' => $row['current_qualification_id'] ?? null,
         'target_qualification_id' => $row['target_qualification_id'] ?? null,
         'onboarding_completed' => ((int)($row['onboarding_completed'] ?? 0) === 1),
+        'email_verified' => ((int)($row['email_verified'] ?? 0) === 1),
+        'email_verified_at' => $row['email_verified_at'] ?? null,
+        'pending_email' => $row['pending_email'] ?? null,
         'created_at' => $row['created_at'] ?? null,
         'updated_at' => $row['updated_at'] ?? null,
         'current_qualification_name' => $currentName,
@@ -451,6 +460,19 @@ function api_create_user_profile(PDO $pdo, array $input): string
     if ($schema['onboarding_completed']) {
         $addValue($schema['onboarding_completed'], $onboardingCompleted);
     }
+    if ($schema['email_verified']) {
+        $addValue($schema['email_verified'], !empty($input['email_verified']) ? 1 : 0);
+    }
+    if ($schema['email_verified_at']) {
+        if (!empty($input['email_verified_at_now'])) {
+            $addNow($schema['email_verified_at']);
+        } else {
+            $addValue($schema['email_verified_at'], $input['email_verified_at'] ?? null);
+        }
+    }
+    if ($schema['pending_email']) {
+        $addValue($schema['pending_email'], $input['pending_email'] ?? null);
+    }
     if ($schema['current_qualification_id']) {
         $addValue($schema['current_qualification_id'], $currentQualificationId);
     }
@@ -483,6 +505,9 @@ function api_build_auth_user_payload(PDO $pdo, string $userId): array
             'current_qualification_id' => $profile['current_qualification_id'] ?? null,
             'onboarding_completed' => (bool)($profile['onboarding_completed'] ?? false),
             'is_guest' => (bool)($profile['is_guest'] ?? false),
+            'email_verified' => (bool)($profile['email_verified'] ?? false),
+            'email_verified_at' => $profile['email_verified_at'] ?? null,
+            'pending_email' => $profile['pending_email'] ?? null,
         ];
     }
 
@@ -496,6 +521,9 @@ function api_build_auth_user_payload(PDO $pdo, string $userId): array
             'current_qualification_id' => null,
             'onboarding_completed' => false,
             'is_guest' => false,
+            'email_verified' => false,
+            'email_verified_at' => null,
+            'pending_email' => null,
         ];
     }
 
@@ -507,6 +535,9 @@ function api_build_auth_user_payload(PDO $pdo, string $userId): array
         'current_qualification_id' => null,
         'onboarding_completed' => false,
         'is_guest' => false,
+        'email_verified' => false,
+        'email_verified_at' => null,
+        'pending_email' => null,
     ];
 }
 
@@ -560,16 +591,25 @@ function api_convert_guest_to_registered(PDO $pdo, string $userId, string $fullN
         $values[] = $fullName;
     }
 
-    $updates[] = '`' . $schema['email'] . '` = ?';
-    $values[] = strtolower($email);
+    if ($schema['pending_email']) {
+        $updates[] = '`' . $schema['pending_email'] . '` = ?';
+        $values[] = strtolower($email);
+    } else {
+        $updates[] = '`' . $schema['email'] . '` = ?';
+        $values[] = strtolower($email);
+    }
 
     if ($schema['password']) {
         $updates[] = '`' . $schema['password'] . '` = ?';
         $values[] = hash_password($password);
     }
 
-    if ($schema['is_guest']) {
-        $updates[] = '`' . $schema['is_guest'] . '` = 0';
+    if ($schema['email_verified']) {
+        $updates[] = '`' . $schema['email_verified'] . '` = 0';
+    }
+
+    if ($schema['email_verified_at']) {
+        $updates[] = '`' . $schema['email_verified_at'] . '` = NULL';
     }
 
     if ($schema['is_deleted']) {
@@ -589,4 +629,444 @@ function api_convert_guest_to_registered(PDO $pdo, string $userId, string $fullN
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute($values);
+}
+
+function api_get_email_verification_schema(PDO $pdo): array
+{
+    $columns = get_table_columns($pdo, 'email_verification_codes');
+    if (!$columns) {
+        throw new RuntimeException('email_verification_codes tablosu okunamadı.');
+    }
+
+    $pick = static function (array $candidates, bool $required = true) use ($columns): ?string {
+        foreach ($candidates as $candidate) {
+            if (in_array($candidate, $columns, true)) {
+                return $candidate;
+            }
+        }
+
+        if ($required) {
+            throw new RuntimeException('Gerekli OTP kolonu bulunamadı: ' . implode(', ', $candidates));
+        }
+
+        return null;
+    };
+
+    return [
+        'table' => 'email_verification_codes',
+        'id' => $pick(['id']),
+        'user_id' => $pick(['user_id']),
+        'email' => $pick(['email']),
+        'purpose' => $pick(['purpose']),
+        'code_hash' => $pick(['code_hash']),
+        'expires_at' => $pick(['expires_at']),
+        'used_at' => $pick(['used_at']),
+        'attempt_count' => $pick(['attempt_count'], false),
+        'last_sent_at' => $pick(['last_sent_at'], false),
+        'created_at' => $pick(['created_at'], false),
+    ];
+}
+
+function api_generate_email_otp_code(): string
+{
+    $len = defined('EMAIL_OTP_LENGTH') ? (int)EMAIL_OTP_LENGTH : 6;
+    if ($len < 4) {
+        $len = 6;
+    }
+
+    $max = (10 ** $len) - 1;
+    $code = (string)random_int(0, $max);
+    return str_pad($code, $len, '0', STR_PAD_LEFT);
+}
+
+function api_hash_email_otp(string $code): string
+{
+    return password_hash($code, PASSWORD_BCRYPT);
+}
+
+function api_get_active_email_otp_record(PDO $pdo, string $userId, string $purpose): ?array
+{
+    $schema = api_get_email_verification_schema($pdo);
+    $orderCol = $schema['last_sent_at'] ?: ($schema['created_at'] ?: $schema['expires_at']);
+    $sql = 'SELECT * FROM `' . $schema['table'] . '` '
+        . 'WHERE `' . $schema['user_id'] . '` = ? '
+        . 'AND `' . $schema['purpose'] . '` = ? '
+        . 'AND `' . $schema['used_at'] . '` IS NULL '
+        . 'ORDER BY `' . $orderCol . '` DESC '
+        . 'LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$userId, $purpose]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+function api_invalidate_email_otp_codes(PDO $pdo, string $userId, string $purpose): void
+{
+    $schema = api_get_email_verification_schema($pdo);
+    $sql = 'UPDATE `' . $schema['table'] . '` '
+        . 'SET `' . $schema['used_at'] . '` = NOW() '
+        . 'WHERE `' . $schema['user_id'] . '` = ? '
+        . 'AND `' . $schema['purpose'] . '` = ? '
+        . 'AND `' . $schema['used_at'] . '` IS NULL';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$userId, $purpose]);
+}
+
+function api_assert_resend_cooldown(PDO $pdo, string $userId, string $purpose): void
+{
+    $active = api_get_active_email_otp_record($pdo, $userId, $purpose);
+    if (!$active) {
+        return;
+    }
+
+    $lastSent = (string)($active['last_sent_at'] ?? $active['created_at'] ?? '');
+    if ($lastSent === '') {
+        return;
+    }
+
+    $cooldown = defined('EMAIL_OTP_RESEND_COOLDOWN_SECONDS') ? (int)EMAIL_OTP_RESEND_COOLDOWN_SECONDS : 60;
+    $remain = (strtotime($lastSent) + $cooldown) - time();
+    if ($remain > 0) {
+        api_error('Yeniden gönderme için bekleme gerekli. Lütfen ' . $remain . ' saniye sonra tekrar deneyin.', 429);
+    }
+}
+
+function api_create_email_otp(PDO $pdo, string $userId, string $email, string $purpose): array
+{
+    api_assert_resend_cooldown($pdo, $userId, $purpose);
+    api_invalidate_email_otp_codes($pdo, $userId, $purpose);
+
+    $schema = api_get_email_verification_schema($pdo);
+    $code = api_generate_email_otp_code();
+    $codeHash = api_hash_email_otp($code);
+
+    $columns = [
+        '`' . $schema['id'] . '`',
+        '`' . $schema['user_id'] . '`',
+        '`' . $schema['email'] . '`',
+        '`' . $schema['purpose'] . '`',
+        '`' . $schema['code_hash'] . '`',
+        '`' . $schema['expires_at'] . '`',
+        '`' . $schema['used_at'] . '`',
+    ];
+    $holders = ['?', '?', '?', '?', '?', 'DATE_ADD(NOW(), INTERVAL ' . (int)(defined('EMAIL_OTP_EXPIRY_SECONDS') ? EMAIL_OTP_EXPIRY_SECONDS : 600) . ' SECOND)', 'NULL'];
+    $params = [
+        generate_uuid(),
+        $userId,
+        strtolower(trim($email)),
+        $purpose,
+        $codeHash,
+    ];
+
+    if ($schema['attempt_count']) {
+        $columns[] = '`' . $schema['attempt_count'] . '`';
+        $holders[] = '0';
+    }
+    if ($schema['last_sent_at']) {
+        $columns[] = '`' . $schema['last_sent_at'] . '`';
+        $holders[] = 'NOW()';
+    }
+    if ($schema['created_at']) {
+        $columns[] = '`' . $schema['created_at'] . '`';
+        $holders[] = 'NOW()';
+    }
+
+    $sql = 'INSERT INTO `' . $schema['table'] . '` (' . implode(', ', $columns) . ') VALUES (' . implode(', ', $holders) . ')';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    return [
+        'code' => $code,
+    ];
+}
+
+function api_get_user_for_email_purpose(PDO $pdo, string $email, string $purpose): ?array
+{
+    $schema = api_get_profile_schema($pdo);
+    $email = strtolower(trim($email));
+    if ($email === '') {
+        return null;
+    }
+
+    if ($purpose === 'guest_convert' && $schema['pending_email']) {
+        $sql = 'SELECT `' . $schema['id'] . '` AS id FROM `' . $schema['table'] . '` '
+            . 'WHERE LOWER(`' . $schema['pending_email'] . '`) = LOWER(?) LIMIT 1';
+    } else {
+        $sql = 'SELECT `' . $schema['id'] . '` AS id FROM `' . $schema['table'] . '` '
+            . 'WHERE LOWER(`' . $schema['email'] . '`) = LOWER(?) LIMIT 1';
+    }
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$email]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+
+    return api_find_profile_by_user_id($pdo, (string)$row['id']);
+}
+
+function api_email_verification_apply(PDO $pdo, string $userId, string $purpose): void
+{
+    $schema = api_get_profile_schema($pdo);
+    $profile = api_find_profile_by_user_id($pdo, $userId);
+    if (!$profile) {
+        api_error('Kullanıcı bulunamadı.', 404);
+    }
+
+    $updates = [];
+    if ($schema['email_verified']) {
+        $updates[$schema['email_verified']] = 1;
+    }
+
+    if ($schema['email_verified_at']) {
+        api_update_profile_fields($pdo, $userId, $updates);
+        $sql = 'UPDATE `' . $schema['table'] . '` SET `' . $schema['email_verified_at'] . '` = NOW() WHERE `' . $schema['id'] . '` = ?';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+    } else {
+        api_update_profile_fields($pdo, $userId, $updates);
+    }
+
+    if ($purpose === 'guest_convert') {
+        $pending = strtolower(trim((string)($profile['pending_email'] ?? '')));
+        if ($pending === '') {
+            api_error('Doğrulanacak bekleyen email bulunamadı.', 422);
+        }
+
+        $existing = api_find_user_by_email($pdo, $pending);
+        if ($existing && (string)$existing['id'] !== $userId) {
+            api_error('Bu email zaten kayıtlı.', 409);
+        }
+
+        $set = ['`' . $schema['email'] . '` = ?'];
+        $values = [$pending];
+        if ($schema['pending_email']) {
+            $set[] = '`' . $schema['pending_email'] . '` = NULL';
+        }
+        if ($schema['is_guest']) {
+            $set[] = '`' . $schema['is_guest'] . '` = 0';
+        }
+        if ($schema['email_verified']) {
+            $set[] = '`' . $schema['email_verified'] . '` = 1';
+        }
+        if ($schema['email_verified_at']) {
+            $set[] = '`' . $schema['email_verified_at'] . '` = NOW()';
+        }
+        if ($schema['updated_at']) {
+            $set[] = '`' . $schema['updated_at'] . '` = NOW()';
+        }
+
+        $sql = 'UPDATE `' . $schema['table'] . '` SET ' . implode(', ', $set) . ' WHERE `' . $schema['id'] . '` = ?';
+        $values[] = $userId;
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($values);
+    }
+}
+
+function api_verify_email_otp(PDO $pdo, string $email, string $purpose, string $code): array
+{
+    $purpose = strtolower(trim($purpose));
+    if (!in_array($purpose, ['signup', 'guest_convert'], true)) {
+        api_error('Geçersiz doğrulama amacı.', 422);
+    }
+
+    $profile = api_get_user_for_email_purpose($pdo, $email, $purpose);
+    if (!$profile) {
+        api_error('Doğrulama kaydı bulunamadı.', 404);
+    }
+
+    $record = api_get_active_email_otp_record($pdo, (string)$profile['id'], $purpose);
+    if (!$record) {
+        api_error('Aktif OTP kaydı bulunamadı.', 404);
+    }
+
+    if (!empty($record['used_at'])) {
+        api_error('OTP zaten kullanıldı.', 409);
+    }
+
+    $attemptCount = (int)($record['attempt_count'] ?? 0);
+    $maxAttempts = defined('EMAIL_OTP_MAX_ATTEMPTS') ? (int)EMAIL_OTP_MAX_ATTEMPTS : 5;
+    if ($attemptCount >= $maxAttempts) {
+        api_error('Çok fazla yanlış deneme yapıldı.', 429);
+    }
+
+    $expiresAt = (string)($record['expires_at'] ?? '');
+    if ($expiresAt !== '' && strtotime($expiresAt) <= time()) {
+        api_error('OTP süresi doldu.', 410);
+    }
+
+    $schema = api_get_email_verification_schema($pdo);
+    $valid = password_verify($code, (string)$record['code_hash']);
+
+    if (!$valid) {
+        if ($schema['attempt_count']) {
+            $sql = 'UPDATE `' . $schema['table'] . '` SET `' . $schema['attempt_count'] . '` = COALESCE(`' . $schema['attempt_count'] . '`,0) + 1 WHERE `' . $schema['id'] . '` = ?';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([(string)$record['id']]);
+        }
+        api_error('Geçersiz OTP.', 422);
+    }
+
+    $sqlUse = 'UPDATE `' . $schema['table'] . '` SET `' . $schema['used_at'] . '` = NOW() WHERE `' . $schema['id'] . '` = ?';
+    $stmtUse = $pdo->prepare($sqlUse);
+    $stmtUse->execute([(string)$record['id']]);
+
+    api_email_verification_apply($pdo, (string)$profile['id'], $purpose);
+
+    return api_build_auth_user_payload($pdo, (string)$profile['id']);
+}
+
+function api_get_smtp_config(): array
+{
+    $config = [
+        'host' => defined('SMTP_HOST') ? trim((string)SMTP_HOST) : '',
+        'port' => defined('SMTP_PORT') ? (int)SMTP_PORT : 587,
+        'username' => defined('SMTP_USERNAME') ? trim((string)SMTP_USERNAME) : '',
+        'password' => defined('SMTP_PASSWORD') ? (string)SMTP_PASSWORD : '',
+        'encryption' => defined('SMTP_ENCRYPTION') ? strtolower(trim((string)SMTP_ENCRYPTION)) : 'tls',
+        'from_email' => defined('SMTP_FROM_EMAIL') ? trim((string)SMTP_FROM_EMAIL) : '',
+        'from_name' => defined('SMTP_FROM_NAME') ? trim((string)SMTP_FROM_NAME) : 'System',
+    ];
+
+    if ($config['host'] === '' || $config['from_email'] === '') {
+        api_error('SMTP gönderim hatası: SMTP yapılandırması eksik.', 500);
+    }
+
+    return $config;
+}
+
+function api_smtp_expect($socket, array $allowedCodes): string
+{
+    $response = '';
+    while (!feof($socket)) {
+        $line = fgets($socket, 515);
+        if ($line === false) {
+            break;
+        }
+        $response .= $line;
+        if (preg_match('/^\d{3}\s/', $line)) {
+            break;
+        }
+    }
+
+    $code = (int)substr(trim($response), 0, 3);
+    if (!in_array($code, $allowedCodes, true)) {
+        throw new RuntimeException('SMTP response hatası: ' . trim($response));
+    }
+
+    return $response;
+}
+
+function api_smtp_cmd($socket, string $cmd, array $allowedCodes): string
+{
+    fwrite($socket, $cmd . "\r\n");
+    return api_smtp_expect($socket, $allowedCodes);
+}
+
+function api_send_email_smtp(string $toEmail, string $subject, string $bodyText): void
+{
+    $cfg = api_get_smtp_config();
+    $transportHost = $cfg['encryption'] === 'ssl' ? ('ssl://' . $cfg['host']) : $cfg['host'];
+    $socket = @stream_socket_client(
+        $transportHost . ':' . $cfg['port'],
+        $errno,
+        $errstr,
+        15,
+        STREAM_CLIENT_CONNECT
+    );
+
+    if (!$socket) {
+        throw new RuntimeException('SMTP bağlantı hatası: ' . $errstr);
+    }
+
+    stream_set_timeout($socket, 15);
+    api_smtp_expect($socket, [220]);
+    api_smtp_cmd($socket, 'EHLO ' . ($_SERVER['SERVER_NAME'] ?? 'localhost'), [250]);
+
+    if ($cfg['encryption'] === 'tls') {
+        api_smtp_cmd($socket, 'STARTTLS', [220]);
+        if (!stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
+            throw new RuntimeException('SMTP TLS başlatılamadı.');
+        }
+        api_smtp_cmd($socket, 'EHLO ' . ($_SERVER['SERVER_NAME'] ?? 'localhost'), [250]);
+    }
+
+    if ($cfg['username'] !== '') {
+        api_smtp_cmd($socket, 'AUTH LOGIN', [334]);
+        api_smtp_cmd($socket, base64_encode($cfg['username']), [334]);
+        api_smtp_cmd($socket, base64_encode($cfg['password']), [235]);
+    }
+
+    api_smtp_cmd($socket, 'MAIL FROM:<' . $cfg['from_email'] . '>', [250]);
+    api_smtp_cmd($socket, 'RCPT TO:<' . $toEmail . '>', [250, 251]);
+    api_smtp_cmd($socket, 'DATA', [354]);
+
+    $headers = [
+        'From: ' . $cfg['from_name'] . ' <' . $cfg['from_email'] . '>',
+        'To: <' . $toEmail . '>',
+        'Subject: =?UTF-8?B?' . base64_encode($subject) . '?=',
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: 8bit',
+    ];
+
+    $data = implode("\r\n", $headers) . "\r\n\r\n" . str_replace("\n.", "\n..", $bodyText) . "\r\n.";
+    fwrite($socket, $data . "\r\n");
+    api_smtp_expect($socket, [250]);
+    api_smtp_cmd($socket, 'QUIT', [221]);
+    fclose($socket);
+}
+
+function api_send_email_otp_mail(string $email, string $code, string $purpose): void
+{
+    $purposeText = $purpose === 'guest_convert' ? 'hesap tamamlama' : 'kayıt doğrulama';
+    $expiryMin = (int)round((defined('EMAIL_OTP_EXPIRY_SECONDS') ? EMAIL_OTP_EXPIRY_SECONDS : 600) / 60);
+    $subject = 'Denizci Eğitim - Email Doğrulama Kodu';
+    $body = "Merhaba,\n\n"
+        . "{$purposeText} işlemi için doğrulama kodunuz: {$code}\n"
+        . "Bu kod {$expiryMin} dakika geçerlidir ve tek kullanımlıktır.\n"
+        . "Kodu siz talep etmediyseniz bu emaili dikkate almayın.\n\n"
+        . "Denizci Eğitim";
+
+    api_send_email_smtp($email, $subject, $body);
+}
+
+function api_create_and_send_email_otp(PDO $pdo, string $userId, string $email, string $purpose): void
+{
+    $otp = api_create_email_otp($pdo, $userId, $email, $purpose);
+    try {
+        api_send_email_otp_mail($email, (string)$otp['code'], $purpose);
+    } catch (Throwable $e) {
+        api_error('SMTP gönderim hatası.', 500);
+    }
+}
+
+function api_resend_email_otp(PDO $pdo, string $email, string $purpose): array
+{
+    $purpose = api_validate_email_verification_purpose($purpose);
+    $profile = api_get_user_for_email_purpose($pdo, $email, $purpose);
+    if (!$profile) {
+        api_error('Doğrulama için kullanıcı bulunamadı.', 404);
+    }
+
+    $targetEmail = strtolower(trim((string)$email));
+    api_create_and_send_email_otp($pdo, (string)$profile['id'], $targetEmail, $purpose);
+
+    return [
+        'user_id' => (string)$profile['id'],
+        'email' => $targetEmail,
+        'purpose' => $purpose,
+    ];
+}
+
+function api_validate_email_verification_purpose(string $purpose): string
+{
+    $purpose = strtolower(trim($purpose));
+    if (!in_array($purpose, ['signup', 'guest_convert'], true)) {
+        api_error('Geçersiz doğrulama amacı.', 422);
+    }
+    return $purpose;
 }
