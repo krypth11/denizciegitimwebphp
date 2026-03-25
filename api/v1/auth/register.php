@@ -53,6 +53,12 @@ try {
             api_delete_pending_signup($pdo, (string)$pendingSignup['id']);
         }
 
+        // Aynı email için guest-convert pending state varsa temizle (guest hesabı korunur).
+        $pendingGuestConvert = api_find_pending_guest_convert_by_email($pdo, $email);
+        if ($pendingGuestConvert && !empty($pendingGuestConvert['id'])) {
+            api_clear_pending_guest_convert($pdo, (string)$pendingGuestConvert['id']);
+        }
+
         $tempEmail = generate_uuid() . '@pending.local';
 
         $userId = api_create_user_profile($pdo, [

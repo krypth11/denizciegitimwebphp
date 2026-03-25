@@ -516,6 +516,39 @@ function api_find_pending_signup_by_email(PDO $pdo, string $email): ?array
     return $row ?: null;
 }
 
+function api_find_pending_guest_convert_by_email(PDO $pdo, string $email): ?array
+{
+    $schema = api_get_profile_schema($pdo);
+    $email = strtolower(trim($email));
+    if ($email === '' || !$schema['pending_email']) {
+        return null;
+    }
+
+    $where = [
+        'LOWER(`' . $schema['pending_email'] . '`) = LOWER(?)',
+        'LOWER(`' . $schema['email'] . '`) LIKE ?',
+    ];
+    $params = [$email, '%@guest.local'];
+
+    if ($schema['email_verified']) {
+        $where[] = '`' . $schema['email_verified'] . '` = 0';
+    }
+    if ($schema['is_deleted']) {
+        $where[] = '`' . $schema['is_deleted'] . '` = 0';
+    }
+
+    $sql = 'SELECT `' . $schema['id'] . '` AS id, `' . $schema['email'] . '` AS email, `' . $schema['pending_email'] . '` AS pending_email'
+        . ' FROM `' . $schema['table'] . '`'
+        . ' WHERE ' . implode(' AND ', $where)
+        . ' ORDER BY `' . $schema['id'] . '` DESC LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $row ?: null;
+}
+
 function api_delete_pending_signup(PDO $pdo, string $userId): void
 {
     $schema = api_get_profile_schema($pdo);
@@ -546,6 +579,53 @@ function api_delete_pending_signup(PDO $pdo, string $userId): void
 
         $stmtUser = $pdo->prepare('DELETE FROM `' . $schema['table'] . '` WHERE `' . $schema['id'] . '` = ?');
         $stmtUser->execute([$userId]);
+
+        if ($startedTx && $pdo->inTransaction()) {
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        if ($startedTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
+function api_clear_pending_guest_convert(PDO $pdo, string $userId): void
+{
+    $schema = api_get_profile_schema($pdo);
+    $otpSchema = api_get_email_verification_schema($pdo);
+    $userId = trim($userId);
+    if ($userId === '' || !$schema['pending_email']) {
+        return;
+    }
+
+    $startedTx = false;
+    if (!$pdo->inTransaction()) {
+        $pdo->beginTransaction();
+        $startedTx = true;
+    }
+
+    try {
+        $set = ['`' . $schema['pending_email'] . '` = NULL'];
+        if ($schema['email_verified']) {
+            $set[] = '`' . $schema['email_verified'] . '` = 0';
+        }
+        if ($schema['email_verified_at']) {
+            $set[] = '`' . $schema['email_verified_at'] . '` = NULL';
+        }
+        if ($schema['updated_at']) {
+            $set[] = '`' . $schema['updated_at'] . '` = NOW()';
+        }
+
+        $sqlProfile = 'UPDATE `' . $schema['table'] . '` SET ' . implode(', ', $set)
+            . ' WHERE `' . $schema['id'] . '` = ?';
+        $stmtProfile = $pdo->prepare($sqlProfile);
+        $stmtProfile->execute([$userId]);
+
+        $sqlOtp = 'DELETE FROM `' . $otpSchema['table'] . '` WHERE `' . $otpSchema['user_id'] . '` = ? AND `' . $otpSchema['purpose'] . '` = ?';
+        $stmtOtp = $pdo->prepare($sqlOtp);
+        $stmtOtp->execute([$userId, 'guest_convert']);
 
         if ($startedTx && $pdo->inTransaction()) {
             $pdo->commit();
@@ -957,9 +1037,20 @@ function api_get_user_for_email_purpose(PDO $pdo, string $email, string $purpose
         return null;
     }
 
-    if (in_array($purpose, ['signup', 'guest_convert'], true) && $schema['pending_email']) {
-        $sql = 'SELECT `' . $schema['id'] . '` AS id FROM `' . $schema['table'] . '` '
-            . 'WHERE LOWER(`' . $schema['pending_email'] . '`) = LOWER(?) LIMIT 1';
+    if ($purpose === 'signup') {
+        $pending = api_find_pending_signup_by_email($pdo, $email);
+        if (!$pending || empty($pending['id'])) {
+            return null;
+        }
+        return api_find_profile_by_user_id($pdo, (string)$pending['id']);
+    }
+
+    if ($purpose === 'guest_convert') {
+        $pending = api_find_pending_guest_convert_by_email($pdo, $email);
+        if (!$pending || empty($pending['id'])) {
+            return null;
+        }
+        return api_find_profile_by_user_id($pdo, (string)$pending['id']);
     } else {
         $sql = 'SELECT `' . $schema['id'] . '` AS id FROM `' . $schema['table'] . '` '
             . 'WHERE LOWER(`' . $schema['email'] . '`) = LOWER(?) LIMIT 1';
@@ -973,6 +1064,25 @@ function api_get_user_for_email_purpose(PDO $pdo, string $email, string $purpose
     }
 
     return api_find_profile_by_user_id($pdo, (string)$row['id']);
+}
+
+function api_get_latest_active_otp_record_by_email_purpose(PDO $pdo, string $email, string $purpose): ?array
+{
+    $schema = api_get_email_verification_schema($pdo);
+    $orderCol = $schema['last_sent_at'] ?: ($schema['created_at'] ?: $schema['expires_at']);
+
+    $sql = 'SELECT * FROM `' . $schema['table'] . '` '
+        . 'WHERE LOWER(`' . $schema['email'] . '`) = LOWER(?) '
+        . 'AND `' . $schema['purpose'] . '` = ? '
+        . 'AND `' . $schema['used_at'] . '` IS NULL '
+        . 'ORDER BY `' . $orderCol . '` DESC '
+        . 'LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([strtolower(trim($email)), $purpose]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $row ?: null;
 }
 
 function api_email_verification_apply(PDO $pdo, string $userId, string $purpose): void
@@ -1073,14 +1183,14 @@ function api_verify_email_otp(PDO $pdo, string $email, string $purpose, string $
         api_error('Geçersiz doğrulama amacı.', 422);
     }
 
-    $profile = api_get_user_for_email_purpose($pdo, $email, $purpose);
-    if (!$profile) {
-        api_error('Doğrulama kaydı bulunamadı.', 404);
-    }
-
-    $record = api_get_active_email_otp_record($pdo, (string)$profile['id'], $purpose);
+    $record = api_get_latest_active_otp_record_by_email_purpose($pdo, $email, $purpose);
     if (!$record) {
         api_error('Aktif OTP kaydı bulunamadı.', 404);
+    }
+
+    $profile = api_find_profile_by_user_id($pdo, (string)($record['user_id'] ?? ''));
+    if (!$profile) {
+        api_error('Doğrulama kaydı bulunamadı.', 404);
     }
 
     if (!empty($record['used_at'])) {
