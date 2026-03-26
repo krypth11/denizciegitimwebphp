@@ -927,6 +927,41 @@ function mock_exam_save_answer(PDO $pdo, string $userId, string $attemptId, stri
     $aq = mock_exam_get_attempt_question_schema($pdo);
     $detail = mock_exam_assert_attempt_in_progress($pdo, $userId, $attemptId);
 
+    $existingSql = 'SELECT '
+        . ($aq['selected_answer'] ? (mock_exam_q($aq['selected_answer']) . ' AS selected_answer') : 'NULL AS selected_answer')
+        . ($aq['correct_answer'] ? (', ' . mock_exam_q($aq['correct_answer']) . ' AS correct_answer') : ', NULL AS correct_answer')
+        . ' FROM ' . mock_exam_q($aq['table'])
+        . ' WHERE ' . mock_exam_q($aq['attempt_id']) . ' = ? AND ' . mock_exam_q($aq['question_id']) . ' = ? LIMIT 1';
+    $existingStmt = $pdo->prepare($existingSql);
+    $existingStmt->execute([$attemptId, $questionId]);
+    $existingRow = $existingStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$existingRow) {
+        throw new RuntimeException('Soru bu denemeye ait değil.');
+    }
+
+    $existingSelectedRaw = $existingRow['selected_answer'] ?? null;
+    $existingSelected = strtoupper(trim((string)$existingSelectedRaw));
+    if ($existingSelected === '') {
+        $existingSelected = null;
+    }
+
+    if ($existingSelected === $selected) {
+        $questions = mock_exam_fetch_attempt_questions($pdo, $attemptId, false);
+        $answeredCount = 0;
+        foreach ($questions as $q) {
+            if (!empty($q['is_answered'])) {
+                $answeredCount++;
+            }
+        }
+        return [
+            'attempt_id' => $attemptId,
+            'question_id' => $questionId,
+            'selected_answer' => $selected,
+            'is_answered' => $selected !== null,
+            'answered_count' => $answeredCount,
+        ];
+    }
+
     $set = [];
     $params = [];
     if ($aq['selected_answer']) {
@@ -934,9 +969,7 @@ function mock_exam_save_answer(PDO $pdo, string $userId, string $attemptId, stri
         $params[] = $selected;
     }
     if ($aq['is_correct']) {
-        $correctStmt = $pdo->prepare('SELECT ' . mock_exam_q($aq['correct_answer']) . ' AS correct_answer FROM ' . mock_exam_q($aq['table']) . ' WHERE ' . mock_exam_q($aq['attempt_id']) . ' = ? AND ' . mock_exam_q($aq['question_id']) . ' = ? LIMIT 1');
-        $correctStmt->execute([$attemptId, $questionId]);
-        $correctAnswer = strtoupper((string)($correctStmt->fetchColumn() ?: ''));
+        $correctAnswer = strtoupper(trim((string)($existingRow['correct_answer'] ?? '')));
         $isCorrect = ($selected !== null && $correctAnswer !== '' && strtoupper((string)$selected) === $correctAnswer) ? 1 : 0;
         $set[] = mock_exam_q($aq['is_correct']) . ' = ?';
         $params[] = $isCorrect;
@@ -953,8 +986,21 @@ function mock_exam_save_answer(PDO $pdo, string $userId, string $attemptId, stri
         . ' WHERE ' . mock_exam_q($aq['attempt_id']) . ' = ? AND ' . mock_exam_q($aq['question_id']) . ' = ?';
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
+
     if ($stmt->rowCount() < 1) {
-        throw new RuntimeException('Soru bu denemeye ait değil veya güncellenemedi.');
+        $verifyStmt = $pdo->prepare($existingSql);
+        $verifyStmt->execute([$attemptId, $questionId]);
+        $verifyRow = $verifyStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$verifyRow) {
+            throw new RuntimeException('Soru bu denemeye ait değil.');
+        }
+        $verifySelected = strtoupper(trim((string)($verifyRow['selected_answer'] ?? '')));
+        if ($verifySelected === '') {
+            $verifySelected = null;
+        }
+        if ($verifySelected !== $selected) {
+            throw new RuntimeException('Cevap kaydedilemedi.');
+        }
     }
 
     $questions = mock_exam_fetch_attempt_questions($pdo, $attemptId, false);
@@ -981,6 +1027,21 @@ function mock_exam_toggle_flag(PDO $pdo, string $userId, string $attemptId, stri
     if (!$aq['is_flagged']) {
         throw new RuntimeException('is_flagged kolonu bulunamadı.');
     }
+
+    $existingSql = 'SELECT ' . mock_exam_q($aq['is_flagged']) . ' AS is_flagged FROM ' . mock_exam_q($aq['table'])
+        . ' WHERE ' . mock_exam_q($aq['attempt_id']) . ' = ? AND ' . mock_exam_q($aq['question_id']) . ' = ? LIMIT 1';
+    $existingStmt = $pdo->prepare($existingSql);
+    $existingStmt->execute([$attemptId, $questionId]);
+    $existingRow = $existingStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$existingRow) {
+        throw new RuntimeException('Soru bu denemeye ait değil.');
+    }
+
+    $existingFlag = ((int)($existingRow['is_flagged'] ?? 0) === 1);
+    if ($existingFlag === $isFlagged) {
+        return ['attempt_id' => $attemptId, 'question_id' => $questionId, 'is_flagged' => $isFlagged];
+    }
+
     $set = [mock_exam_q($aq['is_flagged']) . ' = ?'];
     $params = [$isFlagged ? 1 : 0];
     if ($aq['updated_at']) {
@@ -992,8 +1053,18 @@ function mock_exam_toggle_flag(PDO $pdo, string $userId, string $attemptId, stri
         . ' WHERE ' . mock_exam_q($aq['attempt_id']) . ' = ? AND ' . mock_exam_q($aq['question_id']) . ' = ?';
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
+
     if ($stmt->rowCount() < 1) {
-        throw new RuntimeException('Soru bu denemeye ait değil veya güncellenemedi.');
+        $verifyStmt = $pdo->prepare($existingSql);
+        $verifyStmt->execute([$attemptId, $questionId]);
+        $verifyRow = $verifyStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$verifyRow) {
+            throw new RuntimeException('Soru bu denemeye ait değil.');
+        }
+        $verifyFlag = ((int)($verifyRow['is_flagged'] ?? 0) === 1);
+        if ($verifyFlag !== $isFlagged) {
+            throw new RuntimeException('İşaret durumu kaydedilemedi.');
+        }
     }
 
     return ['attempt_id' => $attemptId, 'question_id' => $questionId, 'is_flagged' => $isFlagged];
