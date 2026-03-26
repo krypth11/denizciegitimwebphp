@@ -274,7 +274,7 @@ function mock_exam_fetch_qualification_courses(PDO $pdo, string $qualificationId
 
 function mock_exam_fetch_candidate_questions(PDO $pdo, string $qualificationId): array
 {
-    $sql = 'SELECT q.id, q.course_id, q.topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, c.name AS course_name '
+    $sql = 'SELECT q.id, q.course_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, c.name AS course_name '
         . 'FROM questions q INNER JOIN courses c ON q.course_id = c.id '
         . 'WHERE c.qualification_id = ?';
     $stmt = $pdo->prepare($sql);
@@ -590,8 +590,6 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
             'question_id' => (string)$r[$aq['question_id']],
             'course_id' => $aq['course_id'] ? ($r[$aq['course_id']] ?? null) : null,
             'course_name' => $aq['course_name'] ? ($r[$aq['course_name']] ?? null) : null,
-            'topic_id' => $aq['topic_id'] ? ($r[$aq['topic_id']] ?? null) : null,
-            'topic_name' => null,
             'order_index' => $aq['order_index'] ? (int)($r[$aq['order_index']] ?? 0) : 0,
             'question_type' => $aq['question_type'] ? ($r[$aq['question_type']] ?? null) : null,
             'question_text' => $aq['question_text'] ? ($r[$aq['question_text']] ?? null) : null,
@@ -762,7 +760,6 @@ function mock_exam_create_attempt(PDO $pdo, string $userId, array $payload): arr
             $map = [
                 'course_id' => $q['course_id'] ?? null,
                 'course_name' => $q['course_name'] ?? null,
-                'topic_id' => $q['topic_id'] ?? null,
                 'order_index' => (int)($q['order_index'] ?? 0),
                 'question_type' => $q['question_type'] ?? null,
                 'question_text' => $q['question_text'] ?? null,
@@ -926,7 +923,6 @@ function mock_exam_write_events_and_progress(PDO $pdo, string $userId, string $a
             'question_id' => (string)$q['question_id'],
             'course_id' => $q['course_id'] ?? null,
             'qualification_id' => $qualificationId,
-            'topic_id' => $q['topic_id'] ?? null,
             'session_id' => $attemptId,
             'source' => 'mock_exam',
             'selected_answer' => $selected,
