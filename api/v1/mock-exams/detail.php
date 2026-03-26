@@ -10,26 +10,15 @@ api_require_method('GET');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
+    $attemptId = api_require_query_param('attempt_id');
 
-    $detail = mock_exam_fetch_active_attempt_detail($pdo, $userId);
-    if (!$detail) {
-        api_success('Aktif deneme yok.', [
-            'attempt' => null,
-            'questions' => [],
-            'summary' => null,
-            'lesson_report' => [],
-            'strongest_course' => null,
-            'weakest_course' => null,
-            'most_blank_course' => null,
-        ]);
-    }
-
+    $detail = mock_exam_fetch_attempt_detail($pdo, $userId, $attemptId);
     $questions = $detail['questions'] ?? [];
     if (empty($questions)) {
-        api_error('Bu kriterlere uygun deneme soruları oluşturulamadı.', 422);
+        api_error('Bu denemeye ait soru bulunamadı.', 422);
     }
 
-    api_success('Aktif deneme detayı alındı.', [
+    api_success('Deneme detayı alındı.', [
         'attempt' => $detail['attempt'] ?? null,
         'questions' => $questions,
         'summary' => $detail['summary'] ?? null,

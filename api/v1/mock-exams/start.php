@@ -19,13 +19,17 @@ try {
             api_error('Bu kriterlere uygun deneme soruları oluşturulamadı.', 422);
         }
 
+        $activeAttempt = $activeDetail['attempt'] ?? [];
         api_success('Aktif deneme bulundu.', [
-            'has_active_attempt' => true,
-            'resume_existing' => true,
-            'attempt' => $activeDetail['attempt'] ?? null,
-            'warning_message' => $activeDetail['attempt']['warning_message'] ?? null,
+            'attempt' => $activeAttempt,
             'questions' => $activeQuestions,
             'summary' => $activeDetail['summary'] ?? null,
+            'lesson_report' => $activeDetail['lesson_report'] ?? [],
+            'strongest_course' => $activeDetail['strongest_course'] ?? null,
+            'weakest_course' => $activeDetail['weakest_course'] ?? null,
+            'most_blank_course' => $activeDetail['most_blank_course'] ?? null,
+            'warning_message' => $activeAttempt['warning_message'] ?? null,
+            'mode' => (string)($activeAttempt['mode'] ?? ($payload['mode'] ?? 'standard')),
         ]);
     }
 
@@ -43,12 +47,15 @@ try {
     }
 
     api_success('Deneme başlatıldı.', [
-        'has_active_attempt' => false,
-        'resume_existing' => (bool)($created['resume_existing'] ?? false),
         'attempt' => $created['attempt'] ?? null,
-        'warning_message' => $created['attempt']['warning_message'] ?? null,
         'questions' => $createdQuestions,
         'summary' => $created['summary'] ?? null,
+        'lesson_report' => $created['lesson_report'] ?? [],
+        'strongest_course' => $created['strongest_course'] ?? null,
+        'weakest_course' => $created['weakest_course'] ?? null,
+        'most_blank_course' => $created['most_blank_course'] ?? null,
+        'warning_message' => $created['attempt']['warning_message'] ?? null,
+        'mode' => (string)($created['attempt']['mode'] ?? ($payload['mode'] ?? 'standard')),
     ]);
 } catch (Throwable $e) {
     api_error($e->getMessage(), 422);
