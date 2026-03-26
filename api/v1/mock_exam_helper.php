@@ -659,11 +659,29 @@ function mock_exam_build_summary_from_questions(array $questions, array $attempt
 
 function mock_exam_pick_course_insights(array $lessonReport): array
 {
+    $buildLabel = static function (?array $row): string {
+        if (!$row) {
+            return '';
+        }
+        $qualification = trim((string)($row['qualification_name'] ?? ''));
+        $course = trim((string)($row['course_name'] ?? ''));
+        if ($qualification !== '' && $course !== '') {
+            return $qualification . ' • ' . $course;
+        }
+        if ($qualification !== '') {
+            return $qualification;
+        }
+        return $course;
+    };
+
     if (!$lessonReport) {
         return [
-            'strongest_course' => null,
-            'weakest_course' => null,
-            'most_blank_course' => null,
+            'strongest_course' => '',
+            'weakest_course' => '',
+            'most_blank_course' => '',
+            'strongest_course_meta' => null,
+            'weakest_course_meta' => null,
+            'most_blank_course_meta' => null,
         ];
     }
 
@@ -684,9 +702,12 @@ function mock_exam_pick_course_insights(array $lessonReport): array
     }
 
     return [
-        'strongest_course' => $strongest,
-        'weakest_course' => $weakest,
-        'most_blank_course' => $mostBlank,
+        'strongest_course' => $buildLabel($strongest),
+        'weakest_course' => $buildLabel($weakest),
+        'most_blank_course' => $buildLabel($mostBlank),
+        'strongest_course_meta' => $strongest,
+        'weakest_course_meta' => $weakest,
+        'most_blank_course_meta' => $mostBlank,
     ];
 }
 
@@ -776,6 +797,9 @@ function mock_exam_fetch_attempt_detail(PDO $pdo, string $userId, string $attemp
         'strongest_course' => $insights['strongest_course'],
         'weakest_course' => $insights['weakest_course'],
         'most_blank_course' => $insights['most_blank_course'],
+        'strongest_course_meta' => $insights['strongest_course_meta'] ?? null,
+        'weakest_course_meta' => $insights['weakest_course_meta'] ?? null,
+        'most_blank_course_meta' => $insights['most_blank_course_meta'] ?? null,
         'resume_existing' => false,
     ];
 }
@@ -1113,6 +1137,9 @@ function mock_exam_submit(PDO $pdo, string $userId, string $attemptId, int $elap
             'strongest_course' => $insights['strongest_course'],
             'weakest_course' => $insights['weakest_course'],
             'most_blank_course' => $insights['most_blank_course'],
+            'strongest_course_meta' => $insights['strongest_course_meta'] ?? null,
+            'weakest_course_meta' => $insights['weakest_course_meta'] ?? null,
+            'most_blank_course_meta' => $insights['most_blank_course_meta'] ?? null,
         ];
     }
     if ($status !== 'in_progress') {
@@ -1190,9 +1217,12 @@ function mock_exam_submit(PDO $pdo, string $userId, string $attemptId, int $elap
         'summary' => $latest['summary'],
         'lesson_report' => $latest['lesson_report'] ?? [],
         'questions' => $latest['questions'] ?? [],
-        'strongest_course' => $latest['strongest_course'] ?? null,
-        'weakest_course' => $latest['weakest_course'] ?? null,
-        'most_blank_course' => $latest['most_blank_course'] ?? null,
+        'strongest_course' => $latest['strongest_course'] ?? '',
+        'weakest_course' => $latest['weakest_course'] ?? '',
+        'most_blank_course' => $latest['most_blank_course'] ?? '',
+        'strongest_course_meta' => $latest['strongest_course_meta'] ?? null,
+        'weakest_course_meta' => $latest['weakest_course_meta'] ?? null,
+        'most_blank_course_meta' => $latest['most_blank_course_meta'] ?? null,
     ];
 }
 
