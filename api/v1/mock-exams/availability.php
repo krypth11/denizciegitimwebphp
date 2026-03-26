@@ -1,0 +1,60 @@
+<?php
+
+require_once dirname(__DIR__) . '/api_bootstrap.php';
+require_once dirname(__DIR__) . '/auth_helper.php';
+require_once dirname(__DIR__) . '/response_helper.php';
+require_once dirname(__DIR__) . '/mock_exam_helper.php';
+
+api_require_method('GET');
+
+try {
+    $auth = api_require_auth($pdo);
+    $userId = (string)$auth['user']['id'];
+
+    $qualificationId = api_require_query_param('qualification_id');
+    $requested = api_get_int_query('requested_question_count', 20, 1, 100);
+
+    $counts = mock_exam_calculate_pool_counts($pdo, $userId, $qualificationId);
+    $courses = mock_exam_fetch_qualification_courses($pdo, $qualificationId);
+    $candidates = mock_exam_fetch_candidate_questions($pdo, $qualificationId);
+
+    $courseCountMap = [];
+    foreach ($candidates as $q) {
+        $cid = (string)($q['course_id'] ?? '');
+        if ($cid === '') {
+            continue;
+        }
+        $courseCountMap[$cid] = ($courseCountMap[$cid] ?? 0) + 1;
+    }
+
+    $distribution = [];
+    foreach ($courses as $c) {
+        $cid = (string)$c['id'];
+        $distribution[] = [
+            'course_id' => $cid,
+            'course_name' => (string)($c['name'] ?? ''),
+            'available_count' => (int)($courseCountMap[$cid] ?? 0),
+        ];
+    }
+
+    $unseenMsg = null;
+    if ($counts['unseen'] <= 0) {
+        $unseenMsg = 'Tüm soruları çözdünüz';
+    } elseif ($counts['unseen'] < $requested) {
+        $unseenMsg = 'Çözülmemiş havuzda ' . $counts['unseen'] . ' soru var. Kalan kısım rastgele tamamlanacaktır.';
+    }
+
+    api_success('Deneme uygunluk bilgisi alındı.', [
+        'available_pool_counts' => $counts,
+        'options' => [
+            'random_available' => $counts['total'] > 0,
+            'unseen_available' => $counts['unseen'] > 0,
+            'seen_available' => $counts['seen'] > 0,
+        ],
+        'unseen_message' => $unseenMsg,
+        'supported_question_count' => max(0, min(100, (int)$counts['total'])),
+        'course_distribution_preview' => $distribution,
+    ]);
+} catch (Throwable $e) {
+    api_error($e->getMessage(), 422);
+}
