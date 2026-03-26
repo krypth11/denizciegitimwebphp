@@ -679,10 +679,11 @@ $(document).ready(function() {
     function saveQuestionFilters() {
         try {
             const payload = {
-                qualification_id: qState.filters.qualification_id || '',
-                course_id: qState.filters.course_id || '',
-                question_type: qState.filters.question_type || ''
+                qualification_id: $('#filterQualification').val() || '',
+                course_id: $('#filterCourse').val() || '',
+                question_type: $('#filterType').val() || ''
             };
+            console.log('questions filters save', payload);
             localStorage.setItem(QUESTIONS_FILTERS_STORAGE_KEY, JSON.stringify(payload));
         } catch (e) {
             // noop
@@ -694,6 +695,37 @@ $(document).ready(function() {
             localStorage.removeItem(QUESTIONS_FILTERS_STORAGE_KEY);
         } catch (e) {
             // noop
+        }
+    }
+
+    async function applySavedQuestionFilters(saved) {
+        const savedQualificationId = String(saved?.qualification_id || '');
+        if (savedQualificationId && $('#filterQualification option[value="' + savedQualificationId + '"]').length) {
+            qState.filters.qualification_id = savedQualificationId;
+            $('#filterQualification').val(savedQualificationId);
+        } else {
+            qState.filters.qualification_id = '';
+            $('#filterQualification').val('');
+        }
+
+        await loadCourses();
+
+        const savedCourseId = String(saved?.course_id || '');
+        if (savedCourseId && $('#filterCourse option[value="' + savedCourseId + '"]').length) {
+            qState.filters.course_id = savedCourseId;
+            $('#filterCourse').val(savedCourseId);
+        } else {
+            qState.filters.course_id = '';
+            $('#filterCourse').val('');
+        }
+
+        const savedQuestionType = String(saved?.question_type || '');
+        if (savedQuestionType && $('#filterType option[value="' + savedQuestionType + '"]').length) {
+            qState.filters.question_type = savedQuestionType;
+            $('#filterType').val(savedQuestionType);
+        } else {
+            qState.filters.question_type = '';
+            $('#filterType').val('');
         }
     }
 
@@ -914,6 +946,7 @@ $(document).ready(function() {
         qState.filters = { qualification_id: '', course_id: '', topic_id: '', question_type: '', status: '', search: '' };
         clearSavedQuestionFilters();
         $('#filterQualification').val('');
+        $('#filterCourse').val('');
         $('#filterType').val('');
         $('#filterStatus').val('');
         $('#filterSearch').val('');
@@ -1248,34 +1281,10 @@ $(document).ready(function() {
 
     (async function initQuestionsPage() {
         const savedFilters = getSavedQuestionFilters();
+        console.log('questions filters restore', savedFilters);
 
         await loadQualifications();
-
-        const savedQualificationId = String(savedFilters.qualification_id || '');
-        if (savedQualificationId && $('#filterQualification option[value="' + savedQualificationId + '"]').length) {
-            qState.filters.qualification_id = savedQualificationId;
-            $('#filterQualification').val(savedQualificationId);
-        }
-
-        await loadCourses();
-
-        const savedCourseId = String(savedFilters.course_id || '');
-        if (savedCourseId && $('#filterCourse option[value="' + savedCourseId + '"]').length) {
-            qState.filters.course_id = savedCourseId;
-            $('#filterCourse').val(savedCourseId);
-        } else {
-            qState.filters.course_id = '';
-            $('#filterCourse').val('');
-        }
-
-        const savedQuestionType = String(savedFilters.question_type || '');
-        if (savedQuestionType && $('#filterType option[value="' + savedQuestionType + '"]').length) {
-            qState.filters.question_type = savedQuestionType;
-            $('#filterType').val(savedQuestionType);
-        } else {
-            qState.filters.question_type = '';
-            $('#filterType').val('');
-        }
+        await applySavedQuestionFilters(savedFilters);
 
         await loadTopics();
         await loadQuestions();
