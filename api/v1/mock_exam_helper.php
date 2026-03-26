@@ -205,6 +205,15 @@ function mock_exam_save_user_exam_preferences(PDO $pdo, string $userId, string $
 
 function mock_exam_format_attempt(array $row): array
 {
+    $correct = (int)($row['correct_count'] ?? 0);
+    $wrong = (int)($row['wrong_count'] ?? 0);
+    $blank = (int)($row['blank_count'] ?? 0);
+    $actual = (int)($row['actual_question_count'] ?? 0);
+    $answered = max(0, $correct + $wrong);
+    $successRate = isset($row['success_rate'])
+        ? (float)$row['success_rate']
+        : ($actual > 0 ? round(($correct / $actual) * 100, 2) : 0.0);
+
     return [
         'id' => (string)($row['id'] ?? ''),
         'qualification_id' => $row['qualification_id'] ?? null,
@@ -220,6 +229,11 @@ function mock_exam_format_attempt(array $row): array
         'started_at' => $row['started_at'] ?? null,
         'submitted_at' => $row['submitted_at'] ?? null,
         'abandoned_at' => $row['abandoned_at'] ?? null,
+        'correct_count' => $correct,
+        'wrong_count' => $wrong,
+        'blank_count' => $blank,
+        'success_rate' => $successRate,
+        'answered_count' => $answered,
     ];
 }
 
@@ -235,6 +249,18 @@ function mock_exam_find_active_attempt(PDO $pdo, string $userId): ?array
         . 'ORDER BY ' . ($s['started_at'] ? ('a.' . mock_exam_q($s['started_at'])) : ('a.' . mock_exam_q($s['id']))) . ' DESC LIMIT 1';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$userId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ? mock_exam_format_attempt($row) : null;
+}
+
+function mock_exam_find_attempt_by_id(PDO $pdo, string $userId, string $attemptId): ?array
+{
+    $a = mock_exam_get_attempt_schema($pdo);
+    $sql = 'SELECT a.*, q.name AS qualification_name FROM `' . $a['table'] . '` a '
+        . 'LEFT JOIN qualifications q ON a.' . mock_exam_q($a['qualification_id']) . ' = q.id '
+        . 'WHERE a.' . mock_exam_q($a['id']) . ' = ? AND a.' . mock_exam_q($a['user_id']) . ' = ? LIMIT 1';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$attemptId, $userId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ? mock_exam_format_attempt($row) : null;
 }
@@ -565,6 +591,7 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
             'course_id' => $aq['course_id'] ? ($r[$aq['course_id']] ?? null) : null,
             'course_name' => $aq['course_name'] ? ($r[$aq['course_name']] ?? null) : null,
             'topic_id' => $aq['topic_id'] ? ($r[$aq['topic_id']] ?? null) : null,
+            'topic_name' => null,
             'order_index' => $aq['order_index'] ? (int)($r[$aq['order_index']] ?? 0) : 0,
             'question_type' => $aq['question_type'] ? ($r[$aq['question_type']] ?? null) : null,
             'question_text' => $aq['question_text'] ? ($r[$aq['question_text']] ?? null) : null,
@@ -576,12 +603,13 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
             'selected_answer' => $selected,
             'is_flagged' => $aq['is_flagged'] ? ((int)($r[$aq['is_flagged']] ?? 0) === 1) : false,
             'is_answered' => $isAnswered,
-            'is_correct' => $withResultFields ? $isCorrect : null,
-            'is_blank' => !$isAnswered,
         ];
         if ($withResultFields) {
             $item['correct_answer'] = $correct;
             $item['explanation'] = $aq['explanation'] ? ($r[$aq['explanation']] ?? null) : null;
+            $item['image_url'] = null;
+            $item['is_correct'] = $isCorrect;
+            $item['is_blank'] = !$isAnswered;
         }
         $out[] = $item;
     }
@@ -606,11 +634,62 @@ function mock_exam_compute_summary_from_questions(array $questions): array
     $total = $answered + $blank;
     $successRate = $total > 0 ? round(($correct / $total) * 100, 2) : 0.0;
     return [
+        'total_questions' => $total,
+        'answered_count' => $answered,
         'correct_count' => $correct,
         'wrong_count' => $wrong,
         'blank_count' => $blank,
-        'answered_count' => $answered,
         'success_rate' => $successRate,
+        'elapsed_seconds' => 0,
+        'duration_seconds_limit' => 2400,
+        'status' => 'in_progress',
+    ];
+}
+
+function mock_exam_standardize_summary(array $attempt, array $questions = []): array
+{
+    $computed = mock_exam_compute_summary_from_questions($questions);
+    $status = (string)($attempt['status'] ?? 'in_progress');
+    $useAttemptAggregates = in_array($status, ['completed', 'abandoned'], true);
+
+    $correct = $useAttemptAggregates ? (int)($attempt['correct_count'] ?? $computed['correct_count'] ?? 0) : (int)($computed['correct_count'] ?? 0);
+    $wrong = $useAttemptAggregates ? (int)($attempt['wrong_count'] ?? $computed['wrong_count'] ?? 0) : (int)($computed['wrong_count'] ?? 0);
+    $blank = $useAttemptAggregates ? (int)($attempt['blank_count'] ?? $computed['blank_count'] ?? 0) : (int)($computed['blank_count'] ?? 0);
+    $answered = $correct + $wrong;
+    $total = max(0, $answered + $blank);
+    $successRate = $total > 0 ? round(($correct / $total) * 100, 2) : 0.0;
+
+    return [
+        'total_questions' => $total,
+        'answered_count' => $answered,
+        'correct_count' => $correct,
+        'wrong_count' => $wrong,
+        'blank_count' => $blank,
+        'success_rate' => $successRate,
+        'elapsed_seconds' => (int)($attempt['elapsed_seconds'] ?? 0),
+        'duration_seconds_limit' => (int)($attempt['duration_seconds_limit'] ?? 2400),
+        'status' => $status,
+    ];
+}
+
+function mock_exam_history_item_from_attempt(array $attempt): array
+{
+    return [
+        'id' => (string)($attempt['id'] ?? ''),
+        'qualification_id' => $attempt['qualification_id'] ?? null,
+        'qualification_name' => $attempt['qualification_name'] ?? null,
+        'requested_question_count' => (int)($attempt['requested_question_count'] ?? 0),
+        'actual_question_count' => (int)($attempt['actual_question_count'] ?? 0),
+        'elapsed_seconds' => (int)($attempt['elapsed_seconds'] ?? 0),
+        'status' => (string)($attempt['status'] ?? 'in_progress'),
+        'correct_count' => (int)($attempt['correct_count'] ?? 0),
+        'wrong_count' => (int)($attempt['wrong_count'] ?? 0),
+        'blank_count' => (int)($attempt['blank_count'] ?? 0),
+        'success_rate' => (float)($attempt['success_rate'] ?? 0),
+        'started_at' => $attempt['started_at'] ?? null,
+        'submitted_at' => $attempt['submitted_at'] ?? null,
+        'abandoned_at' => $attempt['abandoned_at'] ?? null,
+        'warning_message' => $attempt['warning_message'] ?? null,
     ];
 }
 
@@ -745,7 +824,7 @@ function mock_exam_fetch_attempt_detail(PDO $pdo, string $userId, string $attemp
     $attempt = mock_exam_format_attempt($row);
     $withResult = in_array($attempt['status'], ['completed', 'abandoned'], true);
     $questions = mock_exam_fetch_attempt_questions($pdo, $attemptId, $withResult);
-    $summary = mock_exam_compute_summary_from_questions($questions);
+    $summary = mock_exam_standardize_summary($attempt, $questions);
     return ['attempt' => $attempt, 'questions' => $questions, 'summary' => $summary, 'resume_existing' => false];
 }
 
@@ -839,7 +918,8 @@ function mock_exam_write_events_and_progress(PDO $pdo, string $userId, string $a
         if ($selected === '') {
             continue;
         }
-        $isCorrect = !empty($q['is_correct']);
+        $correct = strtoupper(trim((string)($q['correct_answer'] ?? '')));
+        $isCorrect = ($correct !== '' && $selected === $correct);
 
         study_insert_attempt_event($pdo, [
             'user_id' => $userId,
@@ -865,10 +945,12 @@ function mock_exam_submit(PDO $pdo, string $userId, string $attemptId, int $elap
     $status = (string)($detail['attempt']['status'] ?? '');
     if ($status === 'completed') {
         $questions = mock_exam_fetch_attempt_questions($pdo, $attemptId, true);
+        $attempt = $detail['attempt'];
         return [
             'already_submitted' => true,
-            'attempt' => $detail['attempt'],
-            'summary' => mock_exam_compute_summary_from_questions($questions),
+            'attempt' => $attempt,
+            'summary' => mock_exam_standardize_summary($attempt, $questions),
+            'lesson_report' => mock_exam_build_lesson_report($pdo, $attemptId),
             'questions' => $questions,
         ];
     }
@@ -921,10 +1003,12 @@ function mock_exam_submit(PDO $pdo, string $userId, string $attemptId, int $elap
     }
 
     $latest = mock_exam_fetch_attempt_detail($pdo, $userId, $attemptId);
+    $latestQuestions = mock_exam_fetch_attempt_questions($pdo, $attemptId, true);
     return [
         'attempt' => $latest['attempt'],
-        'summary' => mock_exam_compute_summary_from_questions(mock_exam_fetch_attempt_questions($pdo, $attemptId, true)),
-        'questions' => mock_exam_fetch_attempt_questions($pdo, $attemptId, true),
+        'summary' => mock_exam_standardize_summary($latest['attempt'], $latestQuestions),
+        'lesson_report' => mock_exam_build_lesson_report($pdo, $attemptId),
+        'questions' => $latestQuestions,
     ];
 }
 
@@ -935,7 +1019,11 @@ function mock_exam_abandon(PDO $pdo, string $userId, string $attemptId, int $ela
     $detail = mock_exam_fetch_attempt_detail($pdo, $userId, $attemptId);
     $status = (string)($detail['attempt']['status'] ?? '');
     if ($status === 'abandoned') {
-        return ['attempt' => $detail['attempt'], 'already_abandoned' => true];
+        return [
+            'attempt' => $detail['attempt'],
+            'summary' => mock_exam_standardize_summary($detail['attempt'], $detail['questions'] ?? []),
+            'already_abandoned' => true,
+        ];
     }
     if ($status !== 'in_progress') {
         throw new RuntimeException('Bu deneme abandon edilemez.');
@@ -963,7 +1051,11 @@ function mock_exam_abandon(PDO $pdo, string $userId, string $attemptId, int $ela
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    return mock_exam_fetch_attempt_detail($pdo, $userId, $attemptId);
+    $latest = mock_exam_fetch_attempt_detail($pdo, $userId, $attemptId);
+    return [
+        'attempt' => $latest['attempt'],
+        'summary' => mock_exam_standardize_summary($latest['attempt'], $latest['questions'] ?? []),
+    ];
 }
 
 function mock_exam_fetch_history(PDO $pdo, string $userId, array $filters): array
@@ -1011,14 +1103,7 @@ function mock_exam_fetch_history(PDO $pdo, string $userId, array $filters): arra
     $items = [];
     foreach ($rows as $row) {
         $attempt = mock_exam_format_attempt($row);
-        $summary = [
-            'correct_count' => (int)($row['correct_count'] ?? 0),
-            'wrong_count' => (int)($row['wrong_count'] ?? 0),
-            'blank_count' => (int)($row['blank_count'] ?? 0),
-            'answered_count' => ((int)($row['correct_count'] ?? 0) + (int)($row['wrong_count'] ?? 0)),
-            'success_rate' => isset($row['success_rate']) ? (float)$row['success_rate'] : 0.0,
-        ];
-        $items[] = ['attempt' => $attempt, 'summary' => $summary];
+        $items[] = mock_exam_history_item_from_attempt($attempt);
     }
 
     return [
@@ -1033,8 +1118,6 @@ function mock_exam_fetch_history(PDO $pdo, string $userId, array $filters): arra
             'qualification_id' => $qualificationId,
             'status' => $status,
             'sort' => $sort,
-            'page' => $page,
-            'per_page' => $perPage,
         ],
     ];
 }

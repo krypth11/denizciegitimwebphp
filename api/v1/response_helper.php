@@ -27,6 +27,7 @@ function api_error(string $message, int $status = 400): void
     api_send_json([
         'success' => false,
         'message' => $message,
+        'data' => null,
     ], $status);
 }
 
