@@ -626,9 +626,24 @@ function mock_exam_compute_summary_from_questions(array $questions): array
 
 function mock_exam_build_summary_from_questions(array $questions, array $attempt): array
 {
-    $computed = mock_exam_compute_summary_from_questions($questions);
     $status = (string)($attempt['status'] ?? 'in_progress');
-    $useAttemptAggregates = in_array($status, ['completed', 'abandoned'], true);
+
+    $correct = 0;
+    $wrong = 0;
+    $blank = 0;
+    foreach ($questions as $q) {
+        $selected = strtoupper(trim((string)($q['selected_answer'] ?? '')));
+        if ($selected === '') {
+            $blank++;
+            continue;
+        }
+
+        if (!empty($q['is_correct'])) {
+            $correct++;
+        } else {
+            $wrong++;
+        }
+    }
 
     $flaggedCount = 0;
     foreach ($questions as $q) {
@@ -637,9 +652,6 @@ function mock_exam_build_summary_from_questions(array $questions, array $attempt
         }
     }
 
-    $correct = $useAttemptAggregates ? (int)($attempt['correct_count'] ?? $computed['correct_count']) : (int)$computed['correct_count'];
-    $wrong = $useAttemptAggregates ? (int)($attempt['wrong_count'] ?? $computed['wrong_count']) : (int)$computed['wrong_count'];
-    $blank = $useAttemptAggregates ? (int)($attempt['blank_count'] ?? $computed['blank_count']) : (int)$computed['blank_count'];
     $total = $correct + $wrong + $blank;
     $successRate = $total > 0 ? round(($correct / $total) * 100, 2) : 0.0;
 
@@ -679,9 +691,6 @@ function mock_exam_pick_course_insights(array $lessonReport): array
             'strongest_course' => '',
             'weakest_course' => '',
             'most_blank_course' => '',
-            'strongest_course_meta' => null,
-            'weakest_course_meta' => null,
-            'most_blank_course_meta' => null,
         ];
     }
 
@@ -705,9 +714,6 @@ function mock_exam_pick_course_insights(array $lessonReport): array
         'strongest_course' => $buildLabel($strongest),
         'weakest_course' => $buildLabel($weakest),
         'most_blank_course' => $buildLabel($mostBlank),
-        'strongest_course_meta' => $strongest,
-        'weakest_course_meta' => $weakest,
-        'most_blank_course_meta' => $mostBlank,
     ];
 }
 
@@ -718,6 +724,12 @@ function mock_exam_standardize_summary(array $attempt, array $questions = []): a
 
 function mock_exam_history_item_from_attempt(array $attempt): array
 {
+    $correct = (int)($attempt['correct_count'] ?? 0);
+    $wrong = (int)($attempt['wrong_count'] ?? 0);
+    $blank = (int)($attempt['blank_count'] ?? 0);
+    $total = $correct + $wrong + $blank;
+    $successRate = $total > 0 ? round(($correct / $total) * 100, 2) : 0.0;
+
     return [
         'id' => (string)($attempt['id'] ?? ''),
         'qualification_id' => $attempt['qualification_id'] ?? null,
@@ -726,15 +738,21 @@ function mock_exam_history_item_from_attempt(array $attempt): array
         'actual_question_count' => (int)($attempt['actual_question_count'] ?? 0),
         'elapsed_seconds' => (int)($attempt['elapsed_seconds'] ?? 0),
         'status' => (string)($attempt['status'] ?? 'in_progress'),
-        'correct_count' => (int)($attempt['correct_count'] ?? 0),
-        'wrong_count' => (int)($attempt['wrong_count'] ?? 0),
-        'blank_count' => (int)($attempt['blank_count'] ?? 0),
-        'success_rate' => (float)($attempt['success_rate'] ?? 0),
+        'correct_count' => $correct,
+        'wrong_count' => $wrong,
+        'blank_count' => $blank,
+        'success_rate' => $successRate,
         'started_at' => $attempt['started_at'] ?? null,
         'submitted_at' => $attempt['submitted_at'] ?? null,
         'abandoned_at' => $attempt['abandoned_at'] ?? null,
         'warning_message' => $attempt['warning_message'] ?? null,
     ];
+}
+
+function mock_exam_calculate_attempt_aggregates(PDO $pdo, string $attemptId): array
+{
+    $questions = mock_exam_fetch_attempt_questions($pdo, $attemptId, true);
+    return mock_exam_compute_summary_from_questions($questions);
 }
 
 function mock_exam_find_active_attempt(PDO $pdo, string $userId): ?array
@@ -797,9 +815,6 @@ function mock_exam_fetch_attempt_detail(PDO $pdo, string $userId, string $attemp
         'strongest_course' => $insights['strongest_course'],
         'weakest_course' => $insights['weakest_course'],
         'most_blank_course' => $insights['most_blank_course'],
-        'strongest_course_meta' => $insights['strongest_course_meta'] ?? null,
-        'weakest_course_meta' => $insights['weakest_course_meta'] ?? null,
-        'most_blank_course_meta' => $insights['most_blank_course_meta'] ?? null,
         'resume_existing' => false,
     ];
 }
@@ -1137,9 +1152,6 @@ function mock_exam_submit(PDO $pdo, string $userId, string $attemptId, int $elap
             'strongest_course' => $insights['strongest_course'],
             'weakest_course' => $insights['weakest_course'],
             'most_blank_course' => $insights['most_blank_course'],
-            'strongest_course_meta' => $insights['strongest_course_meta'] ?? null,
-            'weakest_course_meta' => $insights['weakest_course_meta'] ?? null,
-            'most_blank_course_meta' => $insights['most_blank_course_meta'] ?? null,
         ];
     }
     if ($status !== 'in_progress') {
@@ -1220,9 +1232,6 @@ function mock_exam_submit(PDO $pdo, string $userId, string $attemptId, int $elap
         'strongest_course' => $latest['strongest_course'] ?? '',
         'weakest_course' => $latest['weakest_course'] ?? '',
         'most_blank_course' => $latest['most_blank_course'] ?? '',
-        'strongest_course_meta' => $latest['strongest_course_meta'] ?? null,
-        'weakest_course_meta' => $latest['weakest_course_meta'] ?? null,
-        'most_blank_course_meta' => $latest['most_blank_course_meta'] ?? null,
     ];
 }
 
@@ -1313,7 +1322,16 @@ function mock_exam_fetch_history(PDO $pdo, string $userId, array $filters): arra
 
     $items = [];
     foreach ($rows as $row) {
-        $items[] = mock_exam_history_item_from_attempt(mock_exam_format_attempt($row));
+        $attempt = mock_exam_format_attempt($row);
+        $status = (string)($attempt['status'] ?? '');
+        if (in_array($status, ['completed', 'abandoned'], true)) {
+            $agg = mock_exam_calculate_attempt_aggregates($pdo, (string)$attempt['id']);
+            $attempt['correct_count'] = (int)($agg['correct_count'] ?? 0);
+            $attempt['wrong_count'] = (int)($agg['wrong_count'] ?? 0);
+            $attempt['blank_count'] = (int)($agg['blank_count'] ?? 0);
+            $attempt['success_rate'] = (float)($agg['success_rate'] ?? 0.0);
+        }
+        $items[] = mock_exam_history_item_from_attempt($attempt);
     }
 
     return [
@@ -1333,15 +1351,40 @@ function mock_exam_build_lesson_report(PDO $pdo, string $attemptId): array
     $attemptRow = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
     $questions = mock_exam_fetch_attempt_questions($pdo, $attemptId, true);
+    $courseLookupIds = [];
+    foreach ($questions as $q) {
+        $cid = trim((string)($q['course_id'] ?? ''));
+        $cname = trim((string)($q['course_name'] ?? ''));
+        if ($cid !== '' && $cname === '') {
+            $courseLookupIds[$cid] = true;
+        }
+    }
+
+    $courseNameById = [];
+    if (!empty($courseLookupIds)) {
+        $ids = array_keys($courseLookupIds);
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $cStmt = $pdo->prepare('SELECT id, name FROM courses WHERE id IN (' . $ph . ')');
+        $cStmt->execute($ids);
+        $cRows = $cStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        foreach ($cRows as $cr) {
+            $courseNameById[(string)$cr['id']] = (string)($cr['name'] ?? '');
+        }
+    }
+
     $agg = [];
     foreach ($questions as $q) {
         $cid = (string)($q['course_id'] ?? '__none__');
+        $resolvedCourseName = trim((string)($q['course_name'] ?? ''));
+        if ($resolvedCourseName === '') {
+            $resolvedCourseName = (string)($courseNameById[(string)($q['course_id'] ?? '')] ?? '');
+        }
         if (!isset($agg[$cid])) {
             $agg[$cid] = [
                 'qualification_id' => $attemptRow['qualification_id'] ?? null,
                 'qualification_name' => $attemptRow['qualification_name'] ?? null,
                 'course_id' => $q['course_id'] ?? null,
-                'course_name' => $q['course_name'] ?? null,
+                'course_name' => ($resolvedCourseName !== '' ? $resolvedCourseName : null),
                 'total_questions' => 0,
                 'correct_count' => 0,
                 'wrong_count' => 0,
@@ -1367,30 +1410,46 @@ function mock_exam_build_lesson_report(PDO $pdo, string $attemptId): array
 function mock_exam_build_summary_stats(PDO $pdo, string $userId): array
 {
     $a = mock_exam_get_attempt_schema($pdo);
-    $sql = 'SELECT '
-        . 'COUNT(*) AS total_attempts, '
-        . 'SUM(CASE WHEN ' . mock_exam_q($a['status']) . " = 'completed' THEN 1 ELSE 0 END) AS completed_attempts, "
-        . 'SUM(CASE WHEN ' . mock_exam_q($a['status']) . " = 'abandoned' THEN 1 ELSE 0 END) AS abandoned_attempts, "
-        . ($a['success_rate'] ? ('AVG(CASE WHEN ' . mock_exam_q($a['status']) . " = 'completed' THEN " . mock_exam_q($a['success_rate']) . ' END)') : 'NULL') . ' AS average_success_rate, '
-        . ($a['success_rate'] ? ('MAX(CASE WHEN ' . mock_exam_q($a['status']) . " = 'completed' THEN " . mock_exam_q($a['success_rate']) . ' END)') : 'NULL') . ' AS best_success_rate '
-        . 'FROM ' . mock_exam_q($a['table']) . ' WHERE ' . mock_exam_q($a['user_id']) . ' = ?';
+    $orderCol = $a['submitted_at'] ?: ($a['created_at'] ?: $a['id']);
+    $sql = 'SELECT a.' . mock_exam_q($a['id']) . ' AS id, a.' . mock_exam_q($a['status']) . ' AS status '
+        . 'FROM ' . mock_exam_q($a['table']) . ' a '
+        . 'WHERE a.' . mock_exam_q($a['user_id']) . ' = ? '
+        . 'ORDER BY a.' . mock_exam_q($orderCol) . ' DESC';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$userId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-    $lastSql = 'SELECT ' . ($a['success_rate'] ? mock_exam_q($a['success_rate']) : 'NULL') . ' AS success_rate FROM ' . mock_exam_q($a['table'])
-        . ' WHERE ' . mock_exam_q($a['user_id']) . ' = ? AND ' . mock_exam_q($a['status']) . " = 'completed' "
-        . ' ORDER BY ' . ($a['submitted_at'] ? mock_exam_q($a['submitted_at']) : mock_exam_q($a['id'])) . ' DESC LIMIT 1';
-    $lastStmt = $pdo->prepare($lastSql);
-    $lastStmt->execute([$userId]);
-    $lastRate = $lastStmt->fetchColumn();
+    $totalAttempts = count($rows);
+    $completedAttempts = 0;
+    $abandonedAttempts = 0;
+    $completedRates = [];
+
+    foreach ($rows as $row) {
+        $status = (string)($row['status'] ?? '');
+        if ($status === 'completed') {
+            $completedAttempts++;
+            $agg = mock_exam_calculate_attempt_aggregates($pdo, (string)$row['id']);
+            $completedRates[] = (float)($agg['success_rate'] ?? 0.0);
+        } elseif ($status === 'abandoned') {
+            $abandonedAttempts++;
+        }
+    }
+
+    $avgRate = 0.0;
+    $bestRate = 0.0;
+    $lastRate = 0.0;
+    if (!empty($completedRates)) {
+        $avgRate = round(array_sum($completedRates) / count($completedRates), 2);
+        $bestRate = round(max($completedRates), 2);
+        $lastRate = round((float)$completedRates[0], 2);
+    }
 
     return [
-        'total_attempts' => (int)($row['total_attempts'] ?? 0),
-        'completed_attempts' => (int)($row['completed_attempts'] ?? 0),
-        'abandoned_attempts' => (int)($row['abandoned_attempts'] ?? 0),
-        'average_success_rate' => $row['average_success_rate'] !== null ? round((float)$row['average_success_rate'], 2) : 0.0,
-        'best_success_rate' => $row['best_success_rate'] !== null ? round((float)$row['best_success_rate'], 2) : 0.0,
-        'last_success_rate' => $lastRate !== false && $lastRate !== null ? round((float)$lastRate, 2) : 0.0,
+        'total_attempts' => $totalAttempts,
+        'completed_attempts' => $completedAttempts,
+        'abandoned_attempts' => $abandonedAttempts,
+        'average_success_rate' => $avgRate,
+        'best_success_rate' => $bestRate,
+        'last_success_rate' => $lastRate,
     ];
 }
