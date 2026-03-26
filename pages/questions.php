@@ -274,47 +274,59 @@ function normalizeCount(v) {
 }
 
 function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
-    const fullText = (rawText || '').replace(/\r\n/g, '\n').trim();
+    const stripInvisibleChars = (txt) => (txt || '')
+        .replace(/\uFFFC/g, '')
+        .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+    const normalizeText = (txt) => stripInvisibleChars(txt)
+        .replace(/\u00A0/g, ' ')
+        .replace(/\r\n?/g, '\n')
+        .replace(/[ \t]+/g, ' ')
+        .trim();
+
+    const cleanOptionText = (txt) => normalizeText((txt || '')
+        .replace(/\(\s*doğru\s*\)/ig, '')
+        .replace(/^[*✓✔]+\s*/, ''));
+
+    const fullText = stripInvisibleChars(rawText || '')
+        .replace(/\u00A0/g, ' ')
+        .replace(/\r\n?/g, '\n')
+        .trim();
     const result = { parsed: [], parsed_count: 0, skipped_count: 0, total_blocks: 0 };
 
     if (!fullText) {
         return result;
     }
 
-    const lowerText = fullText.toLocaleLowerCase('tr-TR');
-    const answerKeyIndex = lowerText.indexOf('cevap anahtarı');
-    const bodyText = answerKeyIndex >= 0 ? fullText.slice(0, answerKeyIndex).trim() : fullText;
-    const answerKeyText = answerKeyIndex >= 0 ? fullText.slice(answerKeyIndex) : '';
+    const answerHeaderRegex = /^\s*cevap\s+anahtarı\s*:?\s*$/im;
+    const answerHeaderMatch = answerHeaderRegex.exec(fullText);
+    const bodyText = answerHeaderMatch ? fullText.slice(0, answerHeaderMatch.index).trim() : fullText;
+    const answerKeyText = answerHeaderMatch ? fullText.slice(answerHeaderMatch.index) : '';
 
     const answerMap = {};
     if (answerKeyText) {
-        const answerRegex = /(\d+)\s*[-:]\s*([ABCDE])/gi;
+        const answerRegex = /^\s*(\d+)\s*[-.):]\s*([ABCDE])\s*$/gim;
         let answerMatch;
         while ((answerMatch = answerRegex.exec(answerKeyText)) !== null) {
             answerMap[parseInt(answerMatch[1], 10)] = answerMatch[2].toUpperCase();
         }
     }
 
-    const startRegex = /^\s*(\d+)\.\s*(.*)$/gm;
-    const starts = [];
-    let startMatch;
-    while ((startMatch = startRegex.exec(bodyText)) !== null) {
-        starts.push({ num: parseInt(startMatch[1], 10), index: startMatch.index });
-    }
+    const blockDivider = '__BULK_QUESTION_DIVIDER__';
+    const blocks = bodyText
+        .replace(/^\s*⸻\s*$/gm, blockDivider)
+        .split(blockDivider)
+        .map((b) => b.trim())
+        .filter((b) => b.length > 0);
 
-    result.total_blocks = starts.length;
-    if (!starts.length) {
+    result.total_blocks = blocks.length;
+    if (!blocks.length) {
         return result;
     }
 
-    const normalizeText = (txt) => (txt || '').replace(/\s+/g, ' ').trim();
-    const cleanOptionText = (txt) => normalizeText((txt || '').replace(/\(\s*doğru\s*\)/ig, '').replace(/^[*✓✔]+\s*/, ''));
-
-    for (let i = 0; i < starts.length; i++) {
-        const blockStart = starts[i].index;
-        const blockEnd = i + 1 < starts.length ? starts[i + 1].index : bodyText.length;
-        const blockText = bodyText.slice(blockStart, blockEnd).trim();
-        const number = starts[i].num;
+    for (const rawBlock of blocks) {
+        const blockText = rawBlock.trim();
 
         const lines = blockText.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
         if (!lines.length) {
@@ -322,7 +334,14 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
             continue;
         }
 
-        lines[0] = lines[0].replace(/^\s*\d+\.\s*/, '').trim();
+        const firstLineMatch = lines[0].match(/^\s*(\d+)\s*[\.)]\s*(.*)$/);
+        if (!firstLineMatch) {
+            result.skipped_count++;
+            continue;
+        }
+
+        const number = parseInt(firstLineMatch[1], 10);
+        lines[0] = (firstLineMatch[2] || '').trim();
 
         const questionLines = [];
         const options = { A: '', B: '', C: '', D: '', E: '' };
@@ -334,6 +353,10 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
         for (const rawLine of lines) {
             const line = rawLine.trim();
             if (!line) continue;
+
+            if (/^⸻$/.test(line)) {
+                continue;
+            }
 
             if (explanationMode) {
                 explanationLines.push(line);
@@ -347,7 +370,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
                 continue;
             }
 
-            const optMatch = line.match(/^[\s\-–—•\*]*([ABCDE])\s*[\)\.\-:]?\s*(.*)$/i);
+            const optMatch = line.match(/^[\s\-–—•\*]*([ABCDE])\s*[\)\.\-:]\s*(.*)$/i);
             if (optMatch) {
                 currentOption = optMatch[1].toUpperCase();
                 let optValue = optMatch[2] || '';
@@ -369,6 +392,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
 
         const questionText = normalizeText(questionLines.join(' '));
         const correctAnswer = (answerMap[number] || inferredCorrect || '').toUpperCase();
+        const explanation = normalizeText(explanationLines.join(' '));
 
         const isValid =
             questionText.length >= 10 &&
@@ -389,7 +413,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
             option_d: options.D,
             option_e: options.E ?? null,
             correct_answer: correctAnswer,
-            explanation: normalizeText(explanationLines.join(' ')),
+            explanation,
             question_type: selectedType,
             course_id: selectedCourseId,
             status: 'pending'
