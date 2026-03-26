@@ -44,14 +44,27 @@ try {
         $unseenMsg = 'Çözülmemiş havuzda ' . $counts['unseen'] . ' soru var. Kalan kısım rastgele tamamlanacaktır.';
     }
 
+    $wrongMsg = null;
+    $wrongCount = (int)($counts['wrong'] ?? 0);
+    if ($wrongCount <= 0) {
+        $wrongMsg = 'Yanlış yaptığınız soru yok';
+    } elseif ($wrongCount < $requested) {
+        $remain = $requested - $wrongCount;
+        $wrongMsg = 'Yanlış yaptığınız ' . $wrongCount . ' soru bulundu. Kalan ' . $remain . ' soru rastgele tamamlanacaktır.';
+    }
+
     api_success('Deneme uygunluk bilgisi alındı.', [
         'available_pool_counts' => $counts,
         'options' => [
             'random_available' => $counts['total'] > 0,
             'unseen_available' => $counts['unseen'] > 0,
             'seen_available' => $counts['seen'] > 0,
+            'wrong_available' => $wrongCount > 0,
         ],
         'unseen_message' => $unseenMsg,
+        'wrong_message' => $wrongMsg,
+        'requested_question_count' => $requested,
+        'qualification_id' => $qualificationId,
         'supported_question_count' => max(0, min(100, (int)$counts['total'])),
         'course_distribution_preview' => $distribution,
     ]);

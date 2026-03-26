@@ -24,7 +24,7 @@ function mock_exam_pick(array $columns, array $candidates, bool $required = fals
 function mock_exam_normalize_pool_type(string $poolType): string
 {
     $v = strtolower(trim($poolType));
-    return in_array($v, ['random', 'unseen', 'seen'], true) ? $v : 'random';
+    return in_array($v, ['random', 'unseen', 'seen', 'wrong'], true) ? $v : 'random';
 }
 
 function mock_exam_normalize_mode(string $mode): string
@@ -330,10 +330,16 @@ function mock_exam_calculate_pool_counts(PDO $pdo, string $userId, string $quali
     $candidates = mock_exam_fetch_candidate_questions($pdo, $qualificationId);
     $ids = array_values(array_map(static fn(array $r): string => (string)$r['id'], $candidates));
     $seen = mock_exam_fetch_seen_question_ids($pdo, $userId, $ids);
+    $wrongIds = mock_exam_fetch_wrong_question_ids($pdo, $userId, $qualificationId);
+    $wrongMap = array_fill_keys($wrongIds, true);
     $seenCount = 0;
+    $wrongCount = 0;
     foreach ($ids as $id) {
         if (isset($seen[$id])) {
             $seenCount++;
+        }
+        if (isset($wrongMap[$id])) {
+            $wrongCount++;
         }
     }
     $total = count($ids);
@@ -341,7 +347,86 @@ function mock_exam_calculate_pool_counts(PDO $pdo, string $userId, string $quali
         'total' => $total,
         'seen' => $seenCount,
         'unseen' => max(0, $total - $seenCount),
+        'wrong' => $wrongCount,
     ];
+}
+
+function mock_exam_fetch_wrong_question_ids(PDO $pdo, string $userId, string $qualificationId): array
+{
+    $candidates = mock_exam_fetch_candidate_questions($pdo, $qualificationId);
+    if (!$candidates) {
+        return [];
+    }
+
+    $candidateIds = array_values(array_unique(array_map(static fn(array $r): string => (string)$r['id'], $candidates)));
+    if (empty($candidateIds)) {
+        return [];
+    }
+
+    $wrong = [];
+    $ph = implode(',', array_fill(0, count($candidateIds), '?'));
+
+    // 1) user_progress öncelikli
+    try {
+        $up = study_get_user_progress_schema($pdo);
+        if (!empty($up['user_id']) && !empty($up['question_id'])) {
+            $conds = [];
+            if (!empty($up['wrong_answer_count'])) {
+                $conds[] = 'COALESCE(up.' . mock_exam_q($up['wrong_answer_count']) . ',0) > 0';
+            }
+            if (!empty($up['is_correct']) && !empty($up['total_answer_count'])) {
+                $conds[] = '(COALESCE(up.' . mock_exam_q($up['total_answer_count']) . ',0) > 0 AND COALESCE(up.' . mock_exam_q($up['is_correct']) . ',1) = 0)';
+            }
+
+            if ($conds) {
+                $sql = 'SELECT DISTINCT up.' . mock_exam_q($up['question_id']) . ' AS question_id '
+                    . 'FROM ' . mock_exam_q($up['table']) . ' up '
+                    . 'WHERE up.' . mock_exam_q($up['user_id']) . ' = ? '
+                    . 'AND up.' . mock_exam_q($up['question_id']) . ' IN (' . $ph . ') '
+                    . 'AND (' . implode(' OR ', $conds) . ')';
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute(array_merge([$userId], $candidateIds));
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                foreach ($rows as $r) {
+                    $qid = (string)($r['question_id'] ?? '');
+                    if ($qid !== '') {
+                        $wrong[$qid] = true;
+                    }
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        // user_progress yoksa fallback ile devam
+    }
+
+    // 2) fallback: tamamlanmış mock exam yanlışları
+    try {
+        $a = mock_exam_get_attempt_schema($pdo);
+        $aq = mock_exam_get_attempt_question_schema($pdo);
+        if (!empty($a['status']) && !empty($aq['selected_answer']) && !empty($aq['correct_answer'])) {
+            $sql = 'SELECT DISTINCT aq.' . mock_exam_q($aq['question_id']) . ' AS question_id '
+                . 'FROM ' . mock_exam_q($aq['table']) . ' aq '
+                . 'INNER JOIN ' . mock_exam_q($a['table']) . ' a ON aq.' . mock_exam_q($aq['attempt_id']) . ' = a.' . mock_exam_q($a['id']) . ' '
+                . 'WHERE a.' . mock_exam_q($a['user_id']) . ' = ? '
+                . "AND a." . mock_exam_q($a['status']) . " = 'completed' "
+                . 'AND aq.' . mock_exam_q($aq['question_id']) . ' IN (' . $ph . ') '
+                . "AND TRIM(COALESCE(aq." . mock_exam_q($aq['selected_answer']) . ", '')) <> '' "
+                . "AND UPPER(TRIM(COALESCE(aq." . mock_exam_q($aq['selected_answer']) . ", ''))) <> UPPER(TRIM(COALESCE(aq." . mock_exam_q($aq['correct_answer']) . ", '')))";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array_merge([$userId], $candidateIds));
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($rows as $r) {
+                $qid = (string)($r['question_id'] ?? '');
+                if ($qid !== '') {
+                    $wrong[$qid] = true;
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        // sessiz fallback
+    }
+
+    return array_keys($wrong);
 }
 
 function mock_exam_assert_questions_not_empty(array $questions): void
@@ -501,6 +586,8 @@ function mock_exam_build_question_set(PDO $pdo, string $userId, string $qualific
     $seenMap = mock_exam_fetch_seen_question_ids($pdo, $userId, $ids);
     $seenPool = [];
     $unseenPool = [];
+    $wrongMap = array_fill_keys(mock_exam_fetch_wrong_question_ids($pdo, $userId, $qualificationId), true);
+    $wrongPool = [];
     foreach ($candidates as $q) {
         $qid = (string)$q['id'];
         if (isset($seenMap[$qid])) {
@@ -508,10 +595,25 @@ function mock_exam_build_question_set(PDO $pdo, string $userId, string $qualific
         } else {
             $unseenPool[] = $q;
         }
+        if (isset($wrongMap[$qid])) {
+            $wrongPool[] = $q;
+        }
     }
 
     $warning = null;
-    if ($poolType === 'seen') {
+    if ($poolType === 'wrong') {
+        if (count($wrongPool) < 1) {
+            throw new RuntimeException('Yanlış yaptığınız soru yok');
+        }
+        $picked = mock_exam_balanced_pick($wrongPool, $requestedCount, $mode === 'similar' ? $sourceQuestionIds : []);
+        if (count($picked) < $requestedCount) {
+            $remainingNeed = $requestedCount - count($picked);
+            $pickedIds = array_fill_keys(array_map(static fn(array $q): string => (string)$q['id'], $picked), true);
+            $fallbackPool = array_values(array_filter($candidates, static fn(array $q): bool => !isset($pickedIds[(string)$q['id']])));
+            $picked = array_merge($picked, mock_exam_balanced_pick($fallbackPool, $remainingNeed, $mode === 'similar' ? $sourceQuestionIds : []));
+            $warning = 'Yanlış yaptığınız ' . count($wrongPool) . ' soru bulundu. Kalan ' . $remainingNeed . ' soru rastgele tamamlandı.';
+        }
+    } elseif ($poolType === 'seen') {
         $picked = mock_exam_balanced_pick($seenPool, $requestedCount, $mode === 'similar' ? $sourceQuestionIds : []);
     } elseif ($poolType === 'unseen') {
         $picked = mock_exam_balanced_pick($unseenPool, $requestedCount, $mode === 'similar' ? $sourceQuestionIds : []);
@@ -546,6 +648,7 @@ function mock_exam_build_question_set(PDO $pdo, string $userId, string $qualific
             'total' => count($candidates),
             'seen' => count($seenPool),
             'unseen' => count($unseenPool),
+            'wrong' => count($wrongPool),
         ],
     ];
 }

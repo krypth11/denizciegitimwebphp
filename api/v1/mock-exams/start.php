@@ -12,6 +12,23 @@ try {
     $userId = (string)$auth['user']['id'];
     $payload = api_get_request_data();
 
+    $qualificationId = trim((string)($payload['qualification_id'] ?? ''));
+    $requestedQuestionCount = (int)($payload['requested_question_count'] ?? 0);
+    $poolType = strtolower(trim((string)($payload['pool_type'] ?? 'random')));
+    $mode = strtolower(trim((string)($payload['mode'] ?? 'standard')));
+
+    if ($qualificationId === '') {
+        api_error('qualification_id zorunludur.', 422);
+    }
+
+    if (!in_array($poolType, ['random', 'unseen', 'seen', 'wrong'], true)) {
+        api_error('pool_type geçersiz. Desteklenen değerler: random, unseen, seen, wrong', 422);
+    }
+
+    if (!in_array($mode, ['standard', 'similar', 'wrong_only', 'wrong_blank'], true)) {
+        api_error('mode geçersiz.', 422);
+    }
+
     $activeDetail = mock_exam_fetch_active_attempt_detail($pdo, $userId);
     if ($activeDetail) {
         $activeQuestions = $activeDetail['questions'] ?? [];
@@ -29,15 +46,15 @@ try {
             'weakest_course' => $activeDetail['weakest_course'] ?? null,
             'most_blank_course' => $activeDetail['most_blank_course'] ?? null,
             'warning_message' => $activeAttempt['warning_message'] ?? null,
-            'mode' => (string)($activeAttempt['mode'] ?? ($payload['mode'] ?? 'standard')),
+            'mode' => (string)($activeAttempt['mode'] ?? $mode),
         ]);
     }
 
     $created = mock_exam_create_attempt($pdo, $userId, [
-        'qualification_id' => (string)($payload['qualification_id'] ?? ''),
-        'requested_question_count' => (int)($payload['requested_question_count'] ?? 0),
-        'pool_type' => (string)($payload['pool_type'] ?? 'random'),
-        'mode' => (string)($payload['mode'] ?? 'standard'),
+        'qualification_id' => $qualificationId,
+        'requested_question_count' => $requestedQuestionCount,
+        'pool_type' => $poolType,
+        'mode' => $mode,
         'source_attempt_id' => (string)($payload['source_attempt_id'] ?? ''),
     ]);
 
@@ -55,7 +72,7 @@ try {
         'weakest_course' => $created['weakest_course'] ?? null,
         'most_blank_course' => $created['most_blank_course'] ?? null,
         'warning_message' => $created['attempt']['warning_message'] ?? null,
-        'mode' => (string)($created['attempt']['mode'] ?? ($payload['mode'] ?? 'standard')),
+        'mode' => (string)($created['attempt']['mode'] ?? $mode),
     ]);
 } catch (Throwable $e) {
     api_error($e->getMessage(), 422);
