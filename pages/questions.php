@@ -605,6 +605,7 @@ function parseRawJson(text) {
 
 $(document).ready(function() {
     let isSavingAiQuestions = false;
+    const QUESTIONS_FILTERS_STORAGE_KEY = 'questions_filters_v1';
 
     const appAlert = (title, message, type = 'info') => {
         if (typeof window.showAppAlert === 'function') {
@@ -662,6 +663,39 @@ $(document).ready(function() {
             status_options: []
         }
     };
+
+    function getSavedQuestionFilters() {
+        try {
+            const raw = localStorage.getItem(QUESTIONS_FILTERS_STORAGE_KEY);
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return {};
+            return parsed;
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function saveQuestionFilters() {
+        try {
+            const payload = {
+                qualification_id: qState.filters.qualification_id || '',
+                course_id: qState.filters.course_id || '',
+                question_type: qState.filters.question_type || ''
+            };
+            localStorage.setItem(QUESTIONS_FILTERS_STORAGE_KEY, JSON.stringify(payload));
+        } catch (e) {
+            // noop
+        }
+    }
+
+    function clearSavedQuestionFilters() {
+        try {
+            localStorage.removeItem(QUESTIONS_FILTERS_STORAGE_KEY);
+        } catch (e) {
+            // noop
+        }
+    }
 
     const shortText = (txt, max = 90) => {
         const t = String(txt || '');
@@ -840,6 +874,7 @@ $(document).ready(function() {
         qState.filters.qualification_id = $(this).val() || '';
         qState.filters.course_id = '';
         qState.filters.topic_id = '';
+        saveQuestionFilters();
         await loadCourses();
         await loadTopics();
         await loadQuestions();
@@ -848,6 +883,7 @@ $(document).ready(function() {
     $('#filterCourse').on('change', async function () {
         qState.filters.course_id = $(this).val() || '';
         qState.filters.topic_id = '';
+        saveQuestionFilters();
         await loadTopics();
         await loadQuestions();
     });
@@ -859,6 +895,7 @@ $(document).ready(function() {
 
     $('#filterType').on('change', function () {
         qState.filters.question_type = $(this).val() || '';
+        saveQuestionFilters();
         loadQuestions();
     });
 
@@ -875,6 +912,7 @@ $(document).ready(function() {
     $('#clearFiltersBtn').on('click', async function (e) {
         e.preventDefault();
         qState.filters = { qualification_id: '', course_id: '', topic_id: '', question_type: '', status: '', search: '' };
+        clearSavedQuestionFilters();
         $('#filterQualification').val('');
         $('#filterType').val('');
         $('#filterStatus').val('');
@@ -1209,8 +1247,36 @@ $(document).ready(function() {
     });
 
     (async function initQuestionsPage() {
+        const savedFilters = getSavedQuestionFilters();
+
         await loadQualifications();
+
+        const savedQualificationId = String(savedFilters.qualification_id || '');
+        if (savedQualificationId && $('#filterQualification option[value="' + savedQualificationId + '"]').length) {
+            qState.filters.qualification_id = savedQualificationId;
+            $('#filterQualification').val(savedQualificationId);
+        }
+
         await loadCourses();
+
+        const savedCourseId = String(savedFilters.course_id || '');
+        if (savedCourseId && $('#filterCourse option[value="' + savedCourseId + '"]').length) {
+            qState.filters.course_id = savedCourseId;
+            $('#filterCourse').val(savedCourseId);
+        } else {
+            qState.filters.course_id = '';
+            $('#filterCourse').val('');
+        }
+
+        const savedQuestionType = String(savedFilters.question_type || '');
+        if (savedQuestionType && $('#filterType option[value="' + savedQuestionType + '"]').length) {
+            qState.filters.question_type = savedQuestionType;
+            $('#filterType').val(savedQuestionType);
+        } else {
+            qState.filters.question_type = '';
+            $('#filterType').val('');
+        }
+
         await loadTopics();
         await loadQuestions();
     })();
