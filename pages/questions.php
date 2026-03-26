@@ -606,6 +606,7 @@ function parseRawJson(text) {
 $(document).ready(function() {
     let isSavingAiQuestions = false;
     const QUESTIONS_FILTERS_STORAGE_KEY = 'questions_filters_v1';
+    const BULK_UPLOAD_PREFS_STORAGE_KEY = 'questions_bulk_upload_prefs_v1';
 
     const appAlert = (title, message, type = 'info') => {
         if (typeof window.showAppAlert === 'function') {
@@ -695,6 +696,85 @@ $(document).ready(function() {
             localStorage.removeItem(QUESTIONS_FILTERS_STORAGE_KEY);
         } catch (e) {
             // noop
+        }
+    }
+
+    function getSavedBulkUploadPrefs() {
+        try {
+            const raw = localStorage.getItem(BULK_UPLOAD_PREFS_STORAGE_KEY);
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return {};
+            return parsed;
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function saveBulkUploadPrefs() {
+        try {
+            const payload = {
+                qualification_id: $('#bulk_qualification_id').val() || '',
+                course_id: $('#bulk_course_id').val() || '',
+                question_type: $('#bulk_question_type').val() || ''
+            };
+            console.log('bulk prefs save', payload);
+            localStorage.setItem(BULK_UPLOAD_PREFS_STORAGE_KEY, JSON.stringify(payload));
+        } catch (e) {
+            // noop
+        }
+    }
+
+    function clearSavedBulkUploadPrefs() {
+        try {
+            localStorage.removeItem(BULK_UPLOAD_PREFS_STORAGE_KEY);
+        } catch (e) {
+            // noop
+        }
+    }
+
+    function loadBulkCourses(qualificationId) {
+        const $course = $('#bulk_course_id');
+        $course.html('<option value="">Ders seçin...</option>');
+
+        if (!qualificationId) {
+            $course.prop('disabled', true);
+            return;
+        }
+
+        coursesData
+            .filter(c => c.qualification_id === qualificationId)
+            .forEach(c => $course.append(`<option value="${c.id}">${c.name}</option>`));
+
+        $course.prop('disabled', $course.find('option').length <= 1);
+    }
+
+    function applySavedBulkUploadPrefs() {
+        const savedPrefs = getSavedBulkUploadPrefs();
+        console.log('bulk prefs restore', savedPrefs);
+
+        const savedQualificationId = String(savedPrefs.qualification_id || '');
+        const savedCourseId = String(savedPrefs.course_id || '');
+        const savedQuestionType = String(savedPrefs.question_type || '');
+
+        if (savedQualificationId && $('#bulk_qualification_id option[value="' + savedQualificationId + '"]').length) {
+            $('#bulk_qualification_id').val(savedQualificationId);
+            loadBulkCourses(savedQualificationId);
+        } else {
+            $('#bulk_qualification_id').val('');
+            loadBulkCourses('');
+        }
+
+        if (savedCourseId && $('#bulk_course_id option[value="' + savedCourseId + '"]').length) {
+            $('#bulk_course_id').val(savedCourseId);
+        } else {
+            $('#bulk_course_id').val('');
+        }
+
+        if (savedQuestionType && $('#bulk_question_type option[value="' + savedQuestionType + '"]').length) {
+            $('#bulk_question_type').val(savedQuestionType);
+        } else {
+            $('#bulk_question_type').val('');
         }
     }
 
@@ -966,16 +1046,17 @@ $(document).ready(function() {
 
     $('#bulk_qualification_id').on('change', function() {
         const qualId = $(this).val();
-        const $course = $('#bulk_course_id');
-        $course.html('<option value="">Ders seçin...</option>');
-        if (!qualId) {
-            $course.prop('disabled', true);
-            return;
-        }
-        coursesData
-            .filter(c => c.qualification_id === qualId)
-            .forEach(c => $course.append(`<option value="${c.id}">${c.name}</option>`));
-        $course.prop('disabled', false);
+        $('#bulk_course_id').val('');
+        loadBulkCourses(qualId);
+        saveBulkUploadPrefs();
+    });
+
+    $('#bulk_course_id').on('change', function() {
+        saveBulkUploadPrefs();
+    });
+
+    $('#bulk_question_type').on('change', function() {
+        saveBulkUploadPrefs();
     });
 
     $('#bulkUploadForm').on('submit', function(e) {
@@ -1012,6 +1093,7 @@ $(document).ready(function() {
 
     $('#bulkUploadModal').on('show.bs.modal', function() {
         $('#bulk_questions_text').val('');
+        applySavedBulkUploadPrefs();
     });
 
     $('#bulkUploadModal').on('hidden.bs.modal', function() {
