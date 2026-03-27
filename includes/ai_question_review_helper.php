@@ -50,6 +50,10 @@ function ai_review_supported_models()
             'qwen-2.5-coder-32b',
             'deepseek-r1-distill-llama-70b',
         ],
+        'cerebras' => [
+            'llama3.1-8b',
+            'qwen-3-235b-a22b-instruct-2507',
+        ],
     ];
 }
 
@@ -69,8 +73,23 @@ function ai_review_validate_provider_model($provider, $model)
         if ($provider === 'groq') {
             throw new RuntimeException('Groq için seçilen model desteklenmiyor: ' . $model);
         }
+        if ($provider === 'cerebras') {
+            throw new RuntimeException('Cerebras için seçilen model desteklenmiyor: ' . $model);
+        }
         throw new RuntimeException(strtoupper($provider) . ' için seçilen model desteklenmiyor: ' . $model);
     }
+}
+
+function ai_review_effective_max_tokens($provider, $maxTokens)
+{
+    $maxTokens = max(1, (int)$maxTokens);
+
+    // Review akışı kısa/structured JSON döndürdüğü için Cerebras tarafında güvenli üst sınır uygula.
+    if ($provider === 'cerebras') {
+        return min(2048, $maxTokens);
+    }
+
+    return $maxTokens;
 }
 
 function ai_review_safe_excerpt($text, $maxLen = 260)
@@ -151,13 +170,26 @@ function ai_review_settings(PDO $pdo)
     $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
     $provider = strtolower(trim((string)($row['ai_provider'] ?? 'groq')));
-    if (!in_array($provider, ['groq', 'openai', 'claude', 'gemini'], true)) {
+    if (!in_array($provider, ['groq', 'openai', 'claude', 'gemini', 'cerebras'], true)) {
         $provider = 'groq';
+    }
+
+    $defaultModelByProvider = [
+        'groq' => 'llama-3.3-70b-versatile',
+        'openai' => 'gpt-4o',
+        'claude' => 'claude-sonnet-4-20250514',
+        'gemini' => 'gemini-2.5-flash',
+        'cerebras' => 'llama3.1-8b',
+    ];
+
+    $model = trim((string)($row['ai_model'] ?? ''));
+    if ($model === '') {
+        $model = $defaultModelByProvider[$provider] ?? 'llama-3.3-70b-versatile';
     }
 
     return [
         'provider' => $provider,
-        'model' => trim((string)($row['ai_model'] ?? 'llama-3.3-70b-versatile')),
+        'model' => $model,
         'api_key' => trim((string)($row['api_key'] ?? '')),
         'max_tokens' => max(1, (int)($row['max_tokens'] ?? 1200)),
         'temperature' => min(1, max(0, (float)($row['temperature'] ?? 0.7))),
@@ -230,7 +262,7 @@ function ai_review_call_ai(array $settings, array $question)
     $provider = $settings['provider'];
     $model = $settings['model'];
     $apiKey = $settings['api_key'];
-    $maxTokens = $settings['max_tokens'];
+    $maxTokens = ai_review_effective_max_tokens($provider, $settings['max_tokens']);
     $temperature = $settings['temperature'];
     $prompt = ai_review_prompt($question);
     $systemText = 'Sen denizcilik eğitim soruları için kalite kontrol uzmanısın. Sadece JSON döndür.';
@@ -242,10 +274,12 @@ function ai_review_call_ai(array $settings, array $question)
     ai_review_validate_provider_model($provider, $model);
 
     $contentText = '';
-    if ($provider === 'openai' || $provider === 'groq') {
+    if ($provider === 'openai' || $provider === 'groq' || $provider === 'cerebras') {
         $endpoint = $provider === 'openai'
             ? 'https://api.openai.com/v1/chat/completions'
-            : 'https://api.groq.com/openai/v1/chat/completions';
+            : ($provider === 'groq'
+                ? 'https://api.groq.com/openai/v1/chat/completions'
+                : 'https://api.cerebras.ai/v1/chat/completions');
 
         [$httpCode, $raw, $curlErr] = ai_review_http_json($endpoint, [
             'Authorization: Bearer ' . $apiKey,

@@ -27,6 +27,7 @@ include '../includes/sidebar.php';
             <p class="mb-0 text-muted">
                 Claude ve OpenAI yüksek kalite üretim için güçlü seçeneklerdir.
                 Gemini ve Groq tarafında ise ücretsiz kota / daha ekonomik kullanım seçenekleri bulunabilir.
+                Cerebras yüksek request limitleriyle AI soru kontrol için uygundur.
                 Kullanım hacminize göre en uygun sağlayıcıyı seçebilirsiniz.
             </p>
         </div>
@@ -85,6 +86,12 @@ include '../includes/sidebar.php';
                                 <input type="radio" name="ai_provider" value="groq">
                                 <div class="provider-title">Groq <span class="badge bg-success-subtle text-success-emphasis">Hızlı & Ekonomik</span></div>
                                 <small class="text-muted">Düşük gecikme ile hızlı üretim akışları.</small>
+                            </label>
+
+                            <label class="provider-card" data-provider="cerebras">
+                                <input type="radio" name="ai_provider" value="cerebras">
+                                <div class="provider-title">Cerebras <span class="badge bg-primary-subtle text-primary-emphasis">Yüksek Limit</span></div>
+                                <small class="text-muted">Yüksek request limitleriyle AI soru kontrol akışları için uygundur.</small>
                             </label>
                         </div>
                     </div>
@@ -208,6 +215,10 @@ $(document).ready(function () {
             'qwen-2.5-32b',
             'qwen-2.5-coder-32b',
             'deepseek-r1-distill-llama-70b'
+        ],
+        cerebras: [
+            'llama3.1-8b',
+            'qwen-3-235b-a22b-instruct-2507'
         ]
     };
 
@@ -215,14 +226,16 @@ $(document).ready(function () {
         claude: { label: 'Anthropic Console', url: 'https://console.anthropic.com/' },
         openai: { label: 'OpenAI Platform', url: 'https://platform.openai.com/' },
         gemini: { label: 'Google AI Studio', url: 'https://aistudio.google.com/' },
-        groq: { label: 'Groq Console', url: 'https://console.groq.com/' }
+        groq: { label: 'Groq Console', url: 'https://console.groq.com/' },
+        cerebras: { label: 'Cerebras Cloud', url: 'https://cloud.cerebras.ai/' }
     };
 
     const defaultProviderModel = {
         claude: 'claude-sonnet-4-20250514',
         openai: 'gpt-4o',
         gemini: 'gemini-2.5-flash',
-        groq: 'llama-3.3-70b-versatile'
+        groq: 'llama-3.3-70b-versatile',
+        cerebras: 'llama3.1-8b'
     };
 
     const appAlert = (title, message, type = 'info') =>

@@ -129,8 +129,85 @@ function settings_update(PDO $pdo, $table, array $data, $whereSql, array $whereP
 function settings_normalize_provider($value)
 {
     $v = strtolower(trim((string)$value));
-    $allowed = ['claude', 'openai', 'gemini', 'groq'];
+    $allowed = ['claude', 'openai', 'gemini', 'groq', 'cerebras'];
     return in_array($v, $allowed, true) ? $v : 'openai';
+}
+
+function settings_provider_models()
+{
+    return [
+        'claude' => [
+            'claude-3-7-sonnet-latest',
+            'claude-3-5-sonnet-latest',
+            'claude-3-5-haiku-latest',
+            'claude-sonnet-4-20250514',
+            'claude-opus-4-20250514',
+            'claude-3-opus-20240229',
+            'claude-3-sonnet-20240229',
+            'claude-3-haiku-20240307',
+        ],
+        'openai' => [
+            'gpt-4.1',
+            'gpt-4.1-mini',
+            'gpt-4.1-nano',
+            'gpt-4o-mini',
+            'gpt-4o',
+            'gpt-4o-2024-11-20',
+            'gpt-4-turbo',
+            'gpt-4',
+            'gpt-3.5-turbo',
+            'o1',
+            'o1-mini',
+            'o3-mini',
+        ],
+        'gemini' => [
+            'gemini-2.5-pro',
+            'gemini-2.5-flash',
+            'gemini-2.0-pro-exp',
+            'gemini-2.0-flash-exp',
+            'gemini-1.5-pro',
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-8b',
+            'gemini-exp-1206',
+        ],
+        'groq' => [
+            'llama-3.3-70b-versatile',
+            'llama-3.1-70b-versatile',
+            'llama-3.1-8b-instant',
+            'llama-guard-3-8b',
+            'mixtral-8x7b-32768',
+            'gemma2-9b-it',
+            'qwen-2.5-32b',
+            'qwen-2.5-coder-32b',
+            'deepseek-r1-distill-llama-70b',
+        ],
+        'cerebras' => [
+            'llama3.1-8b',
+            'qwen-3-235b-a22b-instruct-2507',
+        ],
+    ];
+}
+
+function settings_validate_provider_model($provider, $model)
+{
+    $map = settings_provider_models();
+    if (!isset($map[$provider])) {
+        return 'Geçersiz AI sağlayıcı seçimi.';
+    }
+
+    $model = trim((string)$model);
+    if ($model === '') {
+        return 'Model seçimi zorunludur.';
+    }
+
+    if (!in_array($model, $map[$provider], true)) {
+        if ($provider === 'cerebras') {
+            return 'Cerebras için seçilen model desteklenmiyor: ' . $model;
+        }
+        return strtoupper($provider) . ' için seçilen model desteklenmiyor: ' . $model;
+    }
+
+    return null;
 }
 
 function settings_normalize_type($value)
@@ -270,6 +347,12 @@ try {
             if ($aiModel === '') {
                 settings_json(false, 'Model seçimi zorunludur.', [], 422, ['ai_model' => 'required']);
             }
+
+            $providerModelError = settings_validate_provider_model($aiProvider, $aiModel);
+            if ($providerModelError !== null) {
+                settings_json(false, $providerModelError, [], 422, ['ai_model' => 'invalid_for_provider']);
+            }
+
             if ($maxTokens < 1) {
                 settings_json(false, 'Max Tokens en az 1 olmalıdır.', [], 422, ['max_tokens' => 'invalid']);
             }
