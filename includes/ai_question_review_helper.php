@@ -2,6 +2,116 @@
 
 require_once __DIR__ . '/functions.php';
 
+function ai_review_supported_models()
+{
+    return [
+        'claude' => [
+            'claude-3-7-sonnet-latest',
+            'claude-3-5-sonnet-latest',
+            'claude-3-5-haiku-latest',
+            'claude-sonnet-4-20250514',
+            'claude-opus-4-20250514',
+            'claude-3-opus-20240229',
+            'claude-3-sonnet-20240229',
+            'claude-3-haiku-20240307',
+        ],
+        'openai' => [
+            'gpt-4.1',
+            'gpt-4.1-mini',
+            'gpt-4.1-nano',
+            'gpt-4o-mini',
+            'gpt-4o',
+            'gpt-4o-2024-11-20',
+            'gpt-4-turbo',
+            'gpt-4',
+            'gpt-3.5-turbo',
+            'o1',
+            'o1-mini',
+            'o3-mini',
+        ],
+        'gemini' => [
+            'gemini-2.5-pro',
+            'gemini-2.5-flash',
+            'gemini-2.0-pro-exp',
+            'gemini-2.0-flash-exp',
+            'gemini-1.5-pro',
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-8b',
+            'gemini-exp-1206',
+        ],
+        'groq' => [
+            'llama-3.3-70b-versatile',
+            'llama-3.1-70b-versatile',
+            'llama-3.1-8b-instant',
+            'llama-guard-3-8b',
+            'mixtral-8x7b-32768',
+            'gemma2-9b-it',
+            'qwen-2.5-32b',
+            'qwen-2.5-coder-32b',
+            'deepseek-r1-distill-llama-70b',
+        ],
+    ];
+}
+
+function ai_review_validate_provider_model($provider, $model)
+{
+    $supported = ai_review_supported_models();
+    if (!isset($supported[$provider])) {
+        throw new RuntimeException('Desteklenmeyen AI provider: ' . $provider);
+    }
+
+    $model = trim((string)$model);
+    if ($model === '') {
+        throw new RuntimeException('AI model seçimi boş olamaz.');
+    }
+
+    if (!in_array($model, $supported[$provider], true)) {
+        if ($provider === 'groq') {
+            throw new RuntimeException('Groq için seçilen model desteklenmiyor: ' . $model);
+        }
+        throw new RuntimeException(strtoupper($provider) . ' için seçilen model desteklenmiyor: ' . $model);
+    }
+}
+
+function ai_review_safe_excerpt($text, $maxLen = 260)
+{
+    $text = trim((string)$text);
+    $text = preg_replace('/\s+/u', ' ', $text);
+    if ($text === '') return '';
+    if (mb_strlen($text, 'UTF-8') > $maxLen) {
+        return mb_substr($text, 0, $maxLen, 'UTF-8') . '…';
+    }
+    return $text;
+}
+
+function ai_review_extract_error_detail($rawBody, $curlErr = '')
+{
+    $curlErr = ai_review_safe_excerpt($curlErr, 180);
+    if ($curlErr !== '') {
+        return $curlErr;
+    }
+
+    $rawBody = (string)$rawBody;
+    $decoded = json_decode($rawBody, true);
+    if (is_array($decoded)) {
+        $candidate = '';
+        if (!empty($decoded['error']['message']) && is_string($decoded['error']['message'])) {
+            $candidate = $decoded['error']['message'];
+        } elseif (!empty($decoded['message']) && is_string($decoded['message'])) {
+            $candidate = $decoded['message'];
+        } elseif (!empty($decoded['error']) && is_string($decoded['error'])) {
+            $candidate = $decoded['error'];
+        }
+
+        $candidate = ai_review_safe_excerpt($candidate, 240);
+        if ($candidate !== '') {
+            return $candidate;
+        }
+    }
+
+    return ai_review_safe_excerpt($rawBody, 240);
+}
+
 function ai_review_json($success, $message = '', $data = [], $status = 200)
 {
     http_response_code($status);
@@ -49,8 +159,8 @@ function ai_review_settings(PDO $pdo)
         'provider' => $provider,
         'model' => trim((string)($row['ai_model'] ?? 'llama-3.3-70b-versatile')),
         'api_key' => trim((string)($row['api_key'] ?? '')),
-        'max_tokens' => max(256, (int)($row['max_tokens'] ?? 1200)),
-        'temperature' => min(1, max(0, (float)($row['temperature'] ?? 0.2))),
+        'max_tokens' => max(1, (int)($row['max_tokens'] ?? 1200)),
+        'temperature' => min(1, max(0, (float)($row['temperature'] ?? 0.7))),
     ];
 }
 
@@ -62,7 +172,7 @@ function ai_review_http_json($url, array $headers, array $payload, $timeout = 90
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => $timeout,
         CURLOPT_HTTPHEADER => $headers,
-        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
+        CURLOPT_POSTFIELDS => json_encode($payload),
     ]);
     $response = curl_exec($ch);
     $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -100,24 +210,19 @@ function ai_review_prompt(array $q)
         'course_name' => (string)($q['course_name'] ?? ''),
     ];
 
-    return "Aşağıdaki çoktan seçmeli soruyu bir ön denetçi gibi incele. Son karar adminde olacak.\n"
-        . "Kontrol sınıfları:\n"
-        . "1) Doğru cevap tutarlılığı\n"
-        . "2) Soru netliği\n"
-        . "3) Şık kalitesi\n"
-        . "4) Açıklama kalitesi\n"
-        . "5) Biçimsel sorunlar\n\n"
+    return "Aşağıdaki denizcilik çoktan seçmeli soruyu ön denetim için değerlendir. Son karar admin verecek.\n"
+        . "Kontroller: doğru cevap tutarlılığı, soru netliği, şık kalitesi, açıklama kalitesi, biçimsel sorunlar.\n"
         . "Sadece parse edilebilir JSON döndür.\n"
-        . "Beklenen çıktı:\n"
+        . "Şema:\n"
         . "{\n"
         . "  \"ai_status\": \"ok|warning|error\",\n"
         . "  \"issue_types\": [\"...\"],\n"
         . "  \"confidence_score\": 0,\n"
-        . "  \"ai_notes\": \"kısa açıklayıcı not\",\n"
+        . "  \"ai_notes\": \"kısa açıklama\",\n"
         . "  \"suggested_fix\": \"kısa öneri\"\n"
         . "}\n\n"
         . "Soru verisi:\n"
-        . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+        . json_encode($payload, JSON_UNESCAPED_UNICODE);
 }
 
 function ai_review_call_ai(array $settings, array $question)
@@ -133,6 +238,8 @@ function ai_review_call_ai(array $settings, array $question)
     if ($apiKey === '') {
         throw new RuntimeException('AI API key tanımlı değil.');
     }
+
+    ai_review_validate_provider_model($provider, $model);
 
     $contentText = '';
     if ($provider === 'openai' || $provider === 'groq') {
@@ -155,11 +262,18 @@ function ai_review_call_ai(array $settings, array $question)
         ]);
 
         if ($httpCode !== 200 || $curlErr) {
-            throw new RuntimeException('AI API hatası (' . $provider . '): HTTP ' . $httpCode . ' ' . $curlErr);
+            $detail = ai_review_extract_error_detail($raw, $curlErr);
+            $msg = 'AI API hatası (' . $provider . '): HTTP ' . $httpCode;
+            if ($detail !== '') $msg .= ' - ' . $detail;
+            throw new RuntimeException($msg);
         }
 
         $decoded = json_decode((string)$raw, true);
         $contentText = (string)($decoded['choices'][0]['message']['content'] ?? '');
+        if ($contentText === '') {
+            $detail = ai_review_extract_error_detail($raw, '');
+            throw new RuntimeException('AI API hatası (' . $provider . '): Yanıt içeriği boş. ' . $detail);
+        }
     } elseif ($provider === 'claude') {
         [$httpCode, $raw, $curlErr] = ai_review_http_json('https://api.anthropic.com/v1/messages', [
             'x-api-key: ' . $apiKey,
@@ -176,7 +290,10 @@ function ai_review_call_ai(array $settings, array $question)
         ]);
 
         if ($httpCode !== 200 || $curlErr) {
-            throw new RuntimeException('AI API hatası (claude): HTTP ' . $httpCode . ' ' . $curlErr);
+            $detail = ai_review_extract_error_detail($raw, $curlErr);
+            $msg = 'AI API hatası (claude): HTTP ' . $httpCode;
+            if ($detail !== '') $msg .= ' - ' . $detail;
+            throw new RuntimeException($msg);
         }
 
         $decoded = json_decode((string)$raw, true);
@@ -201,7 +318,10 @@ function ai_review_call_ai(array $settings, array $question)
         ]);
 
         if ($httpCode !== 200 || $curlErr) {
-            throw new RuntimeException('AI API hatası (gemini): HTTP ' . $httpCode . ' ' . $curlErr);
+            $detail = ai_review_extract_error_detail($raw, $curlErr);
+            $msg = 'AI API hatası (gemini): HTTP ' . $httpCode;
+            if ($detail !== '') $msg .= ' - ' . $detail;
+            throw new RuntimeException($msg);
         }
 
         $decoded = json_decode((string)$raw, true);

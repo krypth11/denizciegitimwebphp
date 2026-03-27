@@ -119,12 +119,17 @@ try {
         'actual_count' => $actualCount,
     ]);
 } catch (Throwable $e) {
+    $safeMessage = ai_review_safe_excerpt($e->getMessage(), 280);
+    if ($safeMessage === '') {
+        $safeMessage = 'AI review sırasında beklenmeyen bir hata oluştu.';
+    }
+
     if (!empty($batchId)) {
         try {
             $pdo->prepare('UPDATE question_ai_review_batches SET status = ?, error_message = ?, updated_at = ? WHERE id = ?')
-                ->execute(['failed', mb_substr($e->getMessage(), 0, 1000, 'UTF-8'), date('Y-m-d H:i:s'), $batchId]);
+                ->execute(['failed', $safeMessage, date('Y-m-d H:i:s'), $batchId]);
         } catch (Throwable $ignored) {
         }
     }
-    ai_review_json(false, 'Batch başlatılamadı: ' . $e->getMessage(), [], 500);
+    ai_review_json(false, 'Batch başlatılamadı: ' . $safeMessage, [], 500);
 }
