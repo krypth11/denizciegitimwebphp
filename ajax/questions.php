@@ -131,6 +131,11 @@ try {
                 }
             }
 
+            $countSql = 'SELECT COUNT(*)' . $join . ' WHERE ' . implode(' AND ', $where);
+            $countStmt = $pdo->prepare($countSql);
+            $countStmt->execute($params);
+            $totalCount = (int)$countStmt->fetchColumn();
+
             $sql = 'SELECT ' . $select . $join . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY q.created_at DESC, q.id DESC LIMIT 500';
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
@@ -149,6 +154,7 @@ try {
 
             questions_json(true, '', [
                 'questions' => $rows,
+                'total_count' => $totalCount,
                 'meta' => [
                     'has_topic_filter' => $hasTopicId,
                     'has_status_filter' => ($hasStatus || $hasIsActive),

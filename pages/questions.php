@@ -90,6 +90,12 @@ include '../includes/sidebar.php';
         </div>
     </div>
 
+    <div class="d-flex justify-content-end mb-2">
+        <div class="small text-muted">
+            Filtreye göre toplam soru: <strong id="questionsFilteredCount">-</strong>
+        </div>
+    </div>
+
     <div class="card d-none d-md-block">
         <div class="card-body">
             <div class="table-responsive">
@@ -665,6 +671,11 @@ $(document).ready(function() {
         }
     };
 
+    function updateFilteredCountDisplay(value) {
+        const count = Number.isFinite(Number(value)) ? Number(value) : null;
+        $('#questionsFilteredCount').text(count === null ? '-' : count.toLocaleString('tr-TR'));
+    }
+
     function getSavedQuestionFilters() {
         try {
             const raw = localStorage.getItem(QUESTIONS_FILTERS_STORAGE_KEY);
@@ -961,11 +972,13 @@ $(document).ready(function() {
         Object.entries(qState.filters).forEach(([k, v]) => { if (v) params.append(k, v); });
         const res = await window.appAjax({ url: `../ajax/questions.php?${params.toString()}` });
         if (!res.success) {
+            updateFilteredCountDisplay(null);
             renderDesktopRows([]);
             renderMobileRows([]);
             return;
         }
         qState.meta = { ...qState.meta, ...(res.data?.meta || {}) };
+        updateFilteredCountDisplay(res.data?.total_count ?? null);
         renderStatusOptions();
         const rows = res.data?.questions || [];
         renderDesktopRows(rows);
