@@ -48,14 +48,30 @@ include '../includes/sidebar.php';
         </div>
     </div>
 
+    <div class="row g-3 mb-3" id="reviewStatsRow">
+        <div class="col-md-2 col-6"><div class="card"><div class="card-body py-2"><small class="text-muted d-block">Toplam Soru</small><strong id="statTotalQuestions">0</strong></div></div></div>
+        <div class="col-md-2 col-6"><div class="card"><div class="card-body py-2"><small class="text-muted d-block">İncelenen Soru</small><strong id="statReviewedQuestions">0</strong></div></div></div>
+        <div class="col-md-2 col-6"><div class="card border-danger"><div class="card-body py-2"><small class="text-muted d-block">Hatalı</small><strong id="statErrorCount" class="text-danger">0</strong></div></div></div>
+        <div class="col-md-2 col-6"><div class="card border-warning"><div class="card-body py-2"><small class="text-muted d-block">Warning</small><strong id="statWarningCount" class="text-warning">0</strong></div></div></div>
+        <div class="col-md-2 col-6"><div class="card border-success"><div class="card-body py-2"><small class="text-muted d-block">OK</small><strong id="statOkCount" class="text-success">0</strong></div></div></div>
+        <div class="col-md-2 col-6"><div class="card border-primary"><div class="card-body py-2"><small class="text-muted d-block">Kapatılan / İncelendi</small><strong id="statReviewedClosedCount" class="text-primary">0</strong></div></div></div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <button class="btn btn-success w-100" id="bulkDismissOkBtn"><i class="bi bi-check2-square"></i> OK Olanları Sorun Yok Olarak Kapat</button>
+        </div>
+    </div>
+
     <div class="card">
         <div class="card-header bg-white"><h6 class="mb-0">Review Listesi</h6></div>
         <div class="card-body">
             <div class="row g-3 mb-3">
                 <div class="col-md-2"><label class="form-label">AI Status</label><select class="form-select" id="filterAiStatus"><option value="">Tümü</option><option value="ok">ok</option><option value="warning">warning</option><option value="error">error</option></select></div>
                 <div class="col-md-2"><label class="form-label">Review State</label><select class="form-select" id="filterReviewState"><option value="">Tümü</option><option value="pending">pending</option><option value="reviewed">reviewed</option></select></div>
-                <div class="col-md-3"><label class="form-label">Yeterlilik</label><select class="form-select" id="filterQualification"><option value="">Tümü</option></select></div>
-                <div class="col-md-3"><label class="form-label">Ders</label><select class="form-select" id="filterCourse"><option value="">Tümü</option></select></div>
+                <div class="col-md-2"><label class="form-label">Yeterlilik</label><select class="form-select" id="filterQualification"><option value="">Tümü</option></select></div>
+                <div class="col-md-2"><label class="form-label">Ders</label><select class="form-select" id="filterCourse"><option value="">Tümü</option></select></div>
+                <div class="col-md-2"><label class="form-label">Sayfa Boyutu</label><select class="form-select" id="filterPerPage"><option value="10">10</option><option value="20">20</option><option value="50">50</option></select></div>
                 <div class="col-md-2 d-flex align-items-end"><button class="btn btn-secondary w-100" id="refreshListBtn"><i class="bi bi-arrow-clockwise"></i> Yenile</button></div>
             </div>
             <div class="table-responsive">
@@ -74,6 +90,11 @@ include '../includes/sidebar.php';
                     </thead>
                     <tbody id="reviewTableBody"></tbody>
                 </table>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mt-3">
+                <button class="btn btn-outline-secondary btn-sm" id="paginationPrevBtn"><i class="bi bi-chevron-left"></i> Önceki</button>
+                <div class="text-muted small" id="paginationInfo">Sayfa 1 / 1</div>
+                <button class="btn btn-outline-secondary btn-sm" id="paginationNextBtn">Sonraki <i class="bi bi-chevron-right"></i></button>
             </div>
         </div>
     </div>
@@ -134,17 +155,44 @@ $(document).ready(function () {
 
     let courses = [];
     let qualifications = [];
+    const listState = {
+        page: 1,
+        per_page: 10
+    };
 
     const badgeAi = (v) => v === 'ok' ? 'bg-success' : (v === 'warning' ? 'bg-warning text-dark' : 'bg-danger');
     const badgeState = (v) => v === 'reviewed' ? 'bg-primary' : 'bg-secondary';
 
-    async function loadList() {
-        const params = {
+    function getListParams() {
+        return {
             ai_status: $('#filterAiStatus').val() || '',
             review_state: $('#filterReviewState').val() || '',
             qualification_id: $('#filterQualification').val() || '',
-            course_id: $('#filterCourse').val() || ''
+            course_id: $('#filterCourse').val() || '',
+            page: listState.page,
+            per_page: listState.per_page
         };
+    }
+
+    function updateStats(stats) {
+        $('#statTotalQuestions').text(stats?.total_questions ?? 0);
+        $('#statReviewedQuestions').text(stats?.reviewed_questions ?? 0);
+        $('#statErrorCount').text(stats?.error_count ?? 0);
+        $('#statWarningCount').text(stats?.warning_count ?? 0);
+        $('#statOkCount').text(stats?.ok_count ?? 0);
+        $('#statReviewedClosedCount').text(stats?.reviewed_closed_count ?? 0);
+    }
+
+    function updatePaginationUI(pagination) {
+        const page = pagination?.page ?? 1;
+        const totalPages = pagination?.total_pages ?? 1;
+        $('#paginationInfo').text(`Sayfa ${page} / ${totalPages} • Toplam ${pagination?.total ?? 0} kayıt`);
+        $('#paginationPrevBtn').prop('disabled', !pagination?.has_prev);
+        $('#paginationNextBtn').prop('disabled', !pagination?.has_next);
+    }
+
+    async function loadList() {
+        const params = getListParams();
         const res = await window.appAjax({ url: listEndpoint, method: 'GET', data: params });
         if (!res.success) {
             return window.showAppAlert('Hata', res.message || 'Liste yüklenemedi', 'error');
@@ -170,6 +218,14 @@ $(document).ready(function () {
 
         setOptions($('#filterCourse'), filteredCoursesForFilter);
         setOptions($('#startCourse'), filteredCoursesForStart);
+
+        const pagination = res.data?.pagination || {};
+        listState.page = Number(pagination.page || 1);
+        listState.per_page = Number(pagination.per_page || listState.per_page || 10);
+        $('#filterPerPage').val(String(listState.per_page));
+
+        updateStats(res.data?.stats || {});
+        updatePaginationUI(pagination);
 
         const rows = res.data?.reviews || [];
         const $tb = $('#reviewTableBody');
@@ -218,6 +274,7 @@ $(document).ready(function () {
         $c.html('<option value="">Tümü</option>');
         filtered.forEach(x => $c.append(`<option value="${x.id}">${x.name}</option>`));
         $c.val('');
+        listState.page = 1;
         loadList();
     });
 
@@ -227,7 +284,30 @@ $(document).ready(function () {
         $('#startCountValue').val($(this).data('count'));
     });
 
-    $('#refreshListBtn, #filterAiStatus, #filterReviewState, #filterCourse').on('click change', loadList);
+    $('#refreshListBtn').on('click', loadList);
+
+    $('#filterAiStatus, #filterReviewState, #filterCourse').on('change', function () {
+        listState.page = 1;
+        loadList();
+    });
+
+    $('#filterPerPage').on('change', function () {
+        listState.per_page = parseInt($(this).val(), 10) || 10;
+        listState.page = 1;
+        loadList();
+    });
+
+    $('#paginationPrevBtn').on('click', function () {
+        if (listState.page > 1) {
+            listState.page -= 1;
+            loadList();
+        }
+    });
+
+    $('#paginationNextBtn').on('click', function () {
+        listState.page += 1;
+        loadList();
+    });
 
     $('#startBatchBtn').on('click', async function () {
         const requested = calcRequestedCount();
@@ -315,6 +395,36 @@ $(document).ready(function () {
         if (!res.success) return window.showAppAlert('Hata', res.message || 'Kapatılamadı', 'error');
         bootstrap.Modal.getOrCreateInstance(document.getElementById('reviewDetailModal')).hide();
         await window.showAppAlert('Başarılı', 'İnceleme dismissed olarak kapatıldı.', 'success');
+        loadList();
+    });
+
+    $('#bulkDismissOkBtn').on('click', async function () {
+        const ok = await window.showAppConfirm('Toplu Kapatma Onayı', 'Mevcut filtre bağlamında pending + ok kayıtlar "sorun yok" olarak kapatılacak. Devam edilsin mi?', {
+            type: 'warning',
+            confirmText: 'Kapat',
+            cancelText: 'İptal'
+        });
+        if (!ok) return;
+
+        window.appSetButtonLoading('#bulkDismissOkBtn', true, 'Kapatılıyor...');
+        const res = await window.appAjax({
+            url: resolveEndpoint,
+            method: 'POST',
+            data: {
+                action_type: 'bulk_dismiss_ok',
+                qualification_id: $('#filterQualification').val() || '',
+                course_id: $('#filterCourse').val() || '',
+                ai_status: $('#filterAiStatus').val() || '',
+                review_state: $('#filterReviewState').val() || ''
+            }
+        });
+        window.appSetButtonLoading('#bulkDismissOkBtn', false);
+
+        if (!res.success) {
+            return window.showAppAlert('Hata', res.message || 'Toplu kapatma başarısız', 'error');
+        }
+
+        await window.showAppAlert('Başarılı', res.message || 'Kayıtlar kapatıldı.', 'success');
         loadList();
     });
 

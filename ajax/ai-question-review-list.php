@@ -17,25 +17,47 @@ try {
     $reviewState = trim((string)($_GET['review_state'] ?? ''));
     $qualificationId = trim((string)($_GET['qualification_id'] ?? ''));
     $courseId = trim((string)($_GET['course_id'] ?? ''));
+    $page = max(1, (int)($_GET['page'] ?? 1));
+    $perPage = (int)($_GET['per_page'] ?? 10);
+    if (!in_array($perPage, [10, 20, 50], true)) {
+        $perPage = 10;
+    }
 
-    $where = ['1=1'];
-    $params = [];
+    $offset = ($page - 1) * $perPage;
+
+    $listWhere = ['1=1'];
+    $listParams = [];
 
     if ($aiStatus !== '' && in_array($aiStatus, ['ok', 'warning', 'error'], true)) {
-        $where[] = 'r.ai_status = ?';
-        $params[] = $aiStatus;
+        $listWhere[] = 'r.ai_status = ?';
+        $listParams[] = $aiStatus;
     }
     if ($reviewState !== '' && in_array($reviewState, ['pending', 'reviewed'], true)) {
-        $where[] = 'r.review_state = ?';
-        $params[] = $reviewState;
+        $listWhere[] = 'r.review_state = ?';
+        $listParams[] = $reviewState;
     }
     if ($qualificationId !== '') {
-        $where[] = 'c.qualification_id = ?';
-        $params[] = $qualificationId;
+        $listWhere[] = 'c.qualification_id = ?';
+        $listParams[] = $qualificationId;
     }
     if ($courseId !== '') {
-        $where[] = 'q.course_id = ?';
-        $params[] = $courseId;
+        $listWhere[] = 'q.course_id = ?';
+        $listParams[] = $courseId;
+    }
+
+    $totalSql = 'SELECT COUNT(*)
+                 FROM question_ai_reviews r
+                 INNER JOIN questions q ON q.id = r.question_id
+                 LEFT JOIN courses c ON c.id = q.course_id
+                 WHERE ' . implode(' AND ', $listWhere);
+    $totalStmt = $pdo->prepare($totalSql);
+    $totalStmt->execute($listParams);
+    $total = (int)$totalStmt->fetchColumn();
+    $totalPages = max(1, (int)ceil($total / $perPage));
+
+    if ($page > $totalPages) {
+        $page = $totalPages;
+        $offset = ($page - 1) * $perPage;
     }
 
     $sql = 'SELECT
@@ -55,13 +77,66 @@ try {
             INNER JOIN questions q ON q.id = r.question_id
             LEFT JOIN courses c ON c.id = q.course_id
             LEFT JOIN qualifications qual ON qual.id = c.qualification_id
-            WHERE ' . implode(' AND ', $where) . '
-            ORDER BY r.created_at DESC, r.id DESC
-            LIMIT 500';
+            WHERE ' . implode(' AND ', $listWhere) . '
+            ORDER BY
+                CASE r.ai_status
+                    WHEN "error" THEN 1
+                    WHEN "warning" THEN 2
+                    WHEN "ok" THEN 3
+                    ELSE 4
+                END ASC,
+                r.created_at DESC,
+                r.id DESC
+            LIMIT ? OFFSET ?';
 
     $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
+    $listExecParams = $listParams;
+    $listExecParams[] = $perPage;
+    $listExecParams[] = $offset;
+    $stmt->execute($listExecParams);
     $reviews = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $statsWhere = ['1=1'];
+    $statsParams = [];
+    if ($qualificationId !== '') {
+        $statsWhere[] = 'c.qualification_id = ?';
+        $statsParams[] = $qualificationId;
+    }
+    if ($courseId !== '') {
+        $statsWhere[] = 'q.course_id = ?';
+        $statsParams[] = $courseId;
+    }
+
+    $totalQuestionsSql = 'SELECT COUNT(*)
+                          FROM questions q
+                          LEFT JOIN courses c ON c.id = q.course_id
+                          WHERE ' . implode(' AND ', $statsWhere);
+    $totalQuestionsStmt = $pdo->prepare($totalQuestionsSql);
+    $totalQuestionsStmt->execute($statsParams);
+    $totalQuestions = (int)$totalQuestionsStmt->fetchColumn();
+
+    $reviewStatsSql = 'SELECT
+                        COUNT(DISTINCT r.question_id) AS reviewed_questions,
+                        SUM(CASE WHEN r.ai_status = "error" THEN 1 ELSE 0 END) AS error_count,
+                        SUM(CASE WHEN r.ai_status = "warning" THEN 1 ELSE 0 END) AS warning_count,
+                        SUM(CASE WHEN r.ai_status = "ok" THEN 1 ELSE 0 END) AS ok_count,
+                        SUM(CASE WHEN r.review_state = "reviewed" THEN 1 ELSE 0 END) AS reviewed_closed_count
+                      FROM question_ai_reviews r
+                      INNER JOIN questions q ON q.id = r.question_id
+                      LEFT JOIN courses c ON c.id = q.course_id
+                      WHERE ' . implode(' AND ', $statsWhere);
+    $reviewStatsStmt = $pdo->prepare($reviewStatsSql);
+    $reviewStatsStmt->execute($statsParams);
+    $reviewStats = $reviewStatsStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $stats = [
+        'total_questions' => $totalQuestions,
+        'reviewed_questions' => (int)($reviewStats['reviewed_questions'] ?? 0),
+        'error_count' => (int)($reviewStats['error_count'] ?? 0),
+        'warning_count' => (int)($reviewStats['warning_count'] ?? 0),
+        'ok_count' => (int)($reviewStats['ok_count'] ?? 0),
+        'reviewed_closed_count' => (int)($reviewStats['reviewed_closed_count'] ?? 0),
+    ];
 
     $qualifications = $pdo->query('SELECT id, name FROM qualifications ORDER BY order_index ASC, name ASC')->fetchAll(PDO::FETCH_ASSOC);
     $courses = $pdo->query('SELECT id, qualification_id, name FROM courses ORDER BY order_index ASC, name ASC')->fetchAll(PDO::FETCH_ASSOC);
@@ -70,6 +145,15 @@ try {
         'reviews' => $reviews,
         'qualifications' => $qualifications,
         'courses' => $courses,
+        'stats' => $stats,
+        'pagination' => [
+            'page' => $page,
+            'per_page' => $perPage,
+            'total' => $total,
+            'total_pages' => $totalPages,
+            'has_prev' => $page > 1,
+            'has_next' => $page < $totalPages,
+        ],
     ]);
 } catch (Throwable $e) {
     ai_review_json(false, 'İşlem sırasında bir sunucu hatası oluştu.', [], 500);

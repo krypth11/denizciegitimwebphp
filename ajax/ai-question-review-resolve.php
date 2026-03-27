@@ -9,8 +9,74 @@ require_once '../includes/ai_question_review_helper.php';
 $user = require_admin();
 
 try {
-    $reviewId = trim((string)($_POST['review_id'] ?? ''));
     $action = trim((string)($_POST['action_type'] ?? ''));
+    $now = date('Y-m-d H:i:s');
+
+    if ($action === 'bulk_dismiss_ok') {
+        $qualificationId = trim((string)($_POST['qualification_id'] ?? ''));
+        $courseId = trim((string)($_POST['course_id'] ?? ''));
+        $aiStatusFilter = trim((string)($_POST['ai_status'] ?? ''));
+        $reviewStateFilter = trim((string)($_POST['review_state'] ?? ''));
+
+        $where = ['r.ai_status = "ok"', 'r.review_state = "pending"'];
+        $params = [];
+
+        if ($qualificationId !== '') {
+            $where[] = 'c.qualification_id = ?';
+            $params[] = $qualificationId;
+        }
+        if ($courseId !== '') {
+            $where[] = 'q.course_id = ?';
+            $params[] = $courseId;
+        }
+        if ($aiStatusFilter !== '') {
+            $where[] = 'r.ai_status = ?';
+            $params[] = $aiStatusFilter;
+        }
+        if ($reviewStateFilter !== '') {
+            $where[] = 'r.review_state = ?';
+            $params[] = $reviewStateFilter;
+        }
+
+        $countSql = 'SELECT COUNT(*)
+                     FROM question_ai_reviews r
+                     INNER JOIN questions q ON q.id = r.question_id
+                     LEFT JOIN courses c ON c.id = q.course_id
+                     WHERE ' . implode(' AND ', $where);
+        $countStmt = $pdo->prepare($countSql);
+        $countStmt->execute($params);
+        $targetCount = (int)$countStmt->fetchColumn();
+
+        if ($targetCount < 1) {
+            ai_review_json(true, 'Kapatılacak pending+ok kayıt bulunamadı.', ['affected_count' => 0]);
+        }
+
+        $pdo->beginTransaction();
+        $sql = 'UPDATE question_ai_reviews r
+                INNER JOIN questions q ON q.id = r.question_id
+                LEFT JOIN courses c ON c.id = q.course_id
+                SET r.review_state = ?,
+                    r.admin_action = ?,
+                    r.reviewed_by_user_id = ?,
+                    r.reviewed_at = ?,
+                    r.updated_at = ?
+                WHERE ' . implode(' AND ', $where);
+        $stmt = $pdo->prepare($sql);
+        $execParams = array_merge([
+            'reviewed',
+            'dismissed',
+            $user['user_id'] ?? null,
+            $now,
+            $now,
+        ], $params);
+        $stmt->execute($execParams);
+        $affected = $stmt->rowCount();
+        $pdo->commit();
+
+        ai_review_json(true, $affected . ' kayıt sorun yok olarak kapatıldı.', ['affected_count' => $affected]);
+    }
+
+    $reviewId = trim((string)($_POST['review_id'] ?? ''));
 
     if ($reviewId === '' || !in_array($action, ['fixed', 'dismissed'], true)) {
         ai_review_json(false, 'Geçersiz istek.', [], 422);
@@ -23,7 +89,6 @@ try {
         ai_review_json(false, 'İnceleme kaydı bulunamadı.', [], 404);
     }
 
-    $now = date('Y-m-d H:i:s');
     $pdo->beginTransaction();
 
     if ($action === 'fixed') {
