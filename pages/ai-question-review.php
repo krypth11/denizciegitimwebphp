@@ -49,12 +49,34 @@ include '../includes/sidebar.php';
     </div>
 
     <div class="row g-3 mb-3" id="reviewStatsRow">
-        <div class="col-md-2 col-6"><div class="card"><div class="card-body py-2"><small class="text-muted d-block">Toplam Soru</small><strong id="statTotalQuestions">0</strong></div></div></div>
-        <div class="col-md-2 col-6"><div class="card"><div class="card-body py-2"><small class="text-muted d-block">İncelenen Soru</small><strong id="statReviewedQuestions">0</strong></div></div></div>
-        <div class="col-md-2 col-6"><div class="card border-danger"><div class="card-body py-2"><small class="text-muted d-block">Hatalı</small><strong id="statErrorCount" class="text-danger">0</strong></div></div></div>
-        <div class="col-md-2 col-6"><div class="card border-warning"><div class="card-body py-2"><small class="text-muted d-block">Warning</small><strong id="statWarningCount" class="text-warning">0</strong></div></div></div>
-        <div class="col-md-2 col-6"><div class="card border-success"><div class="card-body py-2"><small class="text-muted d-block">OK</small><strong id="statOkCount" class="text-success">0</strong></div></div></div>
-        <div class="col-md-2 col-6"><div class="card border-primary"><div class="card-body py-2"><small class="text-muted d-block">Kapatılan / İncelendi</small><strong id="statReviewedClosedCount" class="text-primary">0</strong></div></div></div>
+        <div class="col-md-3 col-6"><div class="card"><div class="card-body py-2"><small class="text-muted d-block">Toplam Soru</small><strong id="statTotalQuestions">0</strong></div></div></div>
+        <div class="col-md-3 col-6"><div class="card"><div class="card-body py-2"><small class="text-muted d-block">İncelenen Soru</small><strong id="statReviewedQuestions">0</strong></div></div></div>
+        <div class="col-md-3 col-6"><div class="card"><div class="card-body py-2"><small class="text-muted d-block">İncelenmeyen</small><strong id="statUnreviewedQuestions">0</strong></div></div></div>
+        <div class="col-md-3 col-6"><div class="card border-primary"><div class="card-body py-2"><small class="text-muted d-block">Kapatılan / İncelendi</small><strong id="statReviewedClosedCount" class="text-primary">0</strong></div></div></div>
+        <div class="col-md-4 col-6"><div class="card border-danger"><div class="card-body py-2"><small class="text-muted d-block">Hatalı (Bekleyen)</small><strong id="statErrorCount" class="text-danger">0</strong></div></div></div>
+        <div class="col-md-4 col-6"><div class="card border-warning"><div class="card-body py-2"><small class="text-muted d-block">Warning (Bekleyen)</small><strong id="statWarningCount" class="text-warning">0</strong></div></div></div>
+        <div class="col-md-4 col-12"><div class="card border-success"><div class="card-body py-2"><small class="text-muted d-block">OK (Bekleyen)</small><strong id="statOkCount" class="text-success">0</strong></div></div></div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-header bg-white"><h6 class="mb-0">Yeterlilik Bazlı Durum</h6></div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Yeterlilik</th>
+                            <th>İncelenen</th>
+                            <th>İncelenmeyen</th>
+                            <th>Toplam</th>
+                        </tr>
+                    </thead>
+                    <tbody id="qualificationStatsBody">
+                        <tr><td colspan="4" class="text-muted">Kayıt bulunamadı.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 
     <div class="card mb-3">
@@ -177,10 +199,31 @@ $(document).ready(function () {
     function updateStats(stats) {
         $('#statTotalQuestions').text(stats?.total_questions ?? 0);
         $('#statReviewedQuestions').text(stats?.reviewed_questions ?? 0);
+        $('#statUnreviewedQuestions').text(stats?.unreviewed_questions ?? 0);
         $('#statErrorCount').text(stats?.error_count ?? 0);
         $('#statWarningCount').text(stats?.warning_count ?? 0);
         $('#statOkCount').text(stats?.ok_count ?? 0);
         $('#statReviewedClosedCount').text(stats?.reviewed_closed_count ?? 0);
+    }
+
+    function updateQualificationStats(list) {
+        const $body = $('#qualificationStatsBody');
+        $body.empty();
+        if (!Array.isArray(list) || !list.length) {
+            $body.html('<tr><td colspan="4" class="text-muted">Kayıt bulunamadı.</td></tr>');
+            return;
+        }
+
+        list.forEach(item => {
+            $body.append(`
+                <tr>
+                    <td>${item.qualification_name || '-'}</td>
+                    <td><span class="badge bg-primary">${item.reviewed_questions ?? 0}</span></td>
+                    <td><span class="badge bg-secondary">${item.unreviewed_questions ?? 0}</span></td>
+                    <td><strong>${item.total_questions ?? 0}</strong></td>
+                </tr>
+            `);
+        });
     }
 
     function updatePaginationUI(pagination) {
@@ -225,6 +268,7 @@ $(document).ready(function () {
         $('#filterPerPage').val(String(listState.per_page));
 
         updateStats(res.data?.stats || {});
+        updateQualificationStats(res.data?.qualification_stats || []);
         updatePaginationUI(pagination);
 
         const rows = res.data?.reviews || [];

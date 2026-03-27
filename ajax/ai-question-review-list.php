@@ -117,9 +117,9 @@ try {
 
     $reviewStatsSql = 'SELECT
                         COUNT(DISTINCT r.question_id) AS reviewed_questions,
-                        SUM(CASE WHEN r.ai_status = "error" THEN 1 ELSE 0 END) AS error_count,
-                        SUM(CASE WHEN r.ai_status = "warning" THEN 1 ELSE 0 END) AS warning_count,
-                        SUM(CASE WHEN r.ai_status = "ok" THEN 1 ELSE 0 END) AS ok_count,
+                        SUM(CASE WHEN r.ai_status = "error" AND r.review_state = "pending" THEN 1 ELSE 0 END) AS error_count,
+                        SUM(CASE WHEN r.ai_status = "warning" AND r.review_state = "pending" THEN 1 ELSE 0 END) AS warning_count,
+                        SUM(CASE WHEN r.ai_status = "ok" AND r.review_state = "pending" THEN 1 ELSE 0 END) AS ok_count,
                         SUM(CASE WHEN r.review_state = "reviewed" THEN 1 ELSE 0 END) AS reviewed_closed_count
                       FROM question_ai_reviews r
                       INNER JOIN questions q ON q.id = r.question_id
@@ -129,14 +129,58 @@ try {
     $reviewStatsStmt->execute($statsParams);
     $reviewStats = $reviewStatsStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
+    $reviewedQuestions = (int)($reviewStats['reviewed_questions'] ?? 0);
+    $unreviewedQuestions = max(0, $totalQuestions - $reviewedQuestions);
+
     $stats = [
         'total_questions' => $totalQuestions,
-        'reviewed_questions' => (int)($reviewStats['reviewed_questions'] ?? 0),
+        'reviewed_questions' => $reviewedQuestions,
+        'unreviewed_questions' => $unreviewedQuestions,
         'error_count' => (int)($reviewStats['error_count'] ?? 0),
         'warning_count' => (int)($reviewStats['warning_count'] ?? 0),
         'ok_count' => (int)($reviewStats['ok_count'] ?? 0),
         'reviewed_closed_count' => (int)($reviewStats['reviewed_closed_count'] ?? 0),
     ];
+
+    $qualWhere = ['1=1'];
+    $qualParams = [];
+    if ($qualificationId !== '') {
+        $qualWhere[] = 'qual.id = ?';
+        $qualParams[] = $qualificationId;
+    }
+    if ($courseId !== '') {
+        $qualWhere[] = 'c.id = ?';
+        $qualParams[] = $courseId;
+    }
+
+    $qualificationStatsSql = 'SELECT
+                                qual.id AS qualification_id,
+                                qual.name AS qualification_name,
+                                COUNT(q.id) AS total_questions,
+                                COUNT(DISTINCT r.question_id) AS reviewed_questions
+                              FROM qualifications qual
+                              LEFT JOIN courses c ON c.qualification_id = qual.id
+                              LEFT JOIN questions q ON q.course_id = c.id
+                              LEFT JOIN question_ai_reviews r ON r.question_id = q.id
+                              WHERE ' . implode(' AND ', $qualWhere) . '
+                              GROUP BY qual.id, qual.name
+                              HAVING COUNT(q.id) > 0 OR COUNT(DISTINCT r.question_id) > 0
+                              ORDER BY qual.name ASC';
+    $qualificationStatsStmt = $pdo->prepare($qualificationStatsSql);
+    $qualificationStatsStmt->execute($qualParams);
+    $qualificationStatsRows = $qualificationStatsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $qualificationStats = array_map(static function ($row) {
+        $totalQ = (int)($row['total_questions'] ?? 0);
+        $reviewedQ = (int)($row['reviewed_questions'] ?? 0);
+        return [
+            'qualification_id' => $row['qualification_id'],
+            'qualification_name' => $row['qualification_name'],
+            'total_questions' => $totalQ,
+            'reviewed_questions' => $reviewedQ,
+            'unreviewed_questions' => max(0, $totalQ - $reviewedQ),
+        ];
+    }, $qualificationStatsRows);
 
     $qualifications = $pdo->query('SELECT id, name FROM qualifications ORDER BY order_index ASC, name ASC')->fetchAll(PDO::FETCH_ASSOC);
     $courses = $pdo->query('SELECT id, qualification_id, name FROM courses ORDER BY order_index ASC, name ASC')->fetchAll(PDO::FETCH_ASSOC);
@@ -146,6 +190,7 @@ try {
         'qualifications' => $qualifications,
         'courses' => $courses,
         'stats' => $stats,
+        'qualification_stats' => $qualificationStats,
         'pagination' => [
             'page' => $page,
             'per_page' => $perPage,
