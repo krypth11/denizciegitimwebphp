@@ -45,3 +45,26 @@ function error_response($message, $status = 400)
         'message' => $message,
     ], $status);
 }
+
+function normalize_optional_uuid($value)
+{
+    $value = trim((string)$value);
+    return $value === '' ? null : $value;
+}
+
+function validate_topic_belongs_to_course(PDO $pdo, $topicId, $courseId)
+{
+    $normalizedTopicId = normalize_optional_uuid($topicId);
+    if ($normalizedTopicId === null) {
+        return true;
+    }
+
+    $normalizedCourseId = trim((string)$courseId);
+    if ($normalizedCourseId === '') {
+        return false;
+    }
+
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM topics WHERE id = ? AND course_id = ?');
+    $stmt->execute([$normalizedTopicId, $normalizedCourseId]);
+    return (int)$stmt->fetchColumn() > 0;
+}

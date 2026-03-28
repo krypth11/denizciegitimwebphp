@@ -90,6 +90,7 @@ try {
 
     $questionCols = get_table_columns($pdo, 'questions');
     $dbHasOptionEColumn = is_array($questionCols) && in_array('option_e', $questionCols, true);
+    $dbHasTopicIdColumn = is_array($questionCols) && in_array('topic_id', $questionCols, true);
 
     $questions_json = $_POST['questions'] ?? '';
 
@@ -111,7 +112,23 @@ try {
         exit;
     }
 
-    if ($dbHasOptionEColumn) {
+    if ($dbHasTopicIdColumn && $dbHasOptionEColumn) {
+        $stmt = $pdo->prepare(
+            'INSERT INTO questions (
+                id, course_id, topic_id, question_type, question_text,
+                option_a, option_b, option_c, option_d, option_e,
+                correct_answer, explanation, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+        );
+    } elseif ($dbHasTopicIdColumn) {
+        $stmt = $pdo->prepare(
+            'INSERT INTO questions (
+                id, course_id, topic_id, question_type, question_text,
+                option_a, option_b, option_c, option_d,
+                correct_answer, explanation, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+        );
+    } elseif ($dbHasOptionEColumn) {
         $stmt = $pdo->prepare(
             'INSERT INTO questions (
                 id, course_id, question_type, question_text,
@@ -324,10 +341,57 @@ try {
             continue;
         }
 
+        $topicId = normalize_optional_uuid($q['topic_id'] ?? null);
+        if ($dbHasTopicIdColumn && !validate_topic_belongs_to_course($pdo, $topicId, $q['course_id'])) {
+            $add_skip('topic_not_belongs_to_course', $q);
+            if ($isEAnswer) {
+                $debug_e_skipped_count++;
+            }
+            $push_row_result([
+                'index' => $index,
+                'question_text' => $questionShort,
+                'correct_answer' => $correctAnswer,
+                'has_option_e' => $rowHasOptionE,
+                'status' => 'skipped',
+                'reason' => 'topic_not_belongs_to_course',
+                'db_error' => null,
+            ]);
+            continue;
+        }
+
         $id = generate_uuid();
 
         try {
-            if ($dbHasOptionEColumn) {
+            if ($dbHasTopicIdColumn && $dbHasOptionEColumn) {
+                $ok = $stmt->execute([
+                    $id,
+                    $q['course_id'],
+                    $topicId,
+                    $normalized_type,
+                    $q['question_text'],
+                    $q['option_a'],
+                    $q['option_b'],
+                    $q['option_c'],
+                    $q['option_d'],
+                    $optionE,
+                    $correctAnswer,
+                    $q['explanation'] ?? '',
+                ]);
+            } elseif ($dbHasTopicIdColumn) {
+                $ok = $stmt->execute([
+                    $id,
+                    $q['course_id'],
+                    $topicId,
+                    $normalized_type,
+                    $q['question_text'],
+                    $q['option_a'],
+                    $q['option_b'],
+                    $q['option_c'],
+                    $q['option_d'],
+                    $correctAnswer,
+                    $q['explanation'] ?? '',
+                ]);
+            } elseif ($dbHasOptionEColumn) {
                 $ok = $stmt->execute([
                     $id,
                     $q['course_id'],

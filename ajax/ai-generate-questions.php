@@ -34,6 +34,7 @@ function is_similar_question_text($a, $b) {
 
 try {
     $course_id = $_POST['course_id'] ?? '';
+    $topic_id = normalize_optional_uuid($_POST['topic_id'] ?? null);
     $question_type = $_POST['question_type'] ?? '';
     $count = (int)($_POST['question_count'] ?? ($_POST['count'] ?? 5));
     $topic = sanitize_input($_POST['topic'] ?? '');
@@ -43,6 +44,14 @@ try {
         echo json_encode([
             'success' => false,
             'message' => 'Ders ve tip seçimi zorunludur!',
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if (!validate_topic_belongs_to_course($pdo, $topic_id, $course_id)) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'Seçilen konu bu derse ait değil!',
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -89,6 +98,13 @@ try {
             'message' => 'Ders bulunamadı!',
         ], JSON_UNESCAPED_UNICODE);
         exit;
+    }
+
+    $selectedTopicName = null;
+    if ($topic_id !== null) {
+        $topicStmt = $pdo->prepare('SELECT name FROM topics WHERE id = ? AND course_id = ? LIMIT 1');
+        $topicStmt->execute([$topic_id, $course_id]);
+        $selectedTopicName = $topicStmt->fetchColumn() ?: null;
     }
 
     $settings_stmt = $pdo->query('SELECT * FROM admin_settings LIMIT 1');
@@ -142,6 +158,10 @@ Soru Sayısı: {$count}";
 
     if (!empty($topic)) {
         $prompt .= "\nKonu: {$topic}";
+    }
+
+    if (!empty($selectedTopicName)) {
+        $prompt .= "\nSeçili Konu: {$selectedTopicName}";
     }
 
     $prompt .= "\n\nÖNEMLİ KURALLAR:
@@ -344,6 +364,7 @@ Soru Sayısı: {$count}";
         $deduplicated_questions[] = array_merge($q, [
             'option_e' => $option_e,
             'course_id' => $course_id,
+            'topic_id' => $topic_id,
             'question_type' => $question_type,
             'status' => 'pending',
         ]);

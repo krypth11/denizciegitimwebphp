@@ -165,6 +165,7 @@ try {
 
         case 'add':
             $course_id = $_POST['course_id'] ?? '';
+            $topic_id = normalize_optional_uuid($_POST['topic_id'] ?? null);
             $question_type = $_POST['question_type'] ?? '';
             $question_text = sanitize_input($_POST['question_text'] ?? '');
             $option_a = sanitize_input($_POST['option_a'] ?? '');
@@ -179,6 +180,10 @@ try {
                 empty($option_a) || empty($option_b) || empty($option_c) ||
                 empty($option_d) || empty($correct_answer)) {
                 questions_json(false, 'Tüm zorunlu alanları doldurun!', [], 422);
+            }
+
+            if ($hasTopicId && !validate_topic_belongs_to_course($pdo, $topic_id, $course_id)) {
+                questions_json(false, 'Seçilen konu bu derse ait değil!', [], 422);
             }
 
             if (!in_array($question_type, ['sayısal', 'sözel', 'karışık'], true)) {
@@ -199,7 +204,33 @@ try {
 
             $id = generate_uuid();
 
-            if ($hasOptionE) {
+            if ($hasTopicId && $hasOptionE) {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO questions (
+                        id, course_id, topic_id, question_type, question_text,
+                        option_a, option_b, option_c, option_d, option_e,
+                        correct_answer, explanation, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                );
+                $ok = $stmt->execute([
+                    $id, $course_id, $topic_id, $question_type, $question_text,
+                    $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
+                    $correct_answer, $explanation,
+                ]);
+            } elseif ($hasTopicId) {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO questions (
+                        id, course_id, topic_id, question_type, question_text,
+                        option_a, option_b, option_c, option_d,
+                        correct_answer, explanation, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                );
+                $ok = $stmt->execute([
+                    $id, $course_id, $topic_id, $question_type, $question_text,
+                    $option_a, $option_b, $option_c, $option_d,
+                    $correct_answer, $explanation,
+                ]);
+            } elseif ($hasOptionE) {
                 $stmt = $pdo->prepare(
                     'INSERT INTO questions (
                         id, course_id, question_type, question_text,
@@ -265,6 +296,7 @@ try {
         case 'update':
             $id = $_POST['id'] ?? '';
             $course_id = $_POST['course_id'] ?? '';
+            $topic_id = normalize_optional_uuid($_POST['topic_id'] ?? null);
             $question_type = $_POST['question_type'] ?? '';
             $question_text = sanitize_input($_POST['question_text'] ?? '');
             $option_a = sanitize_input($_POST['option_a'] ?? '');
@@ -289,6 +321,14 @@ try {
                 echo json_encode([
                     'success' => false,
                     'message' => 'Tüm zorunlu alanları doldurun!',
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            if ($hasTopicId && !validate_topic_belongs_to_course($pdo, $topic_id, $course_id)) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Seçilen konu bu derse ait değil!',
                 ], JSON_UNESCAPED_UNICODE);
                 exit;
             }
@@ -326,7 +366,48 @@ try {
                 exit;
             }
 
-            if ($hasOptionE) {
+            if ($hasTopicId && $hasOptionE) {
+                $stmt = $pdo->prepare(
+                    'UPDATE questions SET
+                        course_id = ?,
+                        topic_id = ?,
+                        question_type = ?,
+                        question_text = ?,
+                        option_a = ?,
+                        option_b = ?,
+                        option_c = ?,
+                        option_d = ?,
+                        option_e = ?,
+                        correct_answer = ?,
+                        explanation = ?
+                    WHERE id = ?'
+                );
+                $ok = $stmt->execute([
+                    $course_id, $topic_id, $question_type, $question_text,
+                    $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
+                    $correct_answer, $explanation, $id,
+                ]);
+            } elseif ($hasTopicId) {
+                $stmt = $pdo->prepare(
+                    'UPDATE questions SET
+                        course_id = ?,
+                        topic_id = ?,
+                        question_type = ?,
+                        question_text = ?,
+                        option_a = ?,
+                        option_b = ?,
+                        option_c = ?,
+                        option_d = ?,
+                        correct_answer = ?,
+                        explanation = ?
+                    WHERE id = ?'
+                );
+                $ok = $stmt->execute([
+                    $course_id, $topic_id, $question_type, $question_text,
+                    $option_a, $option_b, $option_c, $option_d,
+                    $correct_answer, $explanation, $id,
+                ]);
+            } elseif ($hasOptionE) {
                 $stmt = $pdo->prepare(
                     'UPDATE questions SET
                         course_id = ?,

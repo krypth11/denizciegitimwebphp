@@ -126,9 +126,10 @@ include '../includes/sidebar.php';
     <div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Yeni Soru Ekle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
         <form id="addForm"><div class="modal-body">
             <div class="row">
-                <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="add_course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" required><option value="">Seçiniz...</option><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
             </div>
+            <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="add_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Konu seçmeden devam edebilirsiniz.</small></div>
             <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" rows="3" required></textarea></div>
             <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e"></div></div>
             <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" required><option value="">Seçiniz...</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
@@ -144,6 +145,7 @@ include '../includes/sidebar.php';
                 <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="edit_course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" id="edit_question_type" required><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
             </div>
+            <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="edit_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Konu alanı zorunlu değildir.</small></div>
             <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" id="edit_question_text" rows="3" required></textarea></div>
             <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" id="edit_option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" id="edit_option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" id="edit_option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" id="edit_option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e" id="edit_option_e"></div></div>
             <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" id="edit_correct_answer" required><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
@@ -158,6 +160,7 @@ include '../includes/sidebar.php';
         <form id="aiForm"><div class="modal-body">
             <div class="mb-3"><label class="form-label">Yeterlilik *</label><select class="form-select" id="ai_qualification_id" required><option value="">Önce yeterlilik seçin...</option><?php foreach ($qualifications as $q): ?><option value="<?= htmlspecialchars($q['id']) ?>"><?= htmlspecialchars($q['name']) ?></option><?php endforeach; ?></select></div>
             <div class="mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="ai_course_id" required disabled><option value="">Önce yeterlilik seçin...</option></select></div>
+            <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="ai_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Bu alanda konu seçmek zorunlu değildir.</small></div>
             <div class="mb-3"><label class="form-label">Soru Türü *</label><select class="form-select" name="question_type" required><option value="mixed">Karışık</option><option value="verbal">Sözel</option><option value="numerical">Sayısal</option></select></div>
             <div class="mb-2"><label class="form-label d-block">Soru Sayısı *</label>
                 <div class="btn-group mb-2" role="group">
@@ -170,7 +173,7 @@ include '../includes/sidebar.php';
                 <input type="hidden" name="question_count" id="ai_question_count" value="5">
                 <small class="text-muted">Min 1 - Max 100</small>
             </div>
-            <div class="mb-3"><label class="form-label">Konu / Açıklama (Opsiyonel)</label><textarea class="form-control" name="topic" rows="2" placeholder="Örn: Denizcilik mevzuatı, Radar kullanımı"></textarea></div>
+            <div class="mb-3"><label class="form-label">Konu / Açıklama Notu (Opsiyonel)</label><textarea class="form-control" name="topic" rows="2" placeholder="Örn: Denizcilik mevzuatı, Radar kullanımı"></textarea></div>
             <div class="mb-3"><label class="form-label">E şıkkı dahil edilsin mi?</label><select class="form-select" name="include_option_e"><option value="0" selected>Hayır</option><option value="1">Evet</option></select></div>
             <div id="aiProgress" class="d-none"><div class="alert alert-info"><div class="d-flex align-items-center"><div class="spinner-border spinner-border-sm me-2"></div><strong>AI Çalışıyor...</strong> Sorular üretiliyor, lütfen bekleyin...</div></div></div>
         </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-success" id="aiGenerateBtn"><i class="bi bi-stars"></i> Üret</button></div></form>
@@ -188,7 +191,7 @@ include '../includes/sidebar.php';
             <form id="bulkUploadForm">
                 <div class="modal-body">
                     <div class="row g-3">
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label">Yeterlilik *</label>
                             <select class="form-select" id="bulk_qualification_id" required>
                                 <option value="">Seçiniz...</option>
@@ -197,13 +200,19 @@ include '../includes/sidebar.php';
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
                             <label class="form-label">Ders *</label>
                             <select class="form-select" id="bulk_course_id" required disabled>
                                 <option value="">Önce yeterlilik seçin...</option>
                             </select>
                         </div>
-                        <div class="col-md-4">
+                        <div class="col-md-3">
+                            <label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label>
+                            <select class="form-select" id="bulk_topic_id" disabled>
+                                <option value="">Önce ders seçin...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
                             <label class="form-label">Soru Türü *</label>
                             <select class="form-select" id="bulk_question_type" required>
                                 <option value="">Seçiniz...</option>
@@ -279,7 +288,7 @@ function normalizeCount(v) {
     return n;
 }
 
-function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
+function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTopicId = '') {
     const stripInvisibleChars = (txt) => (txt || '')
         .replace(/\uFFFC/g, '')
         .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
@@ -422,6 +431,7 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId) {
             explanation,
             question_type: selectedType,
             course_id: selectedCourseId,
+            topic_id: selectedTopicId || null,
             status: 'pending'
         });
     }
@@ -693,6 +703,7 @@ $(document).ready(function() {
             const payload = {
                 qualification_id: $('#filterQualification').val() || '',
                 course_id: $('#filterCourse').val() || '',
+                topic_id: $('#filterTopic').val() || '',
                 question_type: $('#filterType').val() || ''
             };
             console.log('questions filters save', payload);
@@ -727,6 +738,7 @@ $(document).ready(function() {
             const payload = {
                 qualification_id: $('#bulk_qualification_id').val() || '',
                 course_id: $('#bulk_course_id').val() || '',
+                topic_id: $('#bulk_topic_id').val() || '',
                 question_type: $('#bulk_question_type').val() || ''
             };
             console.log('bulk prefs save', payload);
@@ -744,12 +756,46 @@ $(document).ready(function() {
         }
     }
 
+    async function loadTopicsByCourse(courseId, $select, options = {}) {
+        const emptyLabel = options.emptyLabel || 'Konu seçmeden devam et';
+        const waitingLabel = options.waitingLabel || 'Önce ders seçin...';
+        const noTopicLabel = options.noTopicLabel || 'Bu derste kayıtlı konu yok';
+
+        if (!courseId) {
+            $select.html(`<option value="">${waitingLabel}</option>`).prop('disabled', true);
+            return [];
+        }
+
+        const res = await window.appAjax({
+            url: `../ajax/questions.php?action=list_topics&course_id=${encodeURIComponent(courseId)}`
+        });
+
+        if (!res.success) {
+            $select.html(`<option value="">${waitingLabel}</option>`).prop('disabled', true);
+            return [];
+        }
+
+        const topics = res.data?.topics || [];
+        if (!topics.length) {
+            $select.html(`<option value="">${noTopicLabel}</option>`).prop('disabled', true);
+            return [];
+        }
+
+        $select.html(`<option value="">${emptyLabel}</option>`);
+        topics.forEach((t) => {
+            $select.append(`<option value="${esc(t.id)}">${esc(t.name)}</option>`);
+        });
+        $select.prop('disabled', false);
+        return topics;
+    }
+
     function loadBulkCourses(qualificationId) {
         const $course = $('#bulk_course_id');
         $course.html('<option value="">Ders seçin...</option>');
 
         if (!qualificationId) {
             $course.prop('disabled', true);
+            $('#bulk_topic_id').html('<option value="">Önce ders seçin...</option>').prop('disabled', true);
             return;
         }
 
@@ -758,6 +804,7 @@ $(document).ready(function() {
             .forEach(c => $course.append(`<option value="${c.id}">${c.name}</option>`));
 
         $course.prop('disabled', $course.find('option').length <= 1);
+        $('#bulk_topic_id').html('<option value="">Önce ders seçin...</option>').prop('disabled', true);
     }
 
     function applySavedBulkUploadPrefs() {
@@ -766,6 +813,7 @@ $(document).ready(function() {
 
         const savedQualificationId = String(savedPrefs.qualification_id || '');
         const savedCourseId = String(savedPrefs.course_id || '');
+        const savedTopicId = String(savedPrefs.topic_id || '');
         const savedQuestionType = String(savedPrefs.question_type || '');
 
         if (savedQualificationId && $('#bulk_qualification_id option[value="' + savedQualificationId + '"]').length) {
@@ -781,6 +829,18 @@ $(document).ready(function() {
         } else {
             $('#bulk_course_id').val('');
         }
+
+        const selectedCourseId = $('#bulk_course_id').val() || '';
+        loadTopicsByCourse(selectedCourseId, $('#bulk_topic_id'), {
+            emptyLabel: 'Konu seçmeden devam et',
+            noTopicLabel: 'Bu derste kayıtlı konu yok'
+        }).then(() => {
+            if (savedTopicId && $('#bulk_topic_id option[value="' + savedTopicId + '"]').length) {
+                $('#bulk_topic_id').val(savedTopicId);
+            } else {
+                $('#bulk_topic_id').val('');
+            }
+        });
 
         if (savedQuestionType && $('#bulk_question_type option[value="' + savedQuestionType + '"]').length) {
             $('#bulk_question_type').val(savedQuestionType);
@@ -811,6 +871,7 @@ $(document).ready(function() {
         }
 
         const savedQuestionType = String(saved?.question_type || '');
+        const savedTopicId = String(saved?.topic_id || '');
         if (savedQuestionType && $('#filterType option[value="' + savedQuestionType + '"]').length) {
             qState.filters.question_type = savedQuestionType;
             $('#filterType').val(savedQuestionType);
@@ -818,6 +879,8 @@ $(document).ready(function() {
             qState.filters.question_type = '';
             $('#filterType').val('');
         }
+
+        qState.filters.topic_id = savedTopicId;
     }
 
     const shortText = (txt, max = 90) => {
@@ -964,7 +1027,16 @@ $(document).ready(function() {
         qState.topics = res.data?.topics || [];
         $t.html('<option value="">Tüm konular</option>');
         qState.topics.forEach((row) => $t.append(`<option value="${esc(row.id)}">${esc(row.name)}</option>`));
+        if (!qState.topics.length) {
+            $t.html('<option value="">Bu derste kayıtlı konu yok</option>').prop('disabled', true);
+            qState.filters.topic_id = '';
+            return;
+        }
         $t.prop('disabled', !qState.meta.has_topic_filter || qState.topics.length === 0).val(qState.filters.topic_id || '');
+        if (($t.val() || '') !== (qState.filters.topic_id || '')) {
+            qState.filters.topic_id = '';
+            $t.val('');
+        }
     }
 
     async function loadQuestions() {
@@ -1015,6 +1087,7 @@ $(document).ready(function() {
 
     $('#filterTopic').on('change', function () {
         qState.filters.topic_id = $(this).val() || '';
+        saveQuestionFilters();
         loadQuestions();
     });
 
@@ -1052,19 +1125,54 @@ $(document).ready(function() {
         const qualId = $(this).val();
         const $course = $('#ai_course_id');
         $course.html('<option value="">Ders seçin...</option>');
+        $('#ai_topic_id').html('<option value="">Önce ders seçin...</option>').prop('disabled', true);
         if (!qualId) return $course.prop('disabled', true);
         coursesData.filter(c => c.qualification_id === qualId).forEach(c => $course.append(`<option value="${c.id}">${c.name}</option>`));
         $course.prop('disabled', false);
     });
 
+    $('#ai_course_id').on('change', async function() {
+        const courseId = $(this).val() || '';
+        await loadTopicsByCourse(courseId, $('#ai_topic_id'), {
+            emptyLabel: 'Konu seçmeden devam et',
+            noTopicLabel: 'Bu derste kayıtlı konu yok'
+        });
+    });
+
+    $('#add_course_id').on('change', async function() {
+        const courseId = $(this).val() || '';
+        await loadTopicsByCourse(courseId, $('#add_topic_id'), {
+            emptyLabel: 'Konu seçmeden devam et',
+            noTopicLabel: 'Bu derste kayıtlı konu yok'
+        });
+    });
+
+    $('#edit_course_id').on('change', async function() {
+        const courseId = $(this).val() || '';
+        await loadTopicsByCourse(courseId, $('#edit_topic_id'), {
+            emptyLabel: 'Konu seçmeden devam et',
+            noTopicLabel: 'Bu derste kayıtlı konu yok'
+        });
+    });
+
     $('#bulk_qualification_id').on('change', function() {
         const qualId = $(this).val();
         $('#bulk_course_id').val('');
+        $('#bulk_topic_id').val('');
         loadBulkCourses(qualId);
         saveBulkUploadPrefs();
     });
 
-    $('#bulk_course_id').on('change', function() {
+    $('#bulk_course_id').on('change', async function() {
+        const courseId = $(this).val() || '';
+        await loadTopicsByCourse(courseId, $('#bulk_topic_id'), {
+            emptyLabel: 'Konu seçmeden devam et',
+            noTopicLabel: 'Bu derste kayıtlı konu yok'
+        });
+        saveBulkUploadPrefs();
+    });
+
+    $('#bulk_topic_id').on('change', function() {
         saveBulkUploadPrefs();
     });
 
@@ -1077,6 +1185,7 @@ $(document).ready(function() {
 
         const qualificationId = $('#bulk_qualification_id').val();
         const courseId = $('#bulk_course_id').val();
+        const topicId = $('#bulk_topic_id').val() || '';
         const questionType = $('#bulk_question_type').val();
         const rawText = $('#bulk_questions_text').val();
 
@@ -1085,7 +1194,7 @@ $(document).ready(function() {
         if (!questionType) return appAlert('Uyarı', 'Lütfen soru türü seçiniz.', 'warning');
         if (!rawText || !rawText.trim()) return appAlert('Uyarı', 'Lütfen soru metnini yapıştırınız.', 'warning');
 
-        const parsedResult = parseBulkQuestions(rawText, questionType, courseId);
+        const parsedResult = parseBulkQuestions(rawText, questionType, courseId, topicId);
         if (!parsedResult.parsed_count) {
             return appAlert('Hata', 'Hiç soru ayrıştırılamadı. Format hatalı olabilir.', 'error');
         }
@@ -1182,7 +1291,13 @@ $(document).ready(function() {
             $('#edit_id').val(q.id); $('#edit_course_id').val(q.course_id); $('#edit_question_type').val(q.question_type);
             $('#edit_question_text').val(q.question_text); $('#edit_option_a').val(q.option_a); $('#edit_option_b').val(q.option_b);
             $('#edit_option_c').val(q.option_c); $('#edit_option_d').val(q.option_d); $('#edit_option_e').val(q.option_e || ''); $('#edit_correct_answer').val((q.correct_answer || '').toUpperCase()); $('#edit_explanation').val(q.explanation||'');
-            bootstrap.Modal.getOrCreateInstance(document.getElementById('editModal')).show();
+            loadTopicsByCourse(q.course_id || '', $('#edit_topic_id'), {
+                emptyLabel: 'Konu seçmeden devam et',
+                noTopicLabel: 'Bu derste kayıtlı konu yok'
+            }).then(() => {
+                $('#edit_topic_id').val(q.topic_id || '');
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('editModal')).show();
+            });
         });
     });
     $('#editForm').on('submit', function(e){
