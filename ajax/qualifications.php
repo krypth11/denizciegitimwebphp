@@ -4,6 +4,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
+require_once '../includes/community_helper.php';
 
 try {
     $user = require_admin();
@@ -37,6 +38,12 @@ try {
             $result = $stmt->execute([$id, $name, $description, $order_index]);
 
             if ($result) {
+                try {
+                    community_sync_qualification_room($pdo, $id, $name, true);
+                } catch (Throwable $syncError) {
+                    error_log('Qualification room sync add failed: ' . $syncError->getMessage());
+                }
+
                 echo json_encode([
                     'success' => true,
                     'message' => 'Yeterlilik başarıyla eklendi!',
@@ -96,6 +103,12 @@ try {
             $result = $stmt->execute([$name, $description, $order_index, $id]);
 
             if ($result) {
+                try {
+                    community_sync_qualification_room($pdo, $id, $name, true);
+                } catch (Throwable $syncError) {
+                    error_log('Qualification room sync update failed: ' . $syncError->getMessage());
+                }
+
                 echo json_encode([
                     'success' => true,
                     'message' => 'Yeterlilik başarıyla güncellendi!',
@@ -123,6 +136,10 @@ try {
             $checkStmt->execute([$id]);
             $count = (int)($checkStmt->fetch()['count'] ?? 0);
 
+            $existingNameStmt = $pdo->prepare('SELECT name FROM qualifications WHERE id = ? LIMIT 1');
+            $existingNameStmt->execute([$id]);
+            $existingQualificationName = (string)($existingNameStmt->fetchColumn() ?: 'Yeterlilik Odası');
+
             if ($count > 0) {
                 echo json_encode([
                     'success' => false,
@@ -135,6 +152,12 @@ try {
             $result = $stmt->execute([$id]);
 
             if ($result) {
+                try {
+                    community_sync_qualification_room($pdo, $id, $existingQualificationName, false);
+                } catch (Throwable $syncError) {
+                    error_log('Qualification room sync delete failed: ' . $syncError->getMessage());
+                }
+
                 echo json_encode([
                     'success' => true,
                     'message' => 'Yeterlilik başarıyla silindi!',
