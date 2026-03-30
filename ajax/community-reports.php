@@ -25,28 +25,39 @@ try {
     $msg = community_message_schema($pdo);
     $room = community_room_schema($pdo);
     $profile = community_profile_schema($pdo);
+    $reportedByCol = $report['reported_by_user_id'] ?? $report['reporter_user_id'] ?? null;
 
     if ($action === 'list') {
+        if (!$reportedByCol) {
+            error_log('community-reports list schema error: reported_by_user_id kolonu bulunamadı.');
+            crp_json(false, 'Rapor listesi için şema uygun değil.', [], 500);
+        }
+
         $reporterNameExpr = $profile['full_name'] ? "ru.`{$profile['full_name']}`" : "''";
         $ownerNameExpr = $profile['full_name'] ? "mu.`{$profile['full_name']}`" : "''";
 
-        $sql = "SELECT rp.`{$report['id']}` AS id, rp.`{$report['reason']}` AS reason, rp.`{$report['created_at']}` AS created_at, "
-            . "m.`{$msg['id']}` AS message_id, m.`{$msg['message_text']}` AS message_text, m.`{$msg['user_id']}` AS message_owner_id, "
-            . "r.`{$room['name']}` AS room_name, "
-            . "ru.`{$profile['email']}` AS reporter_email, {$reporterNameExpr} AS reporter_name, "
-            . "mu.`{$profile['email']}` AS owner_email, {$ownerNameExpr} AS owner_name "
-            . "FROM `{$report['table']}` rp "
-            . "LEFT JOIN `{$msg['table']}` m ON m.`{$msg['id']}` = rp.`{$report['message_id']}` "
-            . "LEFT JOIN `{$room['table']}` r ON r.`{$room['id']}` = m.`{$msg['room_id']}` "
-            . "LEFT JOIN `{$profile['table']}` ru ON ru.`{$profile['id']}` = rp.`{$report['reporter_user_id']}` "
-            . "LEFT JOIN `{$profile['table']}` mu ON mu.`{$profile['id']}` = m.`{$msg['user_id']}` ";
+        try {
+            $sql = "SELECT rp.`{$report['id']}` AS id, rp.`{$report['reason']}` AS reason, rp.`{$report['created_at']}` AS created_at, "
+                . "m.`{$msg['id']}` AS message_id, m.`{$msg['message_text']}` AS message_text, m.`{$msg['user_id']}` AS message_owner_id, "
+                . "r.`{$room['name']}` AS room_name, "
+                . "ru.`{$profile['email']}` AS reporter_email, {$reporterNameExpr} AS reporter_name, "
+                . "mu.`{$profile['email']}` AS owner_email, {$ownerNameExpr} AS owner_name "
+                . "FROM `{$report['table']}` rp "
+                . "LEFT JOIN `{$msg['table']}` m ON m.`{$msg['id']}` = rp.`{$report['message_id']}` "
+                . "LEFT JOIN `{$room['table']}` r ON r.`{$room['id']}` = m.`{$msg['room_id']}` "
+                . "LEFT JOIN `{$profile['table']}` ru ON ru.`{$profile['id']}` = rp.`{$reportedByCol}` "
+                . "LEFT JOIN `{$profile['table']}` mu ON mu.`{$profile['id']}` = m.`{$msg['user_id']}` ";
 
-        if ($report['status']) {
-            $sql .= " WHERE (rp.`{$report['status']}` IS NULL OR rp.`{$report['status']}` = 'pending')";
+            if ($report['status']) {
+                $sql .= " WHERE (rp.`{$report['status']}` IS NULL OR rp.`{$report['status']}` = 'pending')";
+            }
+
+            $sql .= " ORDER BY rp.`{$report['created_at']}` DESC LIMIT 300";
+            $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable $listError) {
+            error_log('community-reports list error: ' . $listError->getMessage());
+            crp_json(false, 'Rapor listesi alınırken bir hata oluştu.', [], 500);
         }
-
-        $sql .= " ORDER BY rp.`{$report['created_at']}` DESC LIMIT 300";
-        $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         $reports = array_map(static function (array $r): array {
             $text = (string)($r['message_text'] ?? '');
@@ -142,5 +153,6 @@ try {
 
     crp_json(false, 'Geçersiz işlem.', [], 400);
 } catch (Throwable $e) {
+    error_log('community-reports general error: ' . $e->getMessage());
     crp_json(false, 'İşlem sırasında bir hata oluştu.', [], 500);
 }

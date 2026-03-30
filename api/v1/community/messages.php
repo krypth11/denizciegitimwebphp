@@ -48,11 +48,24 @@ try {
 
     $messages = array_map(static function (array $r): array {
         $deleted = (int)($r['is_deleted'] ?? 0) === 1;
+        $fullName = trim((string)($r['user_full_name'] ?? ''));
+        $email = trim((string)($r['user_email'] ?? ''));
+        $emailPrefix = '';
+        if ($email !== '') {
+            $atPos = strpos($email, '@');
+            $emailPrefix = $atPos === false ? $email : substr($email, 0, $atPos);
+            $emailPrefix = trim((string)$emailPrefix);
+        }
+
+        $displayName = $fullName !== '' ? $fullName : ($emailPrefix !== '' ? $emailPrefix : 'Kullanıcı');
+
         return [
             'id' => (string)$r['id'],
             'room_id' => (string)$r['room_id'],
             'user_id' => (string)$r['user_id'],
-            'user_name' => (string)(($r['user_full_name'] ?: $r['user_email']) ?? '-'),
+            'user_full_name' => $displayName,
+            'user_name' => $displayName,
+            'user_display_name' => $displayName,
             'message_text' => $deleted ? '' : (string)($r['message_text'] ?? ''),
             'is_deleted' => $deleted ? 1 : 0,
             'deleted_at' => $r['deleted_at'] ?? null,

@@ -37,6 +37,11 @@ try {
     $msg = community_message_schema($pdo);
     $report = community_report_schema($pdo);
 
+    $reportedByCol = $report['reported_by_user_id'] ?? $report['reporter_user_id'] ?? null;
+    if (!$reportedByCol) {
+        api_error('Raporlama şeması uygun değil.', 500);
+    }
+
     $msgStmt = $pdo->prepare("SELECT `{$msg['id']}` AS id, `{$msg['user_id']}` AS user_id FROM `{$msg['table']}` WHERE `{$msg['id']}` = ? LIMIT 1");
     $msgStmt->execute([$messageId]);
     $message = $msgStmt->fetch(PDO::FETCH_ASSOC);
@@ -44,14 +49,14 @@ try {
         api_error('Mesaj bulunamadı.', 404);
     }
 
-    $dupSql = "SELECT COUNT(*) FROM `{$report['table']}` WHERE `{$report['message_id']}` = ? AND `{$report['reporter_user_id']}` = ?";
+    $dupSql = "SELECT COUNT(*) FROM `{$report['table']}` WHERE `{$report['message_id']}` = ? AND `{$reportedByCol}` = ?";
     $dupStmt = $pdo->prepare($dupSql);
     $dupStmt->execute([$messageId, $userId]);
     if ((int)$dupStmt->fetchColumn() > 0) {
         api_error('Bu mesajı zaten raporladınız.', 409);
     }
 
-    $cols = [$report['id'], $report['message_id'], $report['reporter_user_id'], $report['reason'], $report['created_at']];
+    $cols = [$report['id'], $report['message_id'], $reportedByCol, $report['reason'], $report['created_at']];
     $vals = [generate_uuid(), $messageId, $userId, $reason, community_now()];
     if ($report['message_owner_user_id']) {
         $cols[] = $report['message_owner_user_id'];
@@ -69,5 +74,6 @@ try {
 
     api_success('Mesaj raporlandı.');
 } catch (Throwable $e) {
+    error_log('community/report_message.php error: ' . $e->getMessage());
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
 }

@@ -132,7 +132,9 @@ if (!function_exists('community_report_schema')) {
             'cols' => $cols,
             'id' => community_pick_col($cols, ['id']),
             'message_id' => community_pick_col($cols, ['message_id']),
-            'reporter_user_id' => community_pick_col($cols, ['reporter_user_id', 'user_id']),
+            'reported_by_user_id' => community_pick_col($cols, ['reported_by_user_id', 'reporter_user_id', 'user_id']),
+            // Geriye dönük uyumluluk için alias
+            'reporter_user_id' => community_pick_col($cols, ['reported_by_user_id', 'reporter_user_id', 'user_id']),
             'message_owner_user_id' => community_pick_col($cols, ['message_owner_user_id', 'target_user_id'], false),
             'reason' => community_pick_col($cols, ['reason', 'report_reason']),
             'status' => community_pick_col($cols, ['status'], false),
@@ -405,17 +407,35 @@ if (!function_exists('community_get_unread_count')) {
         $msg = community_message_schema($pdo);
         $read = community_read_schema($pdo);
 
-        $sqlRead = "SELECT `{$read['last_read_at']}` AS last_read_at FROM `{$read['table']}` WHERE `{$read['room_id']}` = ? AND `{$read['user_id']}` = ? LIMIT 1";
+        $sqlRead = "SELECT "
+            . ($read['last_read_message_id'] ? "`{$read['last_read_message_id']}` AS last_read_message_id, " : "NULL AS last_read_message_id, ")
+            . "`{$read['last_read_at']}` AS last_read_at "
+            . "FROM `{$read['table']}` WHERE `{$read['room_id']}` = ? AND `{$read['user_id']}` = ? LIMIT 1";
         $stmtRead = $pdo->prepare($sqlRead);
         $stmtRead->execute([$roomId, $userId]);
-        $lastReadAt = $stmtRead->fetchColumn();
+        $readRow = $stmtRead->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        $lastReadMessageId = trim((string)($readRow['last_read_message_id'] ?? ''));
+        $lastReadAt = $readRow['last_read_at'] ?? null;
+
+        $anchorReadAt = null;
+        if ($lastReadMessageId !== '') {
+            $anchorSql = "SELECT `{$msg['created_at']}` AS created_at FROM `{$msg['table']}` WHERE `{$msg['id']}` = ? AND `{$msg['room_id']}` = ? LIMIT 1";
+            $anchorStmt = $pdo->prepare($anchorSql);
+            $anchorStmt->execute([$lastReadMessageId, $roomId]);
+            $anchorReadAt = $anchorStmt->fetchColumn() ?: null;
+        }
 
         $sql = "SELECT COUNT(*) FROM `{$msg['table']}` WHERE `{$msg['room_id']}` = ?";
         $params = [$roomId];
         if ($msg['is_deleted']) {
             $sql .= " AND `{$msg['is_deleted']}` = 0";
         }
-        if ($lastReadAt) {
+
+        if ($anchorReadAt) {
+            $sql .= " AND `{$msg['created_at']}` > ?";
+            $params[] = $anchorReadAt;
+        } elseif ($lastReadAt) {
             $sql .= " AND `{$msg['created_at']}` > ?";
             $params[] = $lastReadAt;
         }
