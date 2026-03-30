@@ -39,6 +39,8 @@ try {
         try {
             $sql = "SELECT rp.`{$report['id']}` AS id, rp.`{$report['reason']}` AS reason, rp.`{$report['created_at']}` AS created_at, "
                 . "m.`{$msg['id']}` AS message_id, m.`{$msg['message_text']}` AS message_text, m.`{$msg['user_id']}` AS message_owner_id, "
+                . "m.`{$msg['is_deleted']}` AS message_is_deleted, "
+                . ($msg['deleted_at'] ? "m.`{$msg['deleted_at']}` AS message_deleted_at, " : "NULL AS message_deleted_at, ")
                 . "r.`{$room['name']}` AS room_name, "
                 . "ru.`{$profile['email']}` AS reporter_email, {$reporterNameExpr} AS reporter_name, "
                 . "mu.`{$profile['email']}` AS owner_email, {$ownerNameExpr} AS owner_name "
@@ -64,12 +66,18 @@ try {
             $preview = mb_strlen($text, 'UTF-8') > 120 ? mb_substr($text, 0, 120, 'UTF-8') . '…' : $text;
             return [
                 'id' => (string)$r['id'],
+                'report_id' => (string)$r['id'],
                 'reason' => (string)($r['reason'] ?? ''),
                 'message_id' => (string)($r['message_id'] ?? ''),
                 'message_preview' => $preview,
+                'message_text_full' => $text,
+                'message_is_deleted' => (int)($r['message_is_deleted'] ?? 0) === 1 ? 1 : 0,
+                'message_deleted_at' => $r['message_deleted_at'] ?? null,
                 'room_name' => (string)($r['room_name'] ?? '-'),
                 'reporter_name' => (string)(($r['reporter_name'] ?: $r['reporter_email']) ?? '-'),
+                'reporter_email' => (string)($r['reporter_email'] ?? ''),
                 'owner_name' => (string)(($r['owner_name'] ?: $r['owner_email']) ?? '-'),
+                'owner_email' => (string)($r['owner_email'] ?? ''),
                 'owner_id' => (string)($r['message_owner_id'] ?? ''),
                 'created_at' => $r['created_at'] ?? null,
             ];

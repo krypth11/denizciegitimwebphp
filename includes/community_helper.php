@@ -415,26 +415,46 @@ if (!function_exists('community_get_unread_count')) {
         $stmtRead->execute([$roomId, $userId]);
         $readRow = $stmtRead->fetch(PDO::FETCH_ASSOC) ?: null;
 
+        $baseSql = "SELECT COUNT(*) FROM `{$msg['table']}` WHERE `{$msg['room_id']}` = ?";
+        $baseParams = [$roomId];
+        if ($msg['is_deleted']) {
+            $baseSql .= " AND `{$msg['is_deleted']}` = 0";
+        }
+        // Kullanıcının kendi mesajları unread sayılmaz
+        $baseSql .= " AND `{$msg['user_id']}` <> ?";
+        $baseParams[] = $userId;
+
+        if (!$readRow) {
+            $stmt = $pdo->prepare($baseSql);
+            $stmt->execute($baseParams);
+            return (int)$stmt->fetchColumn();
+        }
+
         $lastReadMessageId = trim((string)($readRow['last_read_message_id'] ?? ''));
         $lastReadAt = $readRow['last_read_at'] ?? null;
 
         $anchorReadAt = null;
+        $anchorMessageId = null;
         if ($lastReadMessageId !== '') {
-            $anchorSql = "SELECT `{$msg['created_at']}` AS created_at FROM `{$msg['table']}` WHERE `{$msg['id']}` = ? AND `{$msg['room_id']}` = ? LIMIT 1";
+            $anchorSql = "SELECT `{$msg['id']}` AS id, `{$msg['created_at']}` AS created_at FROM `{$msg['table']}` WHERE `{$msg['id']}` = ? AND `{$msg['room_id']}` = ? LIMIT 1";
             $anchorStmt = $pdo->prepare($anchorSql);
             $anchorStmt->execute([$lastReadMessageId, $roomId]);
-            $anchorReadAt = $anchorStmt->fetchColumn() ?: null;
+            $anchorRow = $anchorStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            if ($anchorRow) {
+                $anchorReadAt = $anchorRow['created_at'] ?? null;
+                $anchorMessageId = (string)($anchorRow['id'] ?? '');
+            }
         }
 
-        $sql = "SELECT COUNT(*) FROM `{$msg['table']}` WHERE `{$msg['room_id']}` = ?";
-        $params = [$roomId];
-        if ($msg['is_deleted']) {
-            $sql .= " AND `{$msg['is_deleted']}` = 0";
-        }
+        $sql = $baseSql;
+        $params = $baseParams;
 
-        if ($anchorReadAt) {
-            $sql .= " AND `{$msg['created_at']}` > ?";
+        if ($anchorReadAt && $anchorMessageId !== null) {
+            // Tie-break: aynı created_at durumunda id karşılaştırmasıyla deterministik davran
+            $sql .= " AND ((`{$msg['created_at']}` > ?) OR (`{$msg['created_at']}` = ? AND `{$msg['id']}` > ?))";
             $params[] = $anchorReadAt;
+            $params[] = $anchorReadAt;
+            $params[] = $anchorMessageId;
         } elseif ($lastReadAt) {
             $sql .= " AND `{$msg['created_at']}` > ?";
             $params[] = $lastReadAt;

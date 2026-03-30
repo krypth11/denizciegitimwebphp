@@ -33,6 +33,10 @@ try {
     $msg = community_message_schema($pdo);
     $read = community_read_schema($pdo);
 
+    if (!$read['last_read_message_id']) {
+        api_error('Okundu şeması uygun değil.', 500);
+    }
+
     $roomStmt = $pdo->prepare("SELECT `{$room['id']}` FROM `{$room['table']}` WHERE `{$room['id']}` = ? AND `{$room['is_active']}` = 1 LIMIT 1");
     $roomStmt->execute([$roomId]);
     if (!$roomStmt->fetchColumn()) {
@@ -45,24 +49,30 @@ try {
         api_error('Mesaj kaydı oda ile eşleşmiyor.', 422);
     }
 
-    $checkStmt = $pdo->prepare("SELECT `{$read['id']}` AS id FROM `{$read['table']}` WHERE `{$read['room_id']}` = ? AND `{$read['user_id']}` = ? LIMIT 1");
-    $checkStmt->execute([$roomId, $userId]);
-    $existingId = $checkStmt->fetchColumn();
-
     $now = community_now();
-    if ($existingId) {
-        $set = ["`{$read['last_read_message_id']}` = ?", "`{$read['last_read_at']}` = ?"];
-        $vals = [$lastReadMessageId, $now];
-        if ($read['updated_at']) {
-            $set[] = "`{$read['updated_at']}` = ?";
-            $vals[] = $now;
-        }
-        $vals[] = $existingId;
 
-        $sql = "UPDATE `{$read['table']}` SET " . implode(', ', $set) . " WHERE `{$read['id']}` = ?";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($vals);
-    } else {
+    $set = ["`{$read['last_read_message_id']}` = ?", "`{$read['last_read_at']}` = ?"];
+    $updateVals = [$lastReadMessageId, $now];
+    if ($read['updated_at']) {
+        $set[] = "`{$read['updated_at']}` = ?";
+        $updateVals[] = $now;
+    }
+    $updateVals[] = $roomId;
+    $updateVals[] = $userId;
+
+    $updateSql = "UPDATE `{$read['table']}` SET " . implode(', ', $set)
+        . " WHERE `{$read['room_id']}` = ? AND `{$read['user_id']}` = ?";
+    $updateStmt = $pdo->prepare($updateSql);
+    $updateStmt->execute($updateVals);
+
+    if ($updateStmt->rowCount() < 1) {
+        $existsStmt = $pdo->prepare("SELECT COUNT(*) FROM `{$read['table']}` WHERE `{$read['room_id']}` = ? AND `{$read['user_id']}` = ?");
+        $existsStmt->execute([$roomId, $userId]);
+        $alreadyExists = (int)$existsStmt->fetchColumn() > 0;
+        if ($alreadyExists) {
+            api_success('Oda okundu bilgisi güncellendi.');
+        }
+
         $cols = [$read['id'], $read['room_id'], $read['user_id'], $read['last_read_message_id'], $read['last_read_at']];
         $vals = [generate_uuid(), $roomId, $userId, $lastReadMessageId, $now];
         if ($read['created_at']) {
@@ -76,8 +86,13 @@ try {
 
         $quoted = implode(', ', array_map(static fn($c) => '`' . $c . '`', $cols));
         $holders = implode(', ', array_fill(0, count($cols), '?'));
-        $stmt = $pdo->prepare("INSERT INTO `{$read['table']}` ({$quoted}) VALUES ({$holders})");
-        $stmt->execute($vals);
+        try {
+            $insertStmt = $pdo->prepare("INSERT INTO `{$read['table']}` ({$quoted}) VALUES ({$holders})");
+            $insertStmt->execute($vals);
+        } catch (Throwable $insertError) {
+            // Olası race condition'da tekrar update dene
+            $updateStmt->execute($updateVals);
+        }
     }
 
     api_success('Oda okundu bilgisi güncellendi.');
