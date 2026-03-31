@@ -616,6 +616,68 @@ function study_toggle_bookmark(PDO $pdo, string $userId, string $questionId): ar
     ];
 }
 
+function study_set_bookmark_state(PDO $pdo, string $userId, string $questionId, bool $isBookmarked): array
+{
+    $schema = study_get_user_progress_schema($pdo);
+    $existing = study_get_progress_by_user_question($pdo, $schema, $userId, $questionId);
+
+    if (!$schema['is_bookmarked']) {
+        throw new RuntimeException('is_bookmarked kolonu bulunamadı.');
+    }
+
+    $bookmarkValue = $isBookmarked ? 1 : 0;
+
+    if ($existing) {
+        $nowColumns = [];
+        if (!empty($schema['updated_at'])) {
+            $nowColumns[] = $schema['updated_at'];
+        }
+
+        study_update_progress_row($pdo, $schema, $userId, $questionId, [
+            $schema['is_bookmarked'] => $bookmarkValue,
+        ], $nowColumns);
+    } else {
+        $insertValues = [
+            $schema['user_id'] => $userId,
+            $schema['question_id'] => $questionId,
+            $schema['is_bookmarked'] => $bookmarkValue,
+        ];
+
+        if ($schema['id']) {
+            $insertValues[$schema['id']] = generate_uuid();
+        }
+        if ($schema['is_answered']) {
+            $insertValues[$schema['is_answered']] = 0;
+        }
+        if ($schema['is_correct']) {
+            $insertValues[$schema['is_correct']] = 0;
+        }
+        if ($schema['total_answer_count']) {
+            $insertValues[$schema['total_answer_count']] = 0;
+        }
+        if ($schema['correct_answer_count']) {
+            $insertValues[$schema['correct_answer_count']] = 0;
+        }
+        if ($schema['wrong_answer_count']) {
+            $insertValues[$schema['wrong_answer_count']] = 0;
+        }
+
+        $nowColumns = [];
+        foreach (['created_at', 'updated_at'] as $k) {
+            if (!empty($schema[$k])) {
+                $nowColumns[] = $schema[$k];
+            }
+        }
+
+        study_insert_progress_row($pdo, $schema, $insertValues, $nowColumns);
+    }
+
+    return [
+        'question_id' => $questionId,
+        'is_bookmarked' => $isBookmarked,
+    ];
+}
+
 function study_insert_session(PDO $pdo, string $userId, array $payload): array
 {
     $cols = get_table_columns($pdo, 'study_sessions');
