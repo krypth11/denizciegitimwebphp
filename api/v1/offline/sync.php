@@ -17,7 +17,7 @@ api_require_method('POST');
  *   "events": [
  *     {
  *       "client_event_id": "uuid-or-stable-id",
- *       "type": "study.answer_upsert|study.bookmark_set|study.session_summary|mock_exam.completed",
+ *       "type": "study.answer_upsert|study.bookmark_set|study.session_summary|mock_exam.completed|exam_attempt_completed",
  *       "payload": { ... },
  *       "created_at": "2026-01-01T10:00:00Z"
  *     }
@@ -26,6 +26,7 @@ api_require_method('POST');
  *
  * Backward compatibility:
  * - If event.type is empty, event.event_type is accepted.
+ * - exam_attempt_completed alias'ı mock_exam.completed'e normalize edilir.
  *
  * Response contract (stable):
  * - processed_event_ids: string[]
@@ -75,9 +76,78 @@ function offline_sync_normalize_event_type(string $type): string
         'mock_exam_completed' => 'mock_exam.completed',
         'mock_exam_complete' => 'mock_exam.completed',
         'mock_exam.submit' => 'mock_exam.completed',
+        'exam_attempt_completed' => 'mock_exam.completed',
     ];
 
     return $aliases[$v] ?? $v;
+}
+
+function offline_sync_is_study_type(string $type): bool
+{
+    return in_array($type, ['study.answer_upsert', 'study.bookmark_set', 'study.session_summary'], true);
+}
+
+function offline_sync_build_dashboard_statistics_snapshot(PDO $pdo, string $userId): array
+{
+    $sql = 'SELECT '
+        . 'COALESCE(SUM(CASE WHEN `is_correct` = 1 THEN 1 ELSE 0 END), 0) AS total_correct, '
+        . 'COALESCE(SUM(CASE WHEN `is_correct` = 0 THEN 1 ELSE 0 END), 0) AS total_wrong '
+        . 'FROM `question_attempt_events` WHERE `user_id` = ?';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$userId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $totalCorrect = (int)($row['total_correct'] ?? 0);
+    $totalWrong = (int)($row['total_wrong'] ?? 0);
+    $totalSolved = $totalCorrect + $totalWrong;
+
+    $durationSeconds = 0;
+    try {
+        $ssCols = get_table_columns($pdo, 'study_sessions');
+        if (!empty($ssCols) && in_array('user_id', $ssCols, true)) {
+            $durationCol = in_array('duration_seconds', $ssCols, true) ? 'duration_seconds' : null;
+            $sqlDuration = 'SELECT ' . ($durationCol ? ('COALESCE(SUM(`' . $durationCol . '`),0)') : '0') . ' AS total_duration '
+                . 'FROM `study_sessions` WHERE `user_id` = ?';
+            $stmtDuration = $pdo->prepare($sqlDuration);
+            $stmtDuration->execute([$userId]);
+            $durationSeconds = (int)$stmtDuration->fetchColumn();
+        }
+    } catch (Throwable $e) {
+        $durationSeconds = 0;
+    }
+
+    return [
+        'total_solved' => $totalSolved,
+        'total_correct' => $totalCorrect,
+        'total_wrong' => $totalWrong,
+        'total_study_duration_seconds' => $durationSeconds,
+        'is_remote_reflected' => true,
+    ];
+}
+
+function offline_sync_mock_exam_reflection_status(PDO $pdo, string $userId, string $remoteAttemptId): array
+{
+    $summary = mock_exam_build_summary_stats($pdo, $userId);
+    $history = mock_exam_fetch_history($pdo, $userId, [
+        'status' => 'all',
+        'sort' => 'newest',
+        'page' => 1,
+        'per_page' => 200,
+    ]);
+
+    $inHistory = false;
+    foreach (($history['items'] ?? []) as $row) {
+        if ((string)($row['id'] ?? '') === $remoteAttemptId) {
+            $inHistory = true;
+            break;
+        }
+    }
+
+    return [
+        'in_summary' => ((int)($summary['total_attempts'] ?? 0) >= 1),
+        'in_history' => $inHistory,
+        'summary_total_attempts' => (int)($summary['total_attempts'] ?? 0),
+    ];
 }
 
 function offline_sync_extract_event_type(array $event): array
@@ -626,6 +696,9 @@ try {
     $duplicateEventIds = [];
     $failedEvents = [];
 
+    $processedEvents = [];
+    $duplicateEvents = [];
+
     $remoteAttemptMap = [];
 
     foreach ($events as $event) {
@@ -679,13 +752,32 @@ try {
                     'status' => (string)($existingReceipt['status'] ?? 'duplicate'),
                 ]);
 
+                $duplicateEventItem = [
+                    'client_event_id' => $clientEventId,
+                    'type' => $type,
+                    'is_remote_reflected' => true,
+                ];
+
                 $existingRemoteAttemptId = offline_sync_receipt_extract_remote_attempt_id($existingReceipt);
                 if ($existingRemoteAttemptId !== null) {
                     $localAttemptId = trim((string)($payload['local_attempt_id'] ?? ''));
                     if ($localAttemptId !== '') {
                         $remoteAttemptMap[$localAttemptId] = $existingRemoteAttemptId;
                     }
+                    $duplicateEventItem['remote_attempt_id'] = $existingRemoteAttemptId;
+
+                    $reflection = offline_sync_mock_exam_reflection_status($pdo, $userId, $existingRemoteAttemptId);
+                    $duplicateEventItem['reflection'] = $reflection;
+
+                    offline_sync_debug_log('mock_exam.summary_history.updated', [
+                        'client_event_id' => $clientEventId,
+                        'remote_attempt_id' => $existingRemoteAttemptId,
+                        'summary_total_attempts' => (int)$reflection['summary_total_attempts'],
+                        'in_history' => !empty($reflection['in_history']),
+                    ]);
                 }
+
+                $duplicateEvents[] = $duplicateEventItem;
                 continue;
             }
 
@@ -735,6 +827,12 @@ try {
                 if ($receiptStatus === 'duplicate') {
                     $duplicateCount++;
                     $duplicateEventIds[] = $clientEventId;
+                    $duplicateEvents[] = [
+                        'client_event_id' => $clientEventId,
+                        'type' => $type,
+                        'is_remote_reflected' => true,
+                        'remote_attempt_id' => ($type === 'mock_exam.completed' ? (string)($resultPayload['remote_attempt_id'] ?? '') : null),
+                    ];
                     offline_sync_debug_log('event.duplicate', [
                         'client_event_id' => $clientEventId,
                         'normalized_type' => $type,
@@ -743,6 +841,43 @@ try {
                 } else {
                     $processedCount++;
                     $processedEventIds[] = $clientEventId;
+
+                    $processedItem = [
+                        'client_event_id' => $clientEventId,
+                        'type' => $type,
+                        'is_remote_reflected' => true,
+                    ];
+
+                    if (offline_sync_is_study_type($type)) {
+                        offline_sync_debug_log('study.replay.processed', [
+                            'client_event_id' => $clientEventId,
+                            'normalized_type' => $type,
+                        ]);
+                    }
+
+                    if ($type === 'mock_exam.completed') {
+                        $remoteAttemptId = trim((string)($resultPayload['remote_attempt_id'] ?? ''));
+                        if ($remoteAttemptId !== '') {
+                            $processedItem['remote_attempt_id'] = $remoteAttemptId;
+                            offline_sync_debug_log('mock_exam.replay.processed', [
+                                'client_event_id' => $clientEventId,
+                                'remote_attempt_id' => $remoteAttemptId,
+                            ]);
+
+                            $reflection = offline_sync_mock_exam_reflection_status($pdo, $userId, $remoteAttemptId);
+                            $processedItem['reflection'] = $reflection;
+
+                            offline_sync_debug_log('mock_exam.summary_history.updated', [
+                                'client_event_id' => $clientEventId,
+                                'remote_attempt_id' => $remoteAttemptId,
+                                'summary_total_attempts' => (int)$reflection['summary_total_attempts'],
+                                'in_history' => !empty($reflection['in_history']),
+                            ]);
+                        }
+                    }
+
+                    $processedEvents[] = $processedItem;
+
                     offline_sync_debug_log('event.processed', [
                         'client_event_id' => $clientEventId,
                         'normalized_type' => $type,
@@ -778,11 +913,16 @@ try {
         }
     }
 
+    $remoteStatistics = offline_sync_build_dashboard_statistics_snapshot($pdo, $userId);
+
     api_success('Offline sync tamamlandı.', [
         'processed_event_ids' => $processedEventIds,
         'duplicate_event_ids' => $duplicateEventIds,
         'failed_events' => $failedEvents,
+        'processed_events' => $processedEvents,
+        'duplicate_events' => $duplicateEvents,
         'remote_attempt_map' => $remoteAttemptMap,
+        'remote_statistics' => $remoteStatistics,
     ]);
 } catch (Throwable $e) {
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
