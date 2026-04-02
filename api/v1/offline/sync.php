@@ -8,6 +8,49 @@ require_once __DIR__ . '/offline_helper.php';
 
 api_require_method('POST');
 
+/**
+ * Offline sync request contract (official)
+ *
+ * POST body:
+ * {
+ *   "device_id": "optional-device-id",
+ *   "events": [
+ *     {
+ *       "client_event_id": "uuid-or-stable-id",
+ *       "type": "study.answer_upsert|study.bookmark_set|study.session_summary|mock_exam.completed",
+ *       "payload": { ... },
+ *       "created_at": "2026-01-01T10:00:00Z"
+ *     }
+ *   ]
+ * }
+ *
+ * Backward compatibility:
+ * - If event.type is empty, event.event_type is accepted.
+ *
+ * Response contract (stable):
+ * - processed_event_ids: string[]
+ * - duplicate_event_ids: string[]
+ * - failed_events: [{ client_event_id, type, message }]
+ * - remote_attempt_map: { [local_attempt_id]: remote_attempt_id }
+ */
+
+function offline_sync_debug_log(string $stage, array $context = []): void
+{
+    $safeContext = [];
+    foreach ($context as $key => $value) {
+        if (is_array($value) || is_object($value)) {
+            $safeContext[$key] = $value;
+        } elseif (is_bool($value) || is_null($value) || is_numeric($value)) {
+            $safeContext[$key] = $value;
+        } else {
+            $safeContext[$key] = (string)$value;
+        }
+    }
+
+    $line = '[offline_sync][' . $stage . '] ' . json_encode($safeContext, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    error_log($line !== false ? $line : ('[offline_sync][' . $stage . ']'));
+}
+
 function offline_sync_normalize_source(?string $source): string
 {
     $value = strtolower(trim((string)$source));
@@ -35,6 +78,24 @@ function offline_sync_normalize_event_type(string $type): string
     ];
 
     return $aliases[$v] ?? $v;
+}
+
+function offline_sync_extract_event_type(array $event): array
+{
+    $rawType = trim((string)($event['type'] ?? ''));
+    $rawEventType = trim((string)($event['event_type'] ?? ''));
+    $usedFallback = false;
+
+    if ($rawType === '' && $rawEventType !== '') {
+        $rawType = $rawEventType;
+        $usedFallback = true;
+    }
+
+    return [
+        'type_raw' => $rawType,
+        'normalized_type' => offline_sync_normalize_event_type($rawType),
+        'used_event_type_fallback' => $usedFallback,
+    ];
 }
 
 function offline_sync_decode_json_payload($value): ?array
@@ -337,6 +398,12 @@ function offline_sync_handle_mock_exam_completed(PDO $pdo, string $userId, array
     $fingerprint = offline_sync_mock_exam_fingerprint($payload);
     $duplicateId = offline_sync_mock_exam_find_duplicate($pdo, $userId, $attemptSchema, $localAttemptId, $fingerprint, $payload);
     if ($duplicateId) {
+        offline_sync_debug_log('mock_exam.completed.duplicate', [
+            'local_attempt_id' => $localAttemptId,
+            'remote_attempt_id' => $duplicateId,
+            'source_attempt_id' => $localAttemptId,
+        ]);
+
         return [
             'duplicate' => true,
             'remote_attempt_id' => $duplicateId,
@@ -510,6 +577,13 @@ function offline_sync_handle_mock_exam_completed(PDO $pdo, string $userId, array
         $order++;
     }
 
+    offline_sync_debug_log('mock_exam.completed.inserted', [
+        'local_attempt_id' => $localAttemptId,
+        'remote_attempt_id' => $attemptId,
+        'source_attempt_id' => $localAttemptId,
+        'question_rows_inserted' => count($eventQuestions),
+    ]);
+
     if ($eventQuestions) {
         mock_exam_write_events_and_progress($pdo, $userId, $attemptId, $eventQuestions, $qualificationId);
     }
@@ -555,15 +629,31 @@ try {
     $remoteAttemptMap = [];
 
     foreach ($events as $event) {
+        $clientEventIdForFailure = '';
+        $normalizedTypeForFailure = '';
+
         try {
             if (!is_array($event)) {
                 throw new RuntimeException('Geçersiz event formatı.');
             }
 
             $clientEventId = trim((string)($event['client_event_id'] ?? ''));
-            $typeRaw = trim((string)($event['type'] ?? ''));
-            $type = offline_sync_normalize_event_type($typeRaw);
-            $payload = is_array($event['payload'] ?? null) ? $event['payload'] : [];
+            $typeMeta = offline_sync_extract_event_type($event);
+            $typeRaw = (string)$typeMeta['type_raw'];
+            $type = (string)$typeMeta['normalized_type'];
+            $createdAt = trim((string)($event['created_at'] ?? ''));
+            $payload = $event['payload'] ?? null;
+
+            $clientEventIdForFailure = $clientEventId;
+            $normalizedTypeForFailure = $type;
+
+            offline_sync_debug_log('event.received', [
+                'client_event_id' => $clientEventId,
+                'incoming_type' => (string)($event['type'] ?? ''),
+                'incoming_event_type' => (string)($event['event_type'] ?? ''),
+                'normalized_type' => $type,
+                'used_event_type_fallback' => !empty($typeMeta['used_event_type_fallback']),
+            ]);
 
             if ($clientEventId === '') {
                 throw new RuntimeException('client_event_id zorunludur.');
@@ -571,11 +661,23 @@ try {
             if ($type === '') {
                 throw new RuntimeException('type zorunludur.');
             }
+            if (!array_key_exists('payload', $event) || !is_array($payload)) {
+                throw new RuntimeException('payload zorunludur ve object/dizi olmalıdır.');
+            }
+            if ($createdAt === '') {
+                throw new RuntimeException('created_at zorunludur.');
+            }
 
             $existingReceipt = offline_sync_get_receipt($pdo, $userId, $clientEventId);
             if ($existingReceipt) {
                 $duplicateCount++;
                 $duplicateEventIds[] = $clientEventId;
+
+                offline_sync_debug_log('event.duplicate', [
+                    'client_event_id' => $clientEventId,
+                    'normalized_type' => $type,
+                    'status' => (string)($existingReceipt['status'] ?? 'duplicate'),
+                ]);
 
                 $existingRemoteAttemptId = offline_sync_receipt_extract_remote_attempt_id($existingReceipt);
                 if ($existingRemoteAttemptId !== null) {
@@ -604,6 +706,11 @@ try {
                     $remoteAttemptId = trim((string)($resultPayload['remote_attempt_id'] ?? ''));
                     if ($localAttemptId !== '' && $remoteAttemptId !== '') {
                         $remoteAttemptMap[$localAttemptId] = $remoteAttemptId;
+                        offline_sync_debug_log('mock_exam.remote_attempt_map.updated', [
+                            'client_event_id' => $clientEventId,
+                            'local_attempt_id' => $localAttemptId,
+                            'remote_attempt_id' => $remoteAttemptId,
+                        ]);
                     }
                     if (!empty($resultPayload['duplicate'])) {
                         $receiptStatus = 'duplicate';
@@ -628,9 +735,19 @@ try {
                 if ($receiptStatus === 'duplicate') {
                     $duplicateCount++;
                     $duplicateEventIds[] = $clientEventId;
+                    offline_sync_debug_log('event.duplicate', [
+                        'client_event_id' => $clientEventId,
+                        'normalized_type' => $type,
+                        'status' => 'duplicate',
+                    ]);
                 } else {
                     $processedCount++;
                     $processedEventIds[] = $clientEventId;
+                    offline_sync_debug_log('event.processed', [
+                        'client_event_id' => $clientEventId,
+                        'normalized_type' => $type,
+                        'status' => 'processed',
+                    ]);
                 }
             } catch (Throwable $processingError) {
                 if ($pdo->inTransaction()) {
@@ -640,18 +757,28 @@ try {
             }
         } catch (Throwable $eventError) {
             $failedCount++;
+            $failedType = $normalizedTypeForFailure !== ''
+                ? $normalizedTypeForFailure
+                : offline_sync_normalize_event_type(trim((string)($event['type'] ?? $event['event_type'] ?? '')));
+            $failedClientEventId = $clientEventIdForFailure !== ''
+                ? $clientEventIdForFailure
+                : (string)($event['client_event_id'] ?? '');
+
+            offline_sync_debug_log('event.failed', [
+                'client_event_id' => $failedClientEventId,
+                'normalized_type' => $failedType,
+                'message' => $eventError->getMessage(),
+            ]);
+
             $failedEvents[] = [
-                'client_event_id' => (string)($event['client_event_id'] ?? ''),
-                'type' => (string)($event['type'] ?? ''),
+                'client_event_id' => $failedClientEventId,
+                'type' => $failedType,
                 'message' => $eventError->getMessage(),
             ];
         }
     }
 
     api_success('Offline sync tamamlandı.', [
-        'processed_count' => $processedCount,
-        'duplicate_count' => $duplicateCount,
-        'failed_count' => $failedCount,
         'processed_event_ids' => $processedEventIds,
         'duplicate_event_ids' => $duplicateEventIds,
         'failed_events' => $failedEvents,
