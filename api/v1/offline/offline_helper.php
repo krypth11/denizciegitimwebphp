@@ -448,7 +448,59 @@ function offline_sync_receipt_exists(PDO $pdo, string $userId, string $clientEve
     return (int)$stmt->fetchColumn() > 0;
 }
 
-function offline_sync_write_receipt(PDO $pdo, string $userId, string $clientEventId, string $eventType, ?string $deviceId, array $eventPayload, array $resultPayload): void
+function offline_sync_get_receipt(PDO $pdo, string $userId, string $clientEventId): ?array
+{
+    $s = offline_schema_sync_receipts($pdo);
+    $select = [
+        offline_q($s['user_id']) . ' AS user_id',
+        offline_q($s['client_event_id']) . ' AS client_event_id',
+    ];
+
+    if ($s['event_type']) {
+        $select[] = offline_q($s['event_type']) . ' AS event_type';
+    } else {
+        $select[] = "'' AS event_type";
+    }
+
+    if ($s['status']) {
+        $select[] = offline_q($s['status']) . ' AS status';
+    } else {
+        $select[] = "'' AS status";
+    }
+
+    if ($s['payload_json']) {
+        $select[] = offline_q($s['payload_json']) . ' AS payload_json';
+    } else {
+        $select[] = 'NULL AS payload_json';
+    }
+
+    if ($s['response_json']) {
+        $select[] = offline_q($s['response_json']) . ' AS response_json';
+    } else {
+        $select[] = 'NULL AS response_json';
+    }
+
+    $sql = 'SELECT ' . implode(', ', $select)
+        . ' FROM ' . offline_q($s['table'])
+        . ' WHERE ' . offline_q($s['user_id']) . ' = ? AND ' . offline_q($s['client_event_id']) . ' = ?'
+        . ' LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$userId, $clientEventId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+function offline_sync_write_receipt(
+    PDO $pdo,
+    string $userId,
+    string $clientEventId,
+    string $eventType,
+    ?string $deviceId,
+    array $eventPayload,
+    array $resultPayload,
+    string $status = 'processed'
+): void
 {
     $s = offline_schema_sync_receipts($pdo);
     $cols = [];
@@ -475,7 +527,7 @@ function offline_sync_write_receipt(PDO $pdo, string $userId, string $clientEven
         $add($cols, $holders, $vals, $s['device_id'], $deviceId);
     }
     if ($s['status']) {
-        $add($cols, $holders, $vals, $s['status'], 'processed');
+        $add($cols, $holders, $vals, $s['status'], $status);
     }
     if ($s['payload_json']) {
         $add($cols, $holders, $vals, $s['payload_json'], json_encode($eventPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));

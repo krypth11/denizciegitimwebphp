@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/study_helper.php';
+require_once dirname(__DIR__) . '/mock_exam_helper.php';
 require_once __DIR__ . '/offline_helper.php';
 
 api_require_method('POST');
@@ -15,6 +16,516 @@ function offline_sync_normalize_source(?string $source): string
         return 'offline_sync';
     }
     return $value;
+}
+
+function offline_sync_normalize_event_type(string $type): string
+{
+    $v = strtolower(trim($type));
+    $aliases = [
+        'answer_upsert' => 'study.answer_upsert',
+        'study_answer_upsert' => 'study.answer_upsert',
+        'study.answer' => 'study.answer_upsert',
+        'bookmark_set' => 'study.bookmark_set',
+        'study_bookmark_set' => 'study.bookmark_set',
+        'session_summary' => 'study.session_summary',
+        'study_session_summary' => 'study.session_summary',
+        'mock_exam_completed' => 'mock_exam.completed',
+        'mock_exam_complete' => 'mock_exam.completed',
+        'mock_exam.submit' => 'mock_exam.completed',
+    ];
+
+    return $aliases[$v] ?? $v;
+}
+
+function offline_sync_decode_json_payload($value): ?array
+{
+    if (is_array($value)) {
+        return $value;
+    }
+    if (!is_string($value)) {
+        return null;
+    }
+    $raw = trim($value);
+    if ($raw === '') {
+        return null;
+    }
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : null;
+}
+
+function offline_sync_normalize_optional_answer($value): ?string
+{
+    $v = strtoupper(trim((string)$value));
+    if ($v === '') {
+        return null;
+    }
+    if (!in_array($v, ['A', 'B', 'C', 'D', 'E'], true)) {
+        return null;
+    }
+    return $v;
+}
+
+function offline_sync_receipt_extract_remote_attempt_id(?array $receipt): ?string
+{
+    if (!$receipt) {
+        return null;
+    }
+    $response = offline_sync_decode_json_payload($receipt['response_json'] ?? null);
+    if (!$response) {
+        return null;
+    }
+    $id = trim((string)($response['remote_attempt_id'] ?? ''));
+    return $id !== '' ? $id : null;
+}
+
+function offline_sync_mock_attempt_schema(PDO $pdo): array
+{
+    $base = mock_exam_get_attempt_schema($pdo);
+    $cols = get_table_columns($pdo, $base['table']);
+
+    $pick = static function (array $candidates) use ($cols): ?string {
+        foreach ($candidates as $c) {
+            if (in_array($c, $cols, true)) {
+                return $c;
+            }
+        }
+        return null;
+    };
+
+    $base['source'] = $pick(['source']);
+    $base['summary_json'] = $pick(['summary_json']);
+    $base['detail_json'] = $pick(['detail_json']);
+    $base['lesson_report_json'] = $pick(['lesson_report_json']);
+    $base['questions_json'] = $pick(['questions_json']);
+    $base['fingerprint'] = $pick(['fingerprint', 'sync_fingerprint', 'offline_fingerprint', 'payload_fingerprint']);
+
+    return $base;
+}
+
+function offline_sync_mock_exam_fingerprint(array $payload): string
+{
+    $data = [
+        'user_scope' => 'offline_sync_mock_exam',
+        'qualification_id' => (string)($payload['qualification_id'] ?? ''),
+        'started_at' => (string)($payload['started_at'] ?? ''),
+        'completed_at' => (string)($payload['completed_at'] ?? ''),
+        'duration_seconds' => (int)($payload['duration_seconds'] ?? 0),
+        'total_questions' => (int)($payload['total_questions'] ?? 0),
+        'answered_questions' => (int)($payload['answered_questions'] ?? 0),
+        'correct_count' => (int)($payload['correct_count'] ?? 0),
+        'wrong_count' => (int)($payload['wrong_count'] ?? 0),
+        'blank_count' => (int)($payload['blank_count'] ?? 0),
+        'success_rate' => (float)($payload['success_rate'] ?? 0),
+        'local_attempt_id' => (string)($payload['local_attempt_id'] ?? ''),
+        'questions_json' => $payload['questions_json'] ?? null,
+    ];
+
+    return sha1(json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+}
+
+function offline_sync_mock_exam_find_duplicate(PDO $pdo, string $userId, array $schema, string $sourceAttemptId, string $fingerprint, array $payload): ?string
+{
+    if ($schema['source_attempt_id'] && $sourceAttemptId !== '') {
+        $sql = 'SELECT ' . mock_exam_q($schema['id']) . ' AS id FROM ' . mock_exam_q($schema['table'])
+            . ' WHERE ' . mock_exam_q($schema['user_id']) . ' = ? AND ' . mock_exam_q($schema['source_attempt_id']) . ' = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId, $sourceAttemptId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row && !empty($row['id'])) {
+            return (string)$row['id'];
+        }
+    }
+
+    if ($schema['fingerprint']) {
+        $sql = 'SELECT ' . mock_exam_q($schema['id']) . ' AS id FROM ' . mock_exam_q($schema['table'])
+            . ' WHERE ' . mock_exam_q($schema['user_id']) . ' = ? AND ' . mock_exam_q($schema['fingerprint']) . ' = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId, $fingerprint]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row && !empty($row['id'])) {
+            return (string)$row['id'];
+        }
+    }
+
+    $qualificationId = trim((string)($payload['qualification_id'] ?? ''));
+    $startedAt = trim((string)($payload['started_at'] ?? ''));
+    $completedAt = trim((string)($payload['completed_at'] ?? ''));
+
+    $where = [mock_exam_q($schema['user_id']) . ' = ?'];
+    $params = [$userId];
+
+    if ($qualificationId !== '') {
+        $where[] = mock_exam_q($schema['qualification_id']) . ' = ?';
+        $params[] = $qualificationId;
+    }
+    if ($startedAt !== '' && $schema['started_at']) {
+        $where[] = mock_exam_q($schema['started_at']) . ' = ?';
+        $params[] = $startedAt;
+    }
+    if ($completedAt !== '' && $schema['submitted_at']) {
+        $where[] = mock_exam_q($schema['submitted_at']) . ' = ?';
+        $params[] = $completedAt;
+    }
+    if ($schema['actual_question_count']) {
+        $where[] = mock_exam_q($schema['actual_question_count']) . ' = ?';
+        $params[] = (int)($payload['total_questions'] ?? 0);
+    }
+    if ($schema['correct_count']) {
+        $where[] = mock_exam_q($schema['correct_count']) . ' = ?';
+        $params[] = (int)($payload['correct_count'] ?? 0);
+    }
+    if ($schema['wrong_count']) {
+        $where[] = mock_exam_q($schema['wrong_count']) . ' = ?';
+        $params[] = (int)($payload['wrong_count'] ?? 0);
+    }
+    if ($schema['blank_count']) {
+        $where[] = mock_exam_q($schema['blank_count']) . ' = ?';
+        $params[] = (int)($payload['blank_count'] ?? 0);
+    }
+
+    $sql = 'SELECT ' . mock_exam_q($schema['id']) . ' AS id FROM ' . mock_exam_q($schema['table'])
+        . ' WHERE ' . implode(' AND ', $where)
+        . ' ORDER BY ' . mock_exam_q($schema['id']) . ' DESC LIMIT 1';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return ($row && !empty($row['id'])) ? (string)$row['id'] : null;
+}
+
+function offline_sync_handle_study_answer_upsert(PDO $pdo, string $userId, array $payload): array
+{
+    $questionId = trim((string)($payload['question_id'] ?? ''));
+    $selectedAnswer = offline_sync_normalize_optional_answer($payload['selected_answer'] ?? null);
+    $source = offline_sync_normalize_source($payload['source'] ?? 'study');
+    $sessionId = trim((string)($payload['session_id'] ?? ''));
+    $sessionId = $sessionId !== '' ? $sessionId : null;
+
+    if ($questionId === '') {
+        throw new RuntimeException('study.answer_upsert.question_id zorunludur.');
+    }
+
+    if ($selectedAnswer === null) {
+        return [
+            'type' => 'study.answer_upsert',
+            'question_id' => $questionId,
+            'skipped' => true,
+            'reason' => 'blank_answer_not_counted_as_solved',
+        ];
+    }
+
+    $meta = study_get_question_meta_with_relations($pdo, $questionId);
+    if (!$meta['exists']) {
+        throw new RuntimeException('Soru bulunamadı.');
+    }
+    if ($selectedAnswer === 'E' && empty($meta['option_e'])) {
+        throw new RuntimeException('Bu soru için E şıkkı bulunmuyor.');
+    }
+
+    $isCorrect = false;
+    if (!empty($meta['correct_answer'])) {
+        $isCorrect = ($selectedAnswer === strtoupper((string)$meta['correct_answer']));
+    }
+
+    $progress = study_upsert_answer_progress($pdo, $userId, $questionId, $selectedAnswer, $isCorrect);
+    study_insert_attempt_event($pdo, [
+        'user_id' => $userId,
+        'question_id' => $questionId,
+        'course_id' => $meta['course_id'] ?? null,
+        'qualification_id' => $meta['qualification_id'] ?? null,
+        'topic_id' => $meta['topic_id'] ?? null,
+        'session_id' => $sessionId,
+        'source' => $source,
+        'selected_answer' => $selectedAnswer,
+        'is_correct' => $isCorrect,
+    ]);
+
+    return [
+        'type' => 'study.answer_upsert',
+        'question_id' => $questionId,
+        'selected_answer' => $selectedAnswer,
+        'is_correct' => $isCorrect,
+        'progress' => $progress,
+    ];
+}
+
+function offline_sync_handle_study_bookmark_set(PDO $pdo, string $userId, array $payload): array
+{
+    $questionId = trim((string)($payload['question_id'] ?? ''));
+    if ($questionId === '') {
+        throw new RuntimeException('study.bookmark_set.question_id zorunludur.');
+    }
+    $isBookmarked = filter_var($payload['is_bookmarked'] ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+    if ($isBookmarked === null) {
+        throw new RuntimeException('study.bookmark_set.is_bookmarked boolean olmalıdır.');
+    }
+
+    $meta = study_get_question_meta($pdo, $questionId);
+    if (!$meta['exists']) {
+        throw new RuntimeException('Soru bulunamadı.');
+    }
+
+    $bookmark = study_set_bookmark_state($pdo, $userId, $questionId, (bool)$isBookmarked);
+    return [
+        'type' => 'study.bookmark_set',
+        'bookmark' => $bookmark,
+    ];
+}
+
+function offline_sync_handle_study_session_summary(PDO $pdo, string $userId, array $payload): array
+{
+    $correct = max(0, (int)($payload['correct_count'] ?? 0));
+    $wrong = max(0, (int)($payload['wrong_count'] ?? 0));
+    $blank = max(0, (int)($payload['blank_count'] ?? 0));
+    $solved = $correct + $wrong; // blank solved'a dahil edilmez
+
+    $sessionPayload = [
+        'course_id' => $payload['course_id'] ?? null,
+        'qualification_id' => $payload['qualification_id'] ?? null,
+        'question_type' => $payload['question_type'] ?? null,
+        'pool_type' => $payload['pool_type'] ?? null,
+        'requested_question_count' => (int)($payload['requested_question_count'] ?? ($solved + $blank)),
+        'served_question_count' => (int)($payload['served_question_count'] ?? ($solved + $blank)),
+        'correct_count' => $correct,
+        'wrong_count' => $wrong,
+        'duration_seconds' => max(0, (int)($payload['duration_seconds'] ?? 0)),
+    ];
+
+    $session = study_insert_session($pdo, $userId, $sessionPayload);
+    return [
+        'type' => 'study.session_summary',
+        'session' => $session,
+        'solved_count' => $solved,
+        'blank_count' => $blank,
+    ];
+}
+
+function offline_sync_handle_mock_exam_completed(PDO $pdo, string $userId, array $payload): array
+{
+    $attemptSchema = offline_sync_mock_attempt_schema($pdo);
+    $questionSchema = mock_exam_get_attempt_question_schema($pdo);
+
+    $localAttemptId = trim((string)($payload['local_attempt_id'] ?? ''));
+    $qualificationId = trim((string)($payload['qualification_id'] ?? ''));
+    $startedAt = trim((string)($payload['started_at'] ?? ''));
+    $completedAt = trim((string)($payload['completed_at'] ?? ''));
+    $durationSeconds = max(0, (int)($payload['duration_seconds'] ?? 0));
+    $totalQuestions = max(0, (int)($payload['total_questions'] ?? 0));
+    $answeredQuestions = max(0, (int)($payload['answered_questions'] ?? 0));
+    $correctCount = max(0, (int)($payload['correct_count'] ?? 0));
+    $wrongCount = max(0, (int)($payload['wrong_count'] ?? 0));
+    $blankCount = max(0, (int)($payload['blank_count'] ?? 0));
+    $successRate = (float)($payload['success_rate'] ?? 0);
+    $source = trim((string)($payload['source'] ?? 'mock_exam'));
+
+    if ($localAttemptId === '') {
+        throw new RuntimeException('mock_exam.completed.local_attempt_id zorunludur.');
+    }
+    if ($qualificationId === '') {
+        throw new RuntimeException('mock_exam.completed.qualification_id zorunludur.');
+    }
+
+    $summaryJson = $payload['summary_json'] ?? null;
+    $detailJson = $payload['detail_json'] ?? null;
+    $lessonReportJson = $payload['lesson_report_json'] ?? null;
+    $questionsJson = $payload['questions_json'] ?? null;
+
+    $questions = is_array($questionsJson) ? $questionsJson : offline_sync_decode_json_payload($questionsJson);
+    if (!is_array($questions)) {
+        $questions = [];
+    }
+
+    $fingerprint = offline_sync_mock_exam_fingerprint($payload);
+    $duplicateId = offline_sync_mock_exam_find_duplicate($pdo, $userId, $attemptSchema, $localAttemptId, $fingerprint, $payload);
+    if ($duplicateId) {
+        return [
+            'duplicate' => true,
+            'remote_attempt_id' => $duplicateId,
+            'local_attempt_id' => $localAttemptId,
+            'type' => 'mock_exam.completed',
+        ];
+    }
+
+    $attemptId = generate_uuid();
+    $cols = [mock_exam_q($attemptSchema['id']), mock_exam_q($attemptSchema['user_id']), mock_exam_q($attemptSchema['qualification_id'])];
+    $holders = ['?', '?', '?'];
+    $params = [$attemptId, $userId, $qualificationId];
+
+    $pairs = [
+        'mode' => 'standard',
+        'pool_type' => 'random',
+        'requested_question_count' => $totalQuestions,
+        'actual_question_count' => $totalQuestions,
+        'duration_seconds_limit' => max($durationSeconds, 1),
+        'elapsed_seconds' => $durationSeconds,
+        'status' => 'completed',
+        'warning_message' => null,
+        'source_attempt_id' => $localAttemptId,
+        'correct_count' => $correctCount,
+        'wrong_count' => $wrongCount,
+        'blank_count' => $blankCount,
+        'success_rate' => $successRate,
+    ];
+
+    foreach ($pairs as $key => $value) {
+        if (!empty($attemptSchema[$key])) {
+            $cols[] = mock_exam_q($attemptSchema[$key]);
+            $holders[] = '?';
+            $params[] = $value;
+        }
+    }
+
+    if (!empty($attemptSchema['source'])) {
+        $cols[] = mock_exam_q($attemptSchema['source']);
+        $holders[] = '?';
+        $params[] = ($source !== '' ? $source : 'mock_exam');
+    }
+
+    if (!empty($attemptSchema['summary_json'])) {
+        $cols[] = mock_exam_q($attemptSchema['summary_json']);
+        $holders[] = '?';
+        $params[] = json_encode($summaryJson, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    if (!empty($attemptSchema['detail_json'])) {
+        $cols[] = mock_exam_q($attemptSchema['detail_json']);
+        $holders[] = '?';
+        $params[] = json_encode($detailJson, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    if (!empty($attemptSchema['lesson_report_json'])) {
+        $cols[] = mock_exam_q($attemptSchema['lesson_report_json']);
+        $holders[] = '?';
+        $params[] = json_encode($lessonReportJson, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    if (!empty($attemptSchema['questions_json'])) {
+        $cols[] = mock_exam_q($attemptSchema['questions_json']);
+        $holders[] = '?';
+        $params[] = json_encode($questionsJson, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    if (!empty($attemptSchema['fingerprint'])) {
+        $cols[] = mock_exam_q($attemptSchema['fingerprint']);
+        $holders[] = '?';
+        $params[] = $fingerprint;
+    }
+
+    if (!empty($attemptSchema['started_at']) && $startedAt !== '') {
+        $cols[] = mock_exam_q($attemptSchema['started_at']);
+        $holders[] = '?';
+        $params[] = $startedAt;
+    }
+    if (!empty($attemptSchema['submitted_at']) && $completedAt !== '') {
+        $cols[] = mock_exam_q($attemptSchema['submitted_at']);
+        $holders[] = '?';
+        $params[] = $completedAt;
+    }
+    if (!empty($attemptSchema['created_at'])) {
+        $cols[] = mock_exam_q($attemptSchema['created_at']);
+        $holders[] = 'NOW()';
+    }
+    if (!empty($attemptSchema['updated_at'])) {
+        $cols[] = mock_exam_q($attemptSchema['updated_at']);
+        $holders[] = 'NOW()';
+    }
+
+    $sql = 'INSERT INTO ' . mock_exam_q($attemptSchema['table'])
+        . ' (' . implode(', ', $cols) . ') VALUES (' . implode(', ', $holders) . ')';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    $eventQuestions = [];
+    $order = 1;
+    foreach ($questions as $questionRow) {
+        if (!is_array($questionRow)) {
+            continue;
+        }
+
+        $questionId = trim((string)($questionRow['question_id'] ?? $questionRow['id'] ?? ''));
+        if ($questionId === '') {
+            continue;
+        }
+
+        $selected = offline_sync_normalize_optional_answer($questionRow['selected_answer'] ?? null);
+        $correct = offline_sync_normalize_optional_answer($questionRow['correct_answer'] ?? null);
+        $isCorrect = ($selected !== null && $correct !== null && $selected === $correct) ? 1 : 0;
+
+        $qCols = [mock_exam_q($questionSchema['id']), mock_exam_q($questionSchema['attempt_id']), mock_exam_q($questionSchema['question_id'])];
+        $qVals = ['?', '?', '?'];
+        $qParams = [generate_uuid(), $attemptId, $questionId];
+
+        $qMap = [
+            'course_id' => $questionRow['course_id'] ?? null,
+            'course_name' => $questionRow['course_name'] ?? null,
+            'order_index' => (int)($questionRow['order_index'] ?? $order),
+            'question_type' => $questionRow['question_type'] ?? null,
+            'question_text' => $questionRow['question_text'] ?? null,
+            'option_a' => $questionRow['option_a'] ?? null,
+            'option_b' => $questionRow['option_b'] ?? null,
+            'option_c' => $questionRow['option_c'] ?? null,
+            'option_d' => $questionRow['option_d'] ?? null,
+            'option_e' => $questionRow['option_e'] ?? null,
+            'correct_answer' => $correct,
+            'explanation' => $questionRow['explanation'] ?? null,
+            'selected_answer' => $selected,
+            'is_correct' => $isCorrect,
+            'is_flagged' => !empty($questionRow['is_flagged']) ? 1 : 0,
+        ];
+
+        foreach ($qMap as $key => $val) {
+            if (!empty($questionSchema[$key])) {
+                $qCols[] = mock_exam_q($questionSchema[$key]);
+                $qVals[] = '?';
+                $qParams[] = $val;
+            }
+        }
+
+        if (!empty($questionSchema['answered_at'])) {
+            if ($selected !== null) {
+                $answeredAt = trim((string)($questionRow['answered_at'] ?? $completedAt));
+                if ($answeredAt !== '') {
+                    $qCols[] = mock_exam_q($questionSchema['answered_at']);
+                    $qVals[] = '?';
+                    $qParams[] = $answeredAt;
+                }
+            }
+        }
+        if (!empty($questionSchema['created_at'])) {
+            $qCols[] = mock_exam_q($questionSchema['created_at']);
+            $qVals[] = 'NOW()';
+        }
+        if (!empty($questionSchema['updated_at'])) {
+            $qCols[] = mock_exam_q($questionSchema['updated_at']);
+            $qVals[] = 'NOW()';
+        }
+
+        $qSql = 'INSERT INTO ' . mock_exam_q($questionSchema['table'])
+            . ' (' . implode(', ', $qCols) . ') VALUES (' . implode(', ', $qVals) . ')';
+        $qStmt = $pdo->prepare($qSql);
+        $qStmt->execute($qParams);
+
+        $eventQuestions[] = [
+            'question_id' => $questionId,
+            'course_id' => $questionRow['course_id'] ?? null,
+            'selected_answer' => $selected,
+            'correct_answer' => $correct,
+        ];
+
+        $order++;
+    }
+
+    if ($eventQuestions) {
+        mock_exam_write_events_and_progress($pdo, $userId, $attemptId, $eventQuestions, $qualificationId);
+    }
+
+    return [
+        'type' => 'mock_exam.completed',
+        'duplicate' => false,
+        'remote_attempt_id' => $attemptId,
+        'local_attempt_id' => $localAttemptId,
+        'answered_questions' => $answeredQuestions,
+        'total_questions' => $totalQuestions,
+        'correct_count' => $correctCount,
+        'wrong_count' => $wrongCount,
+        'blank_count' => $blankCount,
+        'success_rate' => $successRate,
+    ];
 }
 
 try {
@@ -41,6 +552,8 @@ try {
     $duplicateEventIds = [];
     $failedEvents = [];
 
+    $remoteAttemptMap = [];
+
     foreach ($events as $event) {
         try {
             if (!is_array($event)) {
@@ -48,7 +561,8 @@ try {
             }
 
             $clientEventId = trim((string)($event['client_event_id'] ?? ''));
-            $type = trim((string)($event['type'] ?? ''));
+            $typeRaw = trim((string)($event['type'] ?? ''));
+            $type = offline_sync_normalize_event_type($typeRaw);
             $payload = is_array($event['payload'] ?? null) ? $event['payload'] : [];
 
             if ($clientEventId === '') {
@@ -58,112 +572,72 @@ try {
                 throw new RuntimeException('type zorunludur.');
             }
 
-            if (offline_sync_receipt_exists($pdo, $userId, $clientEventId)) {
+            $existingReceipt = offline_sync_get_receipt($pdo, $userId, $clientEventId);
+            if ($existingReceipt) {
                 $duplicateCount++;
                 $duplicateEventIds[] = $clientEventId;
+
+                $existingRemoteAttemptId = offline_sync_receipt_extract_remote_attempt_id($existingReceipt);
+                if ($existingRemoteAttemptId !== null) {
+                    $localAttemptId = trim((string)($payload['local_attempt_id'] ?? ''));
+                    if ($localAttemptId !== '') {
+                        $remoteAttemptMap[$localAttemptId] = $existingRemoteAttemptId;
+                    }
+                }
                 continue;
             }
 
-            $resultPayload = ['status' => 'ok'];
+            $pdo->beginTransaction();
+            try {
+                $resultPayload = ['status' => 'ok'];
+                $receiptStatus = 'processed';
 
-            if ($type === 'answer_upsert') {
-                $questionId = trim((string)($payload['question_id'] ?? ''));
-                $selectedAnswer = strtoupper(trim((string)($payload['selected_answer'] ?? '')));
-                $source = offline_sync_normalize_source($payload['source'] ?? 'offline_sync');
-                $sessionId = trim((string)($payload['session_id'] ?? ''));
-                $sessionId = $sessionId !== '' ? $sessionId : null;
-
-                if ($questionId === '') {
-                    throw new RuntimeException('answer_upsert.question_id zorunludur.');
-                }
-                if (!in_array($selectedAnswer, ['A', 'B', 'C', 'D', 'E'], true)) {
-                    throw new RuntimeException('answer_upsert.selected_answer A/B/C/D/E olmalıdır.');
-                }
-
-                $meta = study_get_question_meta_with_relations($pdo, $questionId);
-                if (!$meta['exists']) {
-                    throw new RuntimeException('Soru bulunamadı.');
-                }
-                if ($selectedAnswer === 'E' && empty($meta['option_e'])) {
-                    throw new RuntimeException('Bu soru için E şıkkı bulunmuyor.');
-                }
-
-                $isCorrect = false;
-                if (!empty($meta['correct_answer'])) {
-                    $isCorrect = ($selectedAnswer === strtoupper((string)$meta['correct_answer']));
+                if ($type === 'study.answer_upsert') {
+                    $resultPayload = offline_sync_handle_study_answer_upsert($pdo, $userId, $payload);
+                } elseif ($type === 'study.bookmark_set') {
+                    $resultPayload = offline_sync_handle_study_bookmark_set($pdo, $userId, $payload);
+                } elseif ($type === 'study.session_summary') {
+                    $resultPayload = offline_sync_handle_study_session_summary($pdo, $userId, $payload);
+                } elseif ($type === 'mock_exam.completed') {
+                    $resultPayload = offline_sync_handle_mock_exam_completed($pdo, $userId, $payload);
+                    $localAttemptId = trim((string)($payload['local_attempt_id'] ?? ''));
+                    $remoteAttemptId = trim((string)($resultPayload['remote_attempt_id'] ?? ''));
+                    if ($localAttemptId !== '' && $remoteAttemptId !== '') {
+                        $remoteAttemptMap[$localAttemptId] = $remoteAttemptId;
+                    }
+                    if (!empty($resultPayload['duplicate'])) {
+                        $receiptStatus = 'duplicate';
+                    }
+                } else {
+                    throw new RuntimeException('Desteklenmeyen event type: ' . $typeRaw);
                 }
 
-                $progress = study_upsert_answer_progress($pdo, $userId, $questionId, $selectedAnswer, $isCorrect);
-                // best effort
-                try {
-                    study_insert_attempt_event($pdo, [
-                        'user_id' => $userId,
-                        'question_id' => $questionId,
-                        'course_id' => $meta['course_id'] ?? null,
-                        'qualification_id' => $meta['qualification_id'] ?? null,
-                        'topic_id' => $meta['topic_id'] ?? null,
-                        'session_id' => $sessionId,
-                        'source' => $source,
-                        'selected_answer' => $selectedAnswer,
-                        'is_correct' => $isCorrect,
-                    ]);
-                } catch (Throwable $ignored) {
+                offline_sync_write_receipt(
+                    $pdo,
+                    $userId,
+                    $clientEventId,
+                    $type,
+                    $deviceId !== '' ? $deviceId : null,
+                    $event,
+                    $resultPayload,
+                    $receiptStatus
+                );
+
+                $pdo->commit();
+
+                if ($receiptStatus === 'duplicate') {
+                    $duplicateCount++;
+                    $duplicateEventIds[] = $clientEventId;
+                } else {
+                    $processedCount++;
+                    $processedEventIds[] = $clientEventId;
                 }
-
-                $resultPayload = [
-                    'type' => 'answer_upsert',
-                    'question_id' => $questionId,
-                    'selected_answer' => $selectedAnswer,
-                    'is_correct' => $isCorrect,
-                    'progress' => $progress,
-                ];
-            } elseif ($type === 'bookmark_set') {
-                $questionId = trim((string)($payload['question_id'] ?? ''));
-                if ($questionId === '') {
-                    throw new RuntimeException('bookmark_set.question_id zorunludur.');
+            } catch (Throwable $processingError) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
                 }
-
-                $isBookmarked = filter_var($payload['is_bookmarked'] ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-                if ($isBookmarked === null) {
-                    throw new RuntimeException('bookmark_set.is_bookmarked boolean olmalıdır.');
-                }
-
-                $meta = study_get_question_meta($pdo, $questionId);
-                if (!$meta['exists']) {
-                    throw new RuntimeException('Soru bulunamadı.');
-                }
-
-                $bookmarkResult = study_set_bookmark_state($pdo, $userId, $questionId, (bool)$isBookmarked);
-                $resultPayload = [
-                    'type' => 'bookmark_set',
-                    'bookmark' => $bookmarkResult,
-                ];
-            } elseif ($type === 'session_summary') {
-                $sessionPayload = [
-                    'course_id' => $payload['course_id'] ?? null,
-                    'qualification_id' => $payload['qualification_id'] ?? null,
-                    'question_type' => $payload['question_type'] ?? null,
-                    'pool_type' => $payload['pool_type'] ?? null,
-                    'requested_question_count' => (int)($payload['requested_question_count'] ?? 0),
-                    'served_question_count' => (int)($payload['served_question_count'] ?? 0),
-                    'correct_count' => (int)($payload['correct_count'] ?? 0),
-                    'wrong_count' => (int)($payload['wrong_count'] ?? 0),
-                    'duration_seconds' => (int)($payload['duration_seconds'] ?? 0),
-                ];
-
-                $session = study_insert_session($pdo, $userId, $sessionPayload);
-                $resultPayload = [
-                    'type' => 'session_summary',
-                    'session' => $session,
-                ];
-            } else {
-                throw new RuntimeException('Desteklenmeyen event type: ' . $type);
+                throw $processingError;
             }
-
-            offline_sync_write_receipt($pdo, $userId, $clientEventId, $type, $deviceId !== '' ? $deviceId : null, $event, $resultPayload);
-
-            $processedCount++;
-            $processedEventIds[] = $clientEventId;
         } catch (Throwable $eventError) {
             $failedCount++;
             $failedEvents[] = [
@@ -181,6 +655,7 @@ try {
         'processed_event_ids' => $processedEventIds,
         'duplicate_event_ids' => $duplicateEventIds,
         'failed_events' => $failedEvents,
+        'remote_attempt_map' => $remoteAttemptMap,
     ]);
 } catch (Throwable $e) {
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
