@@ -3,6 +3,28 @@
 require_once __DIR__ . '/auth_helper.php';
 require_once __DIR__ . '/study_helper.php';
 
+function mock_exam_debug_log(string $stage, array $context = []): void
+{
+    $line = '[mock_exam][' . $stage . '] ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    error_log($line !== false ? $line : ('[mock_exam][' . $stage . ']'));
+}
+
+function mock_exam_decode_json_payload($value): ?array
+{
+    if (is_array($value)) {
+        return $value;
+    }
+    if (!is_string($value)) {
+        return null;
+    }
+    $raw = trim($value);
+    if ($raw === '') {
+        return null;
+    }
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : null;
+}
+
 function mock_exam_q(string $column): string
 {
     return '`' . str_replace('`', '', $column) . '`';
@@ -70,6 +92,12 @@ function mock_exam_get_attempt_schema(PDO $pdo): array
         'wrong_count' => mock_exam_pick($cols, ['wrong_count'], false),
         'blank_count' => mock_exam_pick($cols, ['blank_count'], false),
         'success_rate' => mock_exam_pick($cols, ['success_rate'], false),
+        'source' => mock_exam_pick($cols, ['source'], false),
+        'summary_json' => mock_exam_pick($cols, ['summary_json'], false),
+        'detail_json' => mock_exam_pick($cols, ['detail_json'], false),
+        'lesson_report_json' => mock_exam_pick($cols, ['lesson_report_json'], false),
+        'questions_json' => mock_exam_pick($cols, ['questions_json'], false),
+        'fingerprint' => mock_exam_pick($cols, ['fingerprint', 'sync_fingerprint', 'offline_fingerprint', 'payload_fingerprint'], false),
     ];
 }
 
@@ -217,6 +245,8 @@ function mock_exam_format_attempt(array $row): array
 
     return [
         'id' => (string)($row['id'] ?? ''),
+        'remote_attempt_id' => (string)($row['id'] ?? ''),
+        'source_attempt_id' => $row['source_attempt_id'] ?? null,
         'qualification_id' => $row['qualification_id'] ?? null,
         'qualification_name' => $row['qualification_name'] ?? null,
         'mode' => (string)($row['mode'] ?? 'standard'),
@@ -229,12 +259,14 @@ function mock_exam_format_attempt(array $row): array
         'warning_message' => $row['warning_message'] ?? null,
         'started_at' => $row['started_at'] ?? null,
         'submitted_at' => $row['submitted_at'] ?? null,
+        'completed_at' => $row['submitted_at'] ?? null,
         'abandoned_at' => $row['abandoned_at'] ?? null,
         'correct_count' => $correct,
         'wrong_count' => $wrong,
         'blank_count' => $blank,
         'success_rate' => $successRate,
         'answered_count' => $answered,
+        'duration_seconds' => (int)($row['elapsed_seconds'] ?? 0),
     ];
 }
 
@@ -835,6 +867,8 @@ function mock_exam_history_item_from_attempt(array $attempt): array
 
     return [
         'id' => (string)($attempt['id'] ?? ''),
+        'remote_attempt_id' => (string)($attempt['id'] ?? ''),
+        'source_attempt_id' => $attempt['source_attempt_id'] ?? null,
         'qualification_id' => $attempt['qualification_id'] ?? null,
         'qualification_name' => $attempt['qualification_name'] ?? null,
         'requested_question_count' => (int)($attempt['requested_question_count'] ?? 0),
@@ -845,8 +879,10 @@ function mock_exam_history_item_from_attempt(array $attempt): array
         'wrong_count' => $wrong,
         'blank_count' => $blank,
         'success_rate' => $successRate,
+        'duration_seconds' => (int)($attempt['elapsed_seconds'] ?? 0),
         'started_at' => $attempt['started_at'] ?? null,
         'submitted_at' => $attempt['submitted_at'] ?? null,
+        'completed_at' => $attempt['submitted_at'] ?? null,
         'abandoned_at' => $attempt['abandoned_at'] ?? null,
         'warning_message' => $attempt['warning_message'] ?? null,
     ];
@@ -907,14 +943,60 @@ function mock_exam_fetch_attempt_detail(PDO $pdo, string $userId, string $attemp
     $attempt = mock_exam_format_attempt($row);
     $withResult = in_array($attempt['status'], ['completed', 'abandoned'], true);
     $questions = mock_exam_fetch_attempt_questions($pdo, $attemptId, $withResult);
+
+    $detailJson = null;
+    if (!empty($a['detail_json'])) {
+        $detailJson = mock_exam_decode_json_payload($row[$a['detail_json']] ?? null);
+    }
+    $summaryJson = null;
+    if (!empty($a['summary_json'])) {
+        $summaryJson = mock_exam_decode_json_payload($row[$a['summary_json']] ?? null);
+    }
+    $lessonReportJson = null;
+    if (!empty($a['lesson_report_json'])) {
+        $lessonReportJson = mock_exam_decode_json_payload($row[$a['lesson_report_json']] ?? null);
+    }
+    $questionsJson = null;
+    if (!empty($a['questions_json'])) {
+        $questionsJson = mock_exam_decode_json_payload($row[$a['questions_json']] ?? null);
+    }
+
+    if (empty($questions) && is_array($detailJson) && !empty($detailJson['questions']) && is_array($detailJson['questions'])) {
+        $questions = $detailJson['questions'];
+    }
+    if (empty($questions) && is_array($questionsJson) && !empty($questionsJson)) {
+        $questions = $questionsJson;
+    }
+
     $summary = mock_exam_standardize_summary($attempt, $questions);
+    if ((int)($summary['total_questions'] ?? 0) === 0 && is_array($summaryJson)) {
+        $summary = array_merge($summary, $summaryJson);
+    }
+    if ((int)($summary['total_questions'] ?? 0) === 0 && is_array($detailJson) && !empty($detailJson['summary']) && is_array($detailJson['summary'])) {
+        $summary = array_merge($summary, $detailJson['summary']);
+    }
+
     $lessonReport = mock_exam_build_lesson_report($pdo, $attemptId);
+    if (empty($lessonReport) && is_array($lessonReportJson) && !empty($lessonReportJson)) {
+        $lessonReport = $lessonReportJson;
+    }
+    if (empty($lessonReport) && is_array($detailJson) && !empty($detailJson['lesson_report']) && is_array($detailJson['lesson_report'])) {
+        $lessonReport = $detailJson['lesson_report'];
+    }
+
+    mock_exam_debug_log('detail.response', [
+        'attempt_id' => $attemptId,
+        'question_count' => is_array($questions) ? count($questions) : 0,
+        'lesson_report_count' => is_array($lessonReport) ? count($lessonReport) : 0,
+    ]);
+
     $insights = mock_exam_pick_course_insights($lessonReport);
     return [
         'attempt' => $attempt,
         'questions' => $questions,
         'summary' => $summary,
         'lesson_report' => $lessonReport,
+        'statistics' => $summary,
         'strongest_course' => $insights['strongest_course'],
         'weakest_course' => $insights['weakest_course'],
         'most_blank_course' => $insights['most_blank_course'],
@@ -1402,11 +1484,12 @@ function mock_exam_fetch_history(PDO $pdo, string $userId, array $filters): arra
         $params[] = $status;
     }
 
-    $orderBy = 'a.' . ($a['created_at'] ? mock_exam_q($a['created_at']) : mock_exam_q($a['id'])) . ' DESC';
+    $orderTimeCol = $a['submitted_at'] ?: ($a['created_at'] ?: $a['id']);
+    $orderBy = 'a.' . mock_exam_q($orderTimeCol) . ' DESC';
     if ($sort === 'oldest') {
-        $orderBy = 'a.' . ($a['created_at'] ? mock_exam_q($a['created_at']) : mock_exam_q($a['id'])) . ' ASC';
+        $orderBy = 'a.' . mock_exam_q($orderTimeCol) . ' ASC';
     } elseif ($sort === 'best' && $a['success_rate']) {
-        $orderBy = 'a.' . mock_exam_q($a['success_rate']) . ' DESC, ' . ($a['created_at'] ? ('a.' . mock_exam_q($a['created_at']) . ' DESC') : ('a.' . mock_exam_q($a['id']) . ' DESC'));
+        $orderBy = 'a.' . mock_exam_q($a['success_rate']) . ' DESC, a.' . mock_exam_q($orderTimeCol) . ' DESC';
     }
 
     $sqlCount = 'SELECT COUNT(*) FROM ' . mock_exam_q($a['table']) . ' a WHERE ' . implode(' AND ', $where);
@@ -1429,13 +1512,21 @@ function mock_exam_fetch_history(PDO $pdo, string $userId, array $filters): arra
         $status = (string)($attempt['status'] ?? '');
         if (in_array($status, ['completed', 'abandoned'], true)) {
             $agg = mock_exam_calculate_attempt_aggregates($pdo, (string)$attempt['id']);
-            $attempt['correct_count'] = (int)($agg['correct_count'] ?? 0);
-            $attempt['wrong_count'] = (int)($agg['wrong_count'] ?? 0);
-            $attempt['blank_count'] = (int)($agg['blank_count'] ?? 0);
-            $attempt['success_rate'] = (float)($agg['success_rate'] ?? 0.0);
+            if ((int)($agg['total_questions'] ?? 0) > 0) {
+                $attempt['correct_count'] = (int)($agg['correct_count'] ?? 0);
+                $attempt['wrong_count'] = (int)($agg['wrong_count'] ?? 0);
+                $attempt['blank_count'] = (int)($agg['blank_count'] ?? 0);
+                $attempt['success_rate'] = (float)($agg['success_rate'] ?? 0.0);
+            }
         }
         $items[] = mock_exam_history_item_from_attempt($attempt);
     }
+
+    mock_exam_debug_log('history.response', [
+        'user_id' => $userId,
+        'attempt_ids' => array_values(array_map(static fn(array $i): string => (string)($i['id'] ?? ''), $items)),
+        'total' => $total,
+    ]);
 
     return [
         'items' => $items,

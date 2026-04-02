@@ -196,6 +196,89 @@ function offline_sync_normalize_optional_answer($value): ?string
     return $v;
 }
 
+function offline_sync_normalize_datetime_utc(?string $raw): ?string
+{
+    $value = trim((string)$raw);
+    if ($value === '') {
+        return null;
+    }
+
+    $ts = strtotime($value);
+    if ($ts === false) {
+        return null;
+    }
+
+    return gmdate('Y-m-d H:i:s', $ts);
+}
+
+function offline_sync_extract_questions_from_payload(array $payload): array
+{
+    $questionsJson = $payload['questions_json'] ?? null;
+    $questions = is_array($questionsJson) ? $questionsJson : offline_sync_decode_json_payload($questionsJson);
+    if (is_array($questions) && $questions) {
+        return $questions;
+    }
+
+    $detailJson = $payload['detail_json'] ?? null;
+    $detail = is_array($detailJson) ? $detailJson : offline_sync_decode_json_payload($detailJson);
+    if (is_array($detail) && !empty($detail['questions']) && is_array($detail['questions'])) {
+        return $detail['questions'];
+    }
+
+    if (!empty($payload['questions']) && is_array($payload['questions'])) {
+        return $payload['questions'];
+    }
+
+    return [];
+}
+
+function offline_sync_build_lesson_report_from_questions(array $questions, string $qualificationId): array
+{
+    $agg = [];
+    foreach ($questions as $q) {
+        if (!is_array($q)) {
+            continue;
+        }
+
+        $courseId = (string)($q['course_id'] ?? '__none__');
+        $courseName = trim((string)($q['course_name'] ?? ''));
+        if (!isset($agg[$courseId])) {
+            $agg[$courseId] = [
+                'qualification_id' => $qualificationId,
+                'qualification_name' => null,
+                'course_id' => ($courseId === '__none__' ? null : $courseId),
+                'course_name' => ($courseName !== '' ? $courseName : null),
+                'total_questions' => 0,
+                'correct_count' => 0,
+                'wrong_count' => 0,
+                'blank_count' => 0,
+                'success_rate' => 0.0,
+            ];
+        }
+
+        $selected = offline_sync_normalize_optional_answer($q['selected_answer'] ?? null);
+        $correct = offline_sync_normalize_optional_answer($q['correct_answer'] ?? null);
+
+        $agg[$courseId]['total_questions']++;
+        if ($selected === null) {
+            $agg[$courseId]['blank_count']++;
+        } elseif ($correct !== null && $selected === $correct) {
+            $agg[$courseId]['correct_count']++;
+        } else {
+            $agg[$courseId]['wrong_count']++;
+        }
+    }
+
+    foreach ($agg as $k => $item) {
+        $total = (int)$item['total_questions'];
+        $agg[$k]['success_rate'] = $total > 0
+            ? round(((int)$item['correct_count'] / $total) * 100, 2)
+            : 0.0;
+    }
+
+    return array_values($agg);
+}
+
 function offline_sync_receipt_extract_remote_attempt_id(?array $receipt): ?string
 {
     if (!$receipt) {
@@ -279,8 +362,8 @@ function offline_sync_mock_exam_find_duplicate(PDO $pdo, string $userId, array $
     }
 
     $qualificationId = trim((string)($payload['qualification_id'] ?? ''));
-    $startedAt = trim((string)($payload['started_at'] ?? ''));
-    $completedAt = trim((string)($payload['completed_at'] ?? ''));
+    $startedAt = offline_sync_normalize_datetime_utc((string)($payload['started_at'] ?? ''));
+    $completedAt = offline_sync_normalize_datetime_utc((string)($payload['completed_at'] ?? ''));
 
     $where = [mock_exam_q($schema['user_id']) . ' = ?'];
     $params = [$userId];
@@ -289,11 +372,11 @@ function offline_sync_mock_exam_find_duplicate(PDO $pdo, string $userId, array $
         $where[] = mock_exam_q($schema['qualification_id']) . ' = ?';
         $params[] = $qualificationId;
     }
-    if ($startedAt !== '' && $schema['started_at']) {
+    if ($startedAt !== null && $schema['started_at']) {
         $where[] = mock_exam_q($schema['started_at']) . ' = ?';
         $params[] = $startedAt;
     }
-    if ($completedAt !== '' && $schema['submitted_at']) {
+    if ($completedAt !== null && $schema['submitted_at']) {
         $where[] = mock_exam_q($schema['submitted_at']) . ' = ?';
         $params[] = $completedAt;
     }
@@ -437,8 +520,10 @@ function offline_sync_handle_mock_exam_completed(PDO $pdo, string $userId, array
 
     $localAttemptId = trim((string)($payload['local_attempt_id'] ?? ''));
     $qualificationId = trim((string)($payload['qualification_id'] ?? ''));
-    $startedAt = trim((string)($payload['started_at'] ?? ''));
-    $completedAt = trim((string)($payload['completed_at'] ?? ''));
+    $startedAtRaw = trim((string)($payload['started_at'] ?? ''));
+    $completedAtRaw = trim((string)($payload['completed_at'] ?? ''));
+    $startedAt = offline_sync_normalize_datetime_utc($startedAtRaw);
+    $completedAt = offline_sync_normalize_datetime_utc($completedAtRaw);
     $durationSeconds = max(0, (int)($payload['duration_seconds'] ?? 0));
     $totalQuestions = max(0, (int)($payload['total_questions'] ?? 0));
     $answeredQuestions = max(0, (int)($payload['answered_questions'] ?? 0));
@@ -455,15 +540,53 @@ function offline_sync_handle_mock_exam_completed(PDO $pdo, string $userId, array
         throw new RuntimeException('mock_exam.completed.qualification_id zorunludur.');
     }
 
+    offline_sync_debug_log('mock_exam.completed.timestamps.incoming', [
+        'local_attempt_id' => $localAttemptId,
+        'started_at' => $startedAtRaw,
+        'completed_at' => $completedAtRaw,
+    ]);
+
+    offline_sync_debug_log('mock_exam.completed.timestamps.normalized', [
+        'local_attempt_id' => $localAttemptId,
+        'started_at_utc' => $startedAt,
+        'completed_at_utc' => $completedAt,
+    ]);
+
     $summaryJson = $payload['summary_json'] ?? null;
     $detailJson = $payload['detail_json'] ?? null;
     $lessonReportJson = $payload['lesson_report_json'] ?? null;
-    $questionsJson = $payload['questions_json'] ?? null;
+    $questions = offline_sync_extract_questions_from_payload($payload);
 
-    $questions = is_array($questionsJson) ? $questionsJson : offline_sync_decode_json_payload($questionsJson);
-    if (!is_array($questions)) {
-        $questions = [];
+    if (!$questions && $totalQuestions > 0) {
+        throw new RuntimeException('mock_exam.completed.questions payload zorunludur.');
     }
+
+    if (!is_array($summaryJson)) {
+        $summaryJson = [
+            'total_questions' => $totalQuestions,
+            'answered_questions' => $answeredQuestions,
+            'correct_count' => $correctCount,
+            'wrong_count' => $wrongCount,
+            'blank_count' => $blankCount,
+            'success_rate' => $successRate,
+            'duration_seconds' => $durationSeconds,
+            'completed_at' => $completedAt,
+        ];
+    }
+
+    if (!is_array($lessonReportJson) || empty($lessonReportJson)) {
+        $lessonReportJson = offline_sync_build_lesson_report_from_questions($questions, $qualificationId);
+    }
+
+    if (!is_array($detailJson)) {
+        $detailJson = [
+            'summary' => $summaryJson,
+            'questions' => $questions,
+            'lesson_report' => $lessonReportJson,
+        ];
+    }
+
+    $questionsJson = $questions;
 
     $fingerprint = offline_sync_mock_exam_fingerprint($payload);
     $duplicateId = offline_sync_mock_exam_find_duplicate($pdo, $userId, $attemptSchema, $localAttemptId, $fingerprint, $payload);
@@ -472,6 +595,8 @@ function offline_sync_handle_mock_exam_completed(PDO $pdo, string $userId, array
             'local_attempt_id' => $localAttemptId,
             'remote_attempt_id' => $duplicateId,
             'source_attempt_id' => $localAttemptId,
+            'started_at_utc' => $startedAt,
+            'completed_at_utc' => $completedAt,
         ]);
 
         return [
@@ -535,7 +660,7 @@ function offline_sync_handle_mock_exam_completed(PDO $pdo, string $userId, array
     if (!empty($attemptSchema['questions_json'])) {
         $cols[] = mock_exam_q($attemptSchema['questions_json']);
         $holders[] = '?';
-        $params[] = json_encode($questionsJson, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $params[] = json_encode($questions, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
     if (!empty($attemptSchema['fingerprint'])) {
         $cols[] = mock_exam_q($attemptSchema['fingerprint']);
@@ -543,12 +668,12 @@ function offline_sync_handle_mock_exam_completed(PDO $pdo, string $userId, array
         $params[] = $fingerprint;
     }
 
-    if (!empty($attemptSchema['started_at']) && $startedAt !== '') {
+    if (!empty($attemptSchema['started_at']) && $startedAt !== null) {
         $cols[] = mock_exam_q($attemptSchema['started_at']);
         $holders[] = '?';
         $params[] = $startedAt;
     }
-    if (!empty($attemptSchema['submitted_at']) && $completedAt !== '') {
+    if (!empty($attemptSchema['submitted_at']) && $completedAt !== null) {
         $cols[] = mock_exam_q($attemptSchema['submitted_at']);
         $holders[] = '?';
         $params[] = $completedAt;
@@ -615,8 +740,8 @@ function offline_sync_handle_mock_exam_completed(PDO $pdo, string $userId, array
 
         if (!empty($questionSchema['answered_at'])) {
             if ($selected !== null) {
-                $answeredAt = trim((string)($questionRow['answered_at'] ?? $completedAt));
-                if ($answeredAt !== '') {
+                $answeredAt = offline_sync_normalize_datetime_utc((string)($questionRow['answered_at'] ?? $completedAt));
+                if ($answeredAt !== null) {
                     $qCols[] = mock_exam_q($questionSchema['answered_at']);
                     $qVals[] = '?';
                     $qParams[] = $answeredAt;
@@ -651,7 +776,14 @@ function offline_sync_handle_mock_exam_completed(PDO $pdo, string $userId, array
         'local_attempt_id' => $localAttemptId,
         'remote_attempt_id' => $attemptId,
         'source_attempt_id' => $localAttemptId,
+        'started_at_utc' => $startedAt,
+        'completed_at_utc' => $completedAt,
         'question_rows_inserted' => count($eventQuestions),
+    ]);
+
+    offline_sync_debug_log('mock_exam.lesson_report.inserted', [
+        'remote_attempt_id' => $attemptId,
+        'lesson_report_rows' => is_array($lessonReportJson) ? count($lessonReportJson) : 0,
     ]);
 
     if ($eventQuestions) {
