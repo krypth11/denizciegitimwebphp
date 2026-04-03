@@ -230,7 +230,11 @@ $(document).ready(function () {
         if (typeof window.appSetButtonLoading === 'function') window.appSetButtonLoading($btn, false);
 
         if (!res.success) {
-            await appAlert('Hata', res.message || 'Hikaye oluşturulamadı.', 'error');
+            const baseMessage = res.message || 'Hikaye oluşturulamadı.';
+            const debugError = (res.data && (res.data.error || res.data.type))
+                ? `\n\nTeknik Detay: ${res.data.error || ''}${res.data.type ? ` (${res.data.type})` : ''}`
+                : '';
+            await appAlert('Hata', baseMessage + debugError, 'error');
             return;
         }
 

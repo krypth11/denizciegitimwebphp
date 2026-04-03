@@ -29,6 +29,8 @@ function stories_safe_error_payload(Throwable $e): array
     return [
         'error' => $e->getMessage(),
         'type' => get_class($e),
+        'file' => $e->getFile(),
+        'line' => $e->getLine(),
     ];
 }
 
@@ -48,8 +50,21 @@ try {
         case 'create': {
             story_log('create request geldi', [
                 'has_title' => isset($_POST['title']),
+                'title_length' => mb_strlen((string)($_POST['title'] ?? '')),
                 'has_thumbnail' => isset($_FILES['thumbnail']),
                 'has_image' => isset($_FILES['image']),
+                'thumbnail_meta' => [
+                    'name' => (string)($_FILES['thumbnail']['name'] ?? ''),
+                    'size' => (int)($_FILES['thumbnail']['size'] ?? 0),
+                    'error' => (int)($_FILES['thumbnail']['error'] ?? -1),
+                    'tmp_name' => (string)($_FILES['thumbnail']['tmp_name'] ?? ''),
+                ],
+                'image_meta' => [
+                    'name' => (string)($_FILES['image']['name'] ?? ''),
+                    'size' => (int)($_FILES['image']['size'] ?? 0),
+                    'error' => (int)($_FILES['image']['error'] ?? -1),
+                    'tmp_name' => (string)($_FILES['image']['tmp_name'] ?? ''),
+                ],
                 'admin_id' => $adminId,
             ]);
 
@@ -76,6 +91,11 @@ try {
                 $imagePath = story_store_uploaded_image($_FILES['image'], 'image');
                 $storyId = story_create($pdo, $title, $thumbPath, $imagePath, $adminId);
             } catch (Throwable $e) {
+                story_log('create transaction rollback cleanup', [
+                    'error' => $e->getMessage(),
+                    'thumb_path' => $thumbPath,
+                    'image_path' => $imagePath,
+                ]);
                 story_delete_file_if_exists($thumbPath);
                 story_delete_file_if_exists($imagePath);
                 throw $e;
@@ -124,6 +144,11 @@ try {
             stories_response(false, 'Geçersiz işlem.', [], 400);
     }
 } catch (Throwable $e) {
-    story_log('admin stories error', ['error' => $e->getMessage()]);
+    story_log('admin stories error', [
+        'error' => $e->getMessage(),
+        'type' => get_class($e),
+        'file' => $e->getFile(),
+        'line' => $e->getLine(),
+    ]);
     stories_response(false, 'İşlem sırasında bir sunucu hatası oluştu.', stories_safe_error_payload($e), 500);
 }

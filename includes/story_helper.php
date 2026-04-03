@@ -5,7 +5,12 @@ require_once __DIR__ . '/functions.php';
 function story_log(string $message, array $context = []): void
 {
     if (!empty($context)) {
-        error_log('[STORY] ' . $message . ' | ' . json_encode($context, JSON_UNESCAPED_UNICODE));
+        $json = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        if ($json === false) {
+            $json = '{"log_context_error":"json_encode_failed"}';
+        }
+
+        error_log('[STORY] ' . $message . ' | ' . $json);
         return;
     }
 
@@ -27,16 +32,89 @@ function story_project_root(): string
     return dirname(__DIR__);
 }
 
+function story_upload_error_message(int $errorCode): string
+{
+    $map = [
+        UPLOAD_ERR_OK => 'Upload başarılı.',
+        UPLOAD_ERR_INI_SIZE => 'Dosya php.ini upload_max_filesize limitini aşıyor.',
+        UPLOAD_ERR_FORM_SIZE => 'Dosya form MAX_FILE_SIZE limitini aşıyor.',
+        UPLOAD_ERR_PARTIAL => 'Dosya kısmi yüklendi.',
+        UPLOAD_ERR_NO_FILE => 'Dosya yüklenmedi.',
+        UPLOAD_ERR_NO_TMP_DIR => 'Sunucuda geçici upload dizini bulunamadı.',
+        UPLOAD_ERR_CANT_WRITE => 'Dosya diske yazılamadı.',
+        UPLOAD_ERR_EXTENSION => 'Dosya yükleme bir PHP uzantısı tarafından durduruldu.',
+    ];
+
+    return $map[$errorCode] ?? ('Bilinmeyen upload hatası (' . $errorCode . ')');
+}
+
+function story_upload_root_abs(): string
+{
+    $custom = trim((string)(getenv('STORY_UPLOAD_ROOT') ?: ''));
+    if ($custom !== '') {
+        $clean = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $custom);
+        return rtrim($clean, DIRECTORY_SEPARATOR);
+    }
+
+    return story_project_root() . DIRECTORY_SEPARATOR . 'uploads';
+}
+
+function story_ensure_directory_ready(string $dir): void
+{
+    clearstatcache(true, $dir);
+
+    if (is_file($dir)) {
+        throw new RuntimeException('Upload yolu bir dosyaya işaret ediyor: ' . $dir);
+    }
+
+    if (!is_dir($dir)) {
+        $mkdirOk = @mkdir($dir, 0775, true);
+        $mkdirErr = error_get_last();
+        clearstatcache(true, $dir);
+
+        story_log('mkdir denemesi', [
+            'path' => $dir,
+            'mkdir_ok' => $mkdirOk,
+            'mkdir_error' => $mkdirErr['message'] ?? null,
+            'exists_after' => is_dir($dir),
+        ]);
+
+        if (!$mkdirOk && !is_dir($dir)) {
+            throw new RuntimeException('Upload dizini oluşturulamadı: ' . $dir . ' | ' . (string)($mkdirErr['message'] ?? 'unknown_error'));
+        }
+    }
+
+    if (!is_writable($dir)) {
+        @chmod($dir, 0775);
+        clearstatcache(true, $dir);
+    }
+
+    if (!is_writable($dir)) {
+        throw new RuntimeException('Upload dizini yazılabilir değil: ' . $dir);
+    }
+
+    story_log('directory ready', [
+        'path' => $dir,
+        'is_dir' => is_dir($dir),
+        'is_writable' => is_writable($dir),
+    ]);
+}
+
 function story_upload_dirs(): array
 {
-    $base = story_project_root() . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'stories';
+    $uploadsRoot = story_upload_root_abs();
+    $base = $uploadsRoot . DIRECTORY_SEPARATOR . 'stories';
     $thumb = $base . DIRECTORY_SEPARATOR . 'thumbnails';
     $image = $base . DIRECTORY_SEPARATOR . 'images';
 
+    story_log('upload directory check başladı', [
+        'project_root' => story_project_root(),
+        'uploads_root' => $uploadsRoot,
+        'stories_base' => $base,
+    ]);
+
     foreach ([$base, $thumb, $image] as $dir) {
-        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
-            throw new RuntimeException('Upload dizini oluşturulamadı: ' . $dir);
-        }
+        story_ensure_directory_ready($dir);
     }
 
     return [
@@ -122,8 +200,17 @@ function story_ensure_schema(PDO $pdo): void
 
 function story_validate_upload(array $file, string $label): array
 {
+    story_log('upload validate başladı', [
+        'label' => $label,
+        'name' => (string)($file['name'] ?? ''),
+        'size' => (int)($file['size'] ?? 0),
+        'error_code' => (int)($file['error'] ?? -1),
+        'tmp_name' => (string)($file['tmp_name'] ?? ''),
+    ]);
+
     if (!isset($file['error']) || (int)$file['error'] !== UPLOAD_ERR_OK) {
-        throw new RuntimeException($label . ' yükleme hatası oluştu.');
+        $code = (int)($file['error'] ?? -1);
+        throw new RuntimeException($label . ' yükleme hatası: ' . story_upload_error_message($code));
     }
 
     $tmp = (string)($file['tmp_name'] ?? '');
@@ -192,10 +279,48 @@ function story_store_uploaded_image(array $file, string $type): string
     $dir = $type === 'thumbnail' ? $dirs['thumbnails'] : $dirs['images'];
     $relativeDir = $type === 'thumbnail' ? 'uploads/stories/thumbnails' : 'uploads/stories/images';
 
+    story_log('upload hazırlığı', [
+        'type' => $type,
+        'tmp_name' => $validated['tmp'],
+        'dir' => $dir,
+        'relative_dir' => $relativeDir,
+        'dir_exists' => is_dir($dir),
+        'dir_writable' => is_writable($dir),
+        'tmp_exists' => is_file($validated['tmp']),
+        'tmp_readable' => is_readable($validated['tmp']),
+        'tmp_is_uploaded_file' => is_uploaded_file($validated['tmp']),
+    ]);
+
     $filename = generate_uuid() . '.' . $validated['ext'];
     $target = $dir . DIRECTORY_SEPARATOR . $filename;
+
+    story_log('move_uploaded_file denemesi', [
+        'type' => $type,
+        'tmp_name' => $validated['tmp'],
+        'target' => $target,
+        'target_dir' => dirname($target),
+        'target_dir_exists' => is_dir(dirname($target)),
+        'target_dir_writable' => is_writable(dirname($target)),
+    ]);
+
     if (!move_uploaded_file($validated['tmp'], $target)) {
-        throw new RuntimeException($label . ' dosyası sunucuya taşınamadı.');
+        $moveErr = error_get_last();
+        story_log('move_uploaded_file başarısız', [
+            'type' => $type,
+            'tmp_name' => $validated['tmp'],
+            'target' => $target,
+            'target_dir_exists' => is_dir(dirname($target)),
+            'target_dir_writable' => is_writable(dirname($target)),
+            'tmp_exists' => is_file($validated['tmp']),
+            'tmp_is_uploaded_file' => is_uploaded_file($validated['tmp']),
+            'error' => $moveErr['message'] ?? null,
+        ]);
+        throw new RuntimeException($label . ' dosyası sunucuya taşınamadı. Hedef dizin izinlerini kontrol edin.');
+    }
+
+    clearstatcache(true, $target);
+    if (!is_file($target) || filesize($target) <= 0) {
+        throw new RuntimeException($label . ' dosyası taşındı ancak dosya doğrulanamadı.');
     }
 
     $url = story_build_public_url($relativeDir . '/' . $filename);
@@ -204,6 +329,7 @@ function story_store_uploaded_image(array $file, string $type): string
         'type' => $type,
         'mime' => $validated['mime'],
         'size' => $validated['size'],
+        'target' => $target,
         'url' => $url,
     ]);
 
@@ -246,6 +372,9 @@ function story_create(PDO $pdo, string $title, string $thumbnailUrl, string $ima
     ];
 
     story_log('insert payload', [
+        'title' => $title,
+        'thumbnail_url' => $thumbnailUrl,
+        'image_url' => $imageUrl,
         'columns' => array_keys($payload),
         'story_id' => $id,
     ]);
