@@ -55,11 +55,21 @@ function offline_sync_debug_log(string $stage, array $context = []): void
 function offline_sync_normalize_source(?string $source): string
 {
     $value = strtolower(trim((string)$source));
-    $allowed = ['study', 'daily_quiz', 'exam', 'maritime_english', 'maritime-english', 'me', 'me_quiz', 'maritime_english_quiz', 'offline_sync'];
+    $allowed = ['study', 'daily_quiz', 'exam', 'mock_exam', 'mock-exam', 'maritime_english', 'maritime-english', 'me', 'me_quiz', 'maritime_english_quiz', 'offline_sync'];
     if (!in_array($value, $allowed, true)) {
         return 'offline_sync';
     }
+
+    if ($value === 'mock-exam') {
+        return 'mock_exam';
+    }
     return $value;
+}
+
+function offline_sync_is_mock_exam_source(?string $source): bool
+{
+    $v = strtolower(trim((string)$source));
+    return in_array($v, ['mock_exam', 'mock-exam'], true);
 }
 
 function offline_sync_normalize_event_type(string $type): string
@@ -410,7 +420,8 @@ function offline_sync_handle_study_answer_upsert(PDO $pdo, string $userId, array
 {
     $questionId = trim((string)($payload['question_id'] ?? ''));
     $selectedAnswer = offline_sync_normalize_optional_answer($payload['selected_answer'] ?? null);
-    $source = offline_sync_normalize_source($payload['source'] ?? 'study');
+    $sourceRaw = (string)($payload['source'] ?? 'study');
+    $source = offline_sync_normalize_source($sourceRaw);
     $sessionId = trim((string)($payload['session_id'] ?? ''));
     $sessionId = $sessionId !== '' ? $sessionId : null;
 
@@ -424,6 +435,26 @@ function offline_sync_handle_study_answer_upsert(PDO $pdo, string $userId, array
             'question_id' => $questionId,
             'skipped' => true,
             'reason' => 'blank_answer_not_counted_as_solved',
+            'domain_writes_performed' => ['none'],
+        ];
+    }
+
+    // Authoritative path isolation:
+    // mock_exam kaynaklı answer_upsert eventleri study domain aggregate yazmaz.
+    if (offline_sync_is_mock_exam_source($sourceRaw) || offline_sync_is_mock_exam_source($source)) {
+        offline_sync_debug_log('study.answer_upsert.skipped', [
+            'reason' => 'authoritative_path_mock_exam_completed',
+            'source' => $sourceRaw,
+            'question_id' => $questionId,
+        ]);
+
+        return [
+            'type' => 'study.answer_upsert',
+            'question_id' => $questionId,
+            'skipped' => true,
+            'reason' => 'authoritative_path_mock_exam_completed',
+            'domain_writes_performed' => ['none'],
+            'domain_writes_skipped' => ['user_progress', 'question_attempt_events', 'statistics'],
         ];
     }
 
@@ -459,7 +490,47 @@ function offline_sync_handle_study_answer_upsert(PDO $pdo, string $userId, array
         'selected_answer' => $selectedAnswer,
         'is_correct' => $isCorrect,
         'progress' => $progress,
+        'domain_writes_performed' => ['user_progress', 'question_attempt_events', 'statistics'],
     ];
+}
+
+function offline_sync_find_existing_study_session(PDO $pdo, string $userId, string $sourceSessionId): ?string
+{
+    $sourceSessionId = trim($sourceSessionId);
+    if ($sourceSessionId === '') {
+        return null;
+    }
+
+    $cols = get_table_columns($pdo, 'study_sessions');
+    if (!$cols || !in_array('user_id', $cols, true)) {
+        return null;
+    }
+
+    $idCol = in_array('id', $cols, true) ? 'id' : null;
+    $sourceColCandidates = ['source_session_id', 'offline_session_id', 'client_session_id', 'session_id'];
+    $sourceCol = null;
+    foreach ($sourceColCandidates as $c) {
+        if (in_array($c, $cols, true)) {
+            $sourceCol = $c;
+            break;
+        }
+    }
+
+    if ($sourceCol === null) {
+        return null;
+    }
+
+    $selectId = $idCol ? ('`' . $idCol . '`') : 'NULL';
+    $sql = 'SELECT ' . $selectId . ' AS id FROM `study_sessions` WHERE `user_id` = ? AND `' . $sourceCol . '` = ? LIMIT 1';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$userId, $sourceSessionId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$row) {
+        return null;
+    }
+
+    return (string)($row['id'] ?? $sourceSessionId);
 }
 
 function offline_sync_handle_study_bookmark_set(PDO $pdo, string $userId, array $payload): array
@@ -493,6 +564,7 @@ function offline_sync_handle_study_session_summary(PDO $pdo, string $userId, arr
     $solved = $correct + $wrong; // blank solved'a dahil edilmez
 
     $sessionPayload = [
+        'source_session_id' => $payload['source_session_id'] ?? ($payload['session_id'] ?? null),
         'course_id' => $payload['course_id'] ?? null,
         'qualification_id' => $payload['qualification_id'] ?? null,
         'question_type' => $payload['question_type'] ?? null,
@@ -504,12 +576,37 @@ function offline_sync_handle_study_session_summary(PDO $pdo, string $userId, arr
         'duration_seconds' => max(0, (int)($payload['duration_seconds'] ?? 0)),
     ];
 
+    $sourceSessionId = trim((string)($sessionPayload['source_session_id'] ?? ''));
+    if ($sourceSessionId !== '') {
+        $existingSessionId = offline_sync_find_existing_study_session($pdo, $userId, $sourceSessionId);
+        if ($existingSessionId !== null) {
+            offline_sync_debug_log('study.session_summary.skipped', [
+                'reason' => 'logical_duplicate_source_session_id',
+                'source_session_id' => $sourceSessionId,
+                'existing_session_id' => $existingSessionId,
+            ]);
+
+            return [
+                'type' => 'study.session_summary',
+                'skipped' => true,
+                'reason' => 'logical_duplicate_source_session_id',
+                'existing_session_id' => $existingSessionId,
+                'source_session_id' => $sourceSessionId,
+                'solved_count' => $solved,
+                'blank_count' => $blank,
+                'domain_writes_performed' => ['none'],
+                'domain_writes_skipped' => ['study_sessions_duplicate_metadata'],
+            ];
+        }
+    }
+
     $session = study_insert_session($pdo, $userId, $sessionPayload);
     return [
         'type' => 'study.session_summary',
         'session' => $session,
         'solved_count' => $solved,
         'blank_count' => $blank,
+        'domain_writes_performed' => ['study_sessions_metadata_only'],
     ];
 }
 
@@ -919,12 +1016,36 @@ try {
                 $receiptStatus = 'processed';
 
                 if ($type === 'study.answer_upsert') {
+                    offline_sync_debug_log('event.branch.selected', [
+                        'client_event_id' => $clientEventId,
+                        'normalized_type' => $type,
+                        'source' => (string)($payload['source'] ?? 'study'),
+                        'branch' => 'study.answer_upsert',
+                    ]);
                     $resultPayload = offline_sync_handle_study_answer_upsert($pdo, $userId, $payload);
                 } elseif ($type === 'study.bookmark_set') {
+                    offline_sync_debug_log('event.branch.selected', [
+                        'client_event_id' => $clientEventId,
+                        'normalized_type' => $type,
+                        'source' => (string)($payload['source'] ?? 'study'),
+                        'branch' => 'study.bookmark_set',
+                    ]);
                     $resultPayload = offline_sync_handle_study_bookmark_set($pdo, $userId, $payload);
                 } elseif ($type === 'study.session_summary') {
+                    offline_sync_debug_log('event.branch.selected', [
+                        'client_event_id' => $clientEventId,
+                        'normalized_type' => $type,
+                        'source' => (string)($payload['source'] ?? 'study'),
+                        'branch' => 'study.session_summary',
+                    ]);
                     $resultPayload = offline_sync_handle_study_session_summary($pdo, $userId, $payload);
                 } elseif ($type === 'mock_exam.completed') {
+                    offline_sync_debug_log('event.branch.selected', [
+                        'client_event_id' => $clientEventId,
+                        'normalized_type' => $type,
+                        'source' => (string)($payload['source'] ?? 'mock_exam'),
+                        'branch' => 'mock_exam.completed',
+                    ]);
                     $resultPayload = offline_sync_handle_mock_exam_completed($pdo, $userId, $payload);
                     $localAttemptId = trim((string)($payload['local_attempt_id'] ?? ''));
                     $remoteAttemptId = trim((string)($resultPayload['remote_attempt_id'] ?? ''));

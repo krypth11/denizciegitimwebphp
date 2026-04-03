@@ -690,6 +690,7 @@ function study_insert_session(PDO $pdo, string $userId, array $payload): array
     $createdAtCol = study_pick_column($cols, ['created_at'], false);
 
     $fieldMap = [
+        'source_session_id' => study_pick_column($cols, ['source_session_id', 'offline_session_id', 'client_session_id', 'session_id'], false),
         'course_id' => study_pick_column($cols, ['course_id'], false),
         'qualification_id' => study_pick_column($cols, ['qualification_id'], false),
         'question_type' => study_pick_column($cols, ['question_type'], false),
@@ -747,6 +748,7 @@ function study_insert_session(PDO $pdo, string $userId, array $payload): array
     return [
         'id' => $sessionId ?: (string)$pdo->lastInsertId(),
         'summary' => [
+            'source_session_id' => $payload['source_session_id'] ?? null,
             'course_id' => $payload['course_id'] ?? null,
             'qualification_id' => $payload['qualification_id'] ?? null,
             'question_type' => $payload['question_type'] ?? null,
