@@ -36,6 +36,18 @@ function stats_rate(int $correct, int $wrong): float
     return round(($correct / $den) * 100, 2);
 }
 
+function stats_normalize_bucket(int $correct, int $wrong): array
+{
+    $c = max(0, $correct);
+    $w = max(0, $wrong);
+    return [
+        'total_correct' => $c,
+        'total_wrong' => $w,
+        'total_solved' => $c + $w,
+        'success_rate' => stats_rate($c, $w),
+    ];
+}
+
 function stats_normalize_source(?string $source): string
 {
     $normalized = strtolower(trim((string)$source));
@@ -49,6 +61,10 @@ function stats_normalize_source(?string $source): string
 
     if (in_array($normalized, ['daily_quiz', 'daily-quiz', 'daily quiz'], true)) {
         return 'daily_quiz';
+    }
+
+    if (in_array($normalized, ['mock_exam', 'mock-exam', 'exam', 'exam_attempt', 'exam_attempt_completed'], true)) {
+        return 'mock_exam';
     }
 
     return str_replace(' ', '_', $normalized);
@@ -186,20 +202,19 @@ try {
         'stats_rows' => [],
     ];
 
-    $sqlSolved = 'SELECT COUNT(*) FROM `question_attempt_events` WHERE `user_id` = ?';
-    $stmtSolved = $pdo->prepare($sqlSolved);
-    $stmtSolved->execute([$userId]);
-    $statistics['total_solved'] = (int)$stmtSolved->fetchColumn();
+    $sqlTotals = 'SELECT '
+        . 'COALESCE(SUM(CASE WHEN `is_correct` = 1 THEN 1 ELSE 0 END),0) AS total_correct, '
+        . 'COALESCE(SUM(CASE WHEN `is_correct` = 0 THEN 1 ELSE 0 END),0) AS total_wrong, '
+        . 'COALESCE(SUM(CASE WHEN `is_correct` IS NULL THEN 1 ELSE 0 END),0) AS total_unknown '
+        . 'FROM `question_attempt_events` WHERE `user_id` = ?';
+    $stmtTotals = $pdo->prepare($sqlTotals);
+    $stmtTotals->execute([$userId]);
+    $rowTotals = $stmtTotals->fetch(PDO::FETCH_ASSOC) ?: [];
 
-    $sqlCorrect = 'SELECT COUNT(*) FROM `question_attempt_events` WHERE `user_id` = ? AND `is_correct` = 1';
-    $stmtCorrect = $pdo->prepare($sqlCorrect);
-    $stmtCorrect->execute([$userId]);
-    $statistics['total_correct'] = (int)$stmtCorrect->fetchColumn();
-
-    $sqlWrong = 'SELECT COUNT(*) FROM `question_attempt_events` WHERE `user_id` = ? AND `is_correct` = 0';
-    $stmtWrong = $pdo->prepare($sqlWrong);
-    $stmtWrong->execute([$userId]);
-    $statistics['total_wrong'] = (int)$stmtWrong->fetchColumn();
+    $normalizedTotals = stats_normalize_bucket((int)($rowTotals['total_correct'] ?? 0), (int)($rowTotals['total_wrong'] ?? 0));
+    $statistics['total_correct'] = (int)$normalizedTotals['total_correct'];
+    $statistics['total_wrong'] = (int)$normalizedTotals['total_wrong'];
+    $statistics['total_solved'] = (int)$normalizedTotals['total_solved'];
 
     $sourceMap = [
         'study' => [
@@ -218,6 +233,13 @@ try {
         ],
         'daily_quiz' => [
             'source' => 'daily_quiz',
+            'total_solved' => 0,
+            'total_correct' => 0,
+            'total_wrong' => 0,
+            'success_rate' => 0.0,
+        ],
+        'mock_exam' => [
+            'source' => 'mock_exam',
             'total_solved' => 0,
             'total_correct' => 0,
             'total_wrong' => 0,
@@ -249,19 +271,52 @@ try {
             ];
         }
 
-        $sourceMap[$sourceKey]['total_solved'] += (int)($row['total_solved'] ?? 0);
         $sourceMap[$sourceKey]['total_correct'] += (int)($row['total_correct'] ?? 0);
         $sourceMap[$sourceKey]['total_wrong'] += (int)($row['total_wrong'] ?? 0);
     }
 
     foreach ($sourceMap as $key => $item) {
-        $sourceMap[$key]['success_rate'] = stats_rate((int)$item['total_correct'], (int)$item['total_wrong']);
+        $normalized = stats_normalize_bucket((int)$item['total_correct'], (int)$item['total_wrong']);
+        $sourceMap[$key]['total_solved'] = (int)$normalized['total_solved'];
+        $sourceMap[$key]['total_correct'] = (int)$normalized['total_correct'];
+        $sourceMap[$key]['total_wrong'] = (int)$normalized['total_wrong'];
+        $sourceMap[$key]['success_rate'] = (float)$normalized['success_rate'];
     }
 
     $statistics['source_stats'] = array_values($sourceMap);
 
-    // İstenen kesin tutarlılık
-    $statistics['total_solved'] = $statistics['total_correct'] + $statistics['total_wrong'];
+    $rawStudyTotals = $sourceMap['study'] ?? ['total_solved' => 0, 'total_correct' => 0, 'total_wrong' => 0];
+    $rawMockExamTotals = $sourceMap['mock_exam'] ?? ['total_solved' => 0, 'total_correct' => 0, 'total_wrong' => 0];
+    stats_dbg('raw source totals', [
+        'user_id' => $userId,
+        'study' => $rawStudyTotals,
+        'mock_exam' => $rawMockExamTotals,
+    ]);
+
+    $mergedCorrect = 0;
+    $mergedWrong = 0;
+    foreach ($sourceMap as $s) {
+        $mergedCorrect += (int)($s['total_correct'] ?? 0);
+        $mergedWrong += (int)($s['total_wrong'] ?? 0);
+    }
+    $mergedNormalized = stats_normalize_bucket($mergedCorrect, $mergedWrong);
+    stats_dbg('merged totals', [
+        'user_id' => $userId,
+        'merged_correct' => $mergedCorrect,
+        'merged_wrong' => $mergedWrong,
+        'merged_solved' => $mergedCorrect + $mergedWrong,
+    ]);
+    stats_dbg('normalized totals', [
+        'user_id' => $userId,
+        'total_correct' => $mergedNormalized['total_correct'],
+        'total_wrong' => $mergedNormalized['total_wrong'],
+        'total_solved' => $mergedNormalized['total_solved'],
+        'total_unknown_is_correct' => (int)($rowTotals['total_unknown'] ?? 0),
+    ]);
+
+    $statistics['total_correct'] = (int)$mergedNormalized['total_correct'];
+    $statistics['total_wrong'] = (int)$mergedNormalized['total_wrong'];
+    $statistics['total_solved'] = (int)$mergedNormalized['total_solved'];
 
     // Son 7 gün event bazlı metrikler (active_days + success_rate)
     $sqlLast7 = 'SELECT '
@@ -322,7 +377,7 @@ try {
         $sqlQualificationStats = 'SELECT '
             . 'qf.' . stats_q($qualIdCol) . ' AS qualification_id, '
             . 'qf.' . stats_q($qualNameCol) . ' AS qualification_name, '
-            . 'COUNT(*) AS total_solved, '
+            . 'SUM(CASE WHEN e.`is_correct` IN (0,1) THEN 1 ELSE 0 END) AS total_solved, '
             . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
             . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
             . 'FROM `question_attempt_events` e '
@@ -338,17 +393,15 @@ try {
         $rowsQualificationStats = $stmtQualificationStats->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         foreach ($rowsQualificationStats as $row) {
-            $totalSolved = (int)($row['total_solved'] ?? 0);
-            $totalCorrect = (int)($row['total_correct'] ?? 0);
-            $totalWrong = (int)($row['total_wrong'] ?? 0);
+            $normalized = stats_normalize_bucket((int)($row['total_correct'] ?? 0), (int)($row['total_wrong'] ?? 0));
 
             $statistics['qualification_stats'][] = [
                 'qualification_id' => (string)($row['qualification_id'] ?? ''),
                 'qualification_name' => (string)($row['qualification_name'] ?? ''),
-                'total_solved' => $totalSolved,
-                'total_correct' => $totalCorrect,
-                'total_wrong' => $totalWrong,
-                'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+                'total_solved' => (int)$normalized['total_solved'],
+                'total_correct' => (int)$normalized['total_correct'],
+                'total_wrong' => (int)$normalized['total_wrong'],
+                'success_rate' => (float)$normalized['success_rate'],
             ];
         }
 
@@ -357,7 +410,7 @@ try {
             . 'c.' . stats_q($cNameCol) . ' AS course_name, '
             . 'qf.' . stats_q($qualIdCol) . ' AS qualification_id, '
             . 'qf.' . stats_q($qualNameCol) . ' AS qualification_name, '
-            . 'COUNT(*) AS total_solved, '
+            . 'SUM(CASE WHEN e.`is_correct` IN (0,1) THEN 1 ELSE 0 END) AS total_solved, '
             . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
             . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
             . 'FROM `question_attempt_events` e '
@@ -373,19 +426,17 @@ try {
         $rowsCourseStats = $stmtCourseStats->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         foreach ($rowsCourseStats as $row) {
-            $totalSolved = (int)($row['total_solved'] ?? 0);
-            $totalCorrect = (int)($row['total_correct'] ?? 0);
-            $totalWrong = (int)($row['total_wrong'] ?? 0);
+            $normalized = stats_normalize_bucket((int)($row['total_correct'] ?? 0), (int)($row['total_wrong'] ?? 0));
 
             $statistics['course_stats'][] = [
                 'course_id' => (string)($row['course_id'] ?? ''),
                 'course_name' => (string)($row['course_name'] ?? ''),
                 'qualification_id' => (string)($row['qualification_id'] ?? ''),
                 'qualification_name' => (string)($row['qualification_name'] ?? ''),
-                'total_solved' => $totalSolved,
-                'total_correct' => $totalCorrect,
-                'total_wrong' => $totalWrong,
-                'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+                'total_solved' => (int)$normalized['total_solved'],
+                'total_correct' => (int)$normalized['total_correct'],
+                'total_wrong' => (int)$normalized['total_wrong'],
+                'success_rate' => (float)$normalized['success_rate'],
             ];
         }
 
@@ -393,7 +444,7 @@ try {
         $sqlStatsRows = 'SELECT '
             . 'qf.' . stats_q($qualNameCol) . ' AS qualification_name, '
             . 'c.' . stats_q($cNameCol) . ' AS course_name, '
-            . 'COUNT(*) AS total_solved, '
+            . 'SUM(CASE WHEN e.`is_correct` IN (0,1) THEN 1 ELSE 0 END) AS total_solved, '
             . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
             . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
             . 'FROM `question_attempt_events` e '
@@ -409,17 +460,15 @@ try {
         $rowsStatsRows = $stmtStatsRows->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         foreach ($rowsStatsRows as $row) {
-            $totalSolved = (int)($row['total_solved'] ?? 0);
-            $totalCorrect = (int)($row['total_correct'] ?? 0);
-            $totalWrong = (int)($row['total_wrong'] ?? 0);
+            $normalized = stats_normalize_bucket((int)($row['total_correct'] ?? 0), (int)($row['total_wrong'] ?? 0));
 
             $statistics['stats_rows'][] = [
                 'qualification_name' => (string)($row['qualification_name'] ?? ''),
                 'course_name' => (string)($row['course_name'] ?? ''),
-                'total_solved' => $totalSolved,
-                'total_correct' => $totalCorrect,
-                'total_wrong' => $totalWrong,
-                'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+                'total_solved' => (int)$normalized['total_solved'],
+                'total_correct' => (int)$normalized['total_correct'],
+                'total_wrong' => (int)$normalized['total_wrong'],
+                'success_rate' => (float)$normalized['success_rate'],
             ];
         }
     }
@@ -448,9 +497,10 @@ try {
         $meTotalWrong = 0;
 
         foreach ($rowsMeCourseStats as $row) {
-            $totalSolved = (int)($row['total_solved'] ?? 0);
-            $totalCorrect = (int)($row['total_correct'] ?? 0);
-            $totalWrong = (int)($row['total_wrong'] ?? 0);
+            $normalized = stats_normalize_bucket((int)($row['total_correct'] ?? 0), (int)($row['total_wrong'] ?? 0));
+            $totalSolved = (int)$normalized['total_solved'];
+            $totalCorrect = (int)$normalized['total_correct'];
+            $totalWrong = (int)$normalized['total_wrong'];
 
             $meTotalSolved += $totalSolved;
             $meTotalCorrect += $totalCorrect;
@@ -464,7 +514,7 @@ try {
                 'total_solved' => $totalSolved,
                 'total_correct' => $totalCorrect,
                 'total_wrong' => $totalWrong,
-                'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+                'success_rate' => (float)$normalized['success_rate'],
             ];
 
             $statistics['stats_rows'][] = [
@@ -473,18 +523,19 @@ try {
                 'total_solved' => $totalSolved,
                 'total_correct' => $totalCorrect,
                 'total_wrong' => $totalWrong,
-                'success_rate' => $totalSolved > 0 ? (float)round(($totalCorrect / $totalSolved) * 100, 2) : 0.0,
+                'success_rate' => (float)$normalized['success_rate'],
             ];
         }
 
         if ($meTotalSolved > 0) {
+            $meNormalized = stats_normalize_bucket($meTotalCorrect, $meTotalWrong);
             $statistics['qualification_stats'][] = [
                 'qualification_id' => 'maritime_english',
                 'qualification_name' => 'Maritime English',
-                'total_solved' => $meTotalSolved,
-                'total_correct' => $meTotalCorrect,
-                'total_wrong' => $meTotalWrong,
-                'success_rate' => $meTotalSolved > 0 ? (float)round(($meTotalCorrect / $meTotalSolved) * 100, 2) : 0.0,
+                'total_solved' => (int)$meNormalized['total_solved'],
+                'total_correct' => (int)$meNormalized['total_correct'],
+                'total_wrong' => (int)$meNormalized['total_wrong'],
+                'success_rate' => (float)$meNormalized['success_rate'],
             ];
         }
     }
@@ -493,9 +544,7 @@ try {
     if ($statistics['total_solved'] === 0) {
         stats_dbg('total_solved is zero', [
             'user_id' => $userId,
-            'query_solved' => $sqlSolved,
-            'query_correct' => $sqlCorrect,
-            'query_wrong' => $sqlWrong,
+            'query_totals' => $sqlTotals,
             'total_correct' => $statistics['total_correct'],
             'total_wrong' => $statistics['total_wrong'],
         ]);
