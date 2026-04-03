@@ -17,6 +17,7 @@ $menuGroups = [
     ],
     [
         ['slug' => 'users', 'url' => '/pages/users.php', 'icon' => 'bi-people', 'label' => 'Kullanıcılar'],
+        ['slug' => 'stories', 'url' => '/pages/stories.php', 'icon' => 'bi-images', 'label' => 'Dashboard Hikayeleri'],
         ['slug' => 'community-rooms', 'url' => '/pages/community-rooms.php', 'icon' => 'bi-chat-dots', 'label' => 'Topluluk Odaları'],
         ['slug' => 'community-messages', 'url' => '/pages/community-messages.php', 'icon' => 'bi-chat-left-text', 'label' => 'Topluluk Mesajları'],
         ['slug' => 'community-reports', 'url' => '/pages/community-reports.php', 'icon' => 'bi-flag', 'label' => 'Raporlanan Mesajlar'],
@@ -85,6 +86,7 @@ function render_sidebar_menu($menuGroups, $current_page)
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
 
 
 
