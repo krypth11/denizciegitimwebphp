@@ -17,6 +17,7 @@ define('DB_NAME', 'u2621168_denizciegitim');
 // Site ayarları
 define('SITE_URL', 'https://denizciegitim.com');
 define('SITE_NAME', 'Denizci Eğitim Admin Panel');
+define('STORY_PUBLIC_BASE_URL', getenv('STORY_PUBLIC_BASE_URL') ?: '');
 
 // JWT ayarları
 define('JWT_SECRET', 'dEnIzCi_EgItIm_2026_sEcReT_kEy_ChAnGe_Me');

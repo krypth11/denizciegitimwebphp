@@ -249,23 +249,103 @@ function story_validate_upload(array $file, string $label): array
 
 function story_build_public_url(string $relativePath): string
 {
-    $clean = ltrim(str_replace('\\', '/', trim($relativePath)), '/');
-    return rtrim((string)SITE_URL, '/') . '/' . $clean;
+    return story_public_url($relativePath);
+}
+
+function story_detect_scheme(): string
+{
+    $https = strtolower((string)($_SERVER['HTTPS'] ?? ''));
+    $proto = strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+
+    if ($https === 'on' || $https === '1' || $proto === 'https') {
+        return 'https';
+    }
+
+    return 'http';
+}
+
+function story_detect_host(): string
+{
+    $forwardedHost = trim((string)($_SERVER['HTTP_X_FORWARDED_HOST'] ?? ''));
+    if ($forwardedHost !== '') {
+        $parts = explode(',', $forwardedHost);
+        $host = trim((string)($parts[0] ?? ''));
+        if ($host !== '') {
+            return $host;
+        }
+    }
+
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    if ($host !== '') {
+        return $host;
+    }
+
+    $siteHost = (string)parse_url((string)SITE_URL, PHP_URL_HOST);
+    return trim($siteHost);
+}
+
+function story_public_base_url(): string
+{
+    static $cached = null;
+    if (is_string($cached)) {
+        return $cached;
+    }
+
+    $envBase = trim((string)(defined('STORY_PUBLIC_BASE_URL') ? STORY_PUBLIC_BASE_URL : (getenv('STORY_PUBLIC_BASE_URL') ?: '')));
+    if ($envBase !== '') {
+        $cached = rtrim($envBase, '/');
+    } else {
+        $host = story_detect_host();
+        if ($host !== '') {
+            $cached = story_detect_scheme() . '://' . $host;
+        } else {
+            $cached = rtrim((string)SITE_URL, '/');
+        }
+    }
+
+    story_log('story_public_base_url resolved', [
+        'base_url' => $cached,
+        'host' => story_detect_host(),
+        'site_url' => (string)SITE_URL,
+        'env_story_public_base_url' => $envBase,
+    ]);
+
+    return $cached;
+}
+
+function story_extract_relative_path_from_url(?string $urlOrPath): string
+{
+    $value = trim((string)$urlOrPath);
+    if ($value === '') {
+        return '';
+    }
+
+    if (preg_match('#^https?://#i', $value)) {
+        $path = (string)parse_url($value, PHP_URL_PATH);
+        return ltrim(str_replace('\\', '/', $path), '/');
+    }
+
+    return ltrim(str_replace('\\', '/', $value), '/');
+}
+
+function story_public_url(?string $urlOrPath): string
+{
+    $relative = story_extract_relative_path_from_url($urlOrPath);
+    if ($relative === '') {
+        return '';
+    }
+
+    return rtrim(story_public_base_url(), '/') . '/' . $relative;
 }
 
 function story_public_url_to_abs(?string $url): string
 {
-    $url = trim((string)$url);
-    if ($url === '') {
+    $relativePath = story_extract_relative_path_from_url($url);
+    if ($relativePath === '') {
         return '';
     }
 
-    $path = parse_url($url, PHP_URL_PATH);
-    if (!is_string($path) || trim($path) === '') {
-        return '';
-    }
-
-    $cleanPath = ltrim(str_replace(['..', '\\'], ['', '/'], $path), '/');
+    $cleanPath = ltrim(str_replace('..', '', $relativePath), '/');
     return story_project_root() . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $cleanPath);
 }
 
@@ -323,7 +403,7 @@ function story_store_uploaded_image(array $file, string $type): string
         throw new RuntimeException($label . ' dosyası taşındı ancak dosya doğrulanamadı.');
     }
 
-    $url = story_build_public_url($relativeDir . '/' . $filename);
+    $url = story_public_url($relativeDir . '/' . $filename);
 
     story_log('upload success', [
         'type' => $type,
@@ -401,6 +481,11 @@ function story_create(PDO $pdo, string $title, string $thumbnailUrl, string $ima
 
 function story_admin_list(PDO $pdo): array
 {
+    return story_list_for_admin($pdo);
+}
+
+function story_list_for_admin(PDO $pdo): array
+{
     $schema = story_schema($pdo);
     $order = isset($schema['story_columns']['sort_created_at']) ? '`sort_created_at` DESC' : '`created_at` DESC';
 
@@ -409,10 +494,10 @@ function story_admin_list(PDO $pdo): array
 
     $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-    story_log('list query result', ['count' => count($rows)]);
+    story_log('admin story list query result', ['count' => count($rows)]);
 
     return array_map(static function (array $row): array {
-        return [
+        $item = [
             'id' => (string)($row['id'] ?? ''),
             'title' => (string)($row['title'] ?? ''),
             'thumbnail_url' => (string)($row['thumbnail_url'] ?? ''),
@@ -421,6 +506,8 @@ function story_admin_list(PDO $pdo): array
             'created_at' => (string)($row['created_at'] ?? ''),
             'sort_created_at' => (string)($row['sort_created_at'] ?? ''),
         ];
+
+        return story_normalize_story_row_urls($item, 'admin_list');
     }, $rows);
 }
 
@@ -470,11 +557,16 @@ function story_soft_delete(PDO $pdo, string $storyId, ?string $adminId = null): 
 
 function story_mobile_list(PDO $pdo, string $userId): array
 {
+    return story_list_for_mobile($pdo, $userId);
+}
+
+function story_list_for_mobile(PDO $pdo, string $userId): array
+{
     $schema = story_schema($pdo);
     $order = isset($schema['story_columns']['sort_created_at']) ? 's.`sort_created_at` DESC' : 's.`created_at` DESC';
     $viewIdSelect = $schema['view_has_id'] ? 'v.`id`' : 'v.`story_id`';
 
-    $sql = 'SELECT s.`id`, s.`title`, s.`thumbnail_url`, s.`image_url`, s.`created_at`, '
+    $sql = 'SELECT s.`id`, s.`title`, s.`thumbnail_url`, s.`image_url`, s.`created_at`, s.`sort_created_at`, '
         . 'CASE WHEN ' . $viewIdSelect . ' IS NULL THEN 0 ELSE 1 END AS `is_viewed` '
         . 'FROM `' . $schema['stories_table'] . '` s '
         . 'LEFT JOIN `' . $schema['views_table'] . '` v ON v.`story_id` = s.`id` AND v.`user_id` = ? '
@@ -485,16 +577,42 @@ function story_mobile_list(PDO $pdo, string $userId): array
     $stmt->execute([$userId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
+    story_log('mobile story list query result', [
+        'user_id' => $userId,
+        'count' => count($rows),
+    ]);
+
     return array_map(static function (array $row): array {
-        return [
+        $item = [
             'id' => (string)($row['id'] ?? ''),
             'title' => (string)($row['title'] ?? ''),
             'thumbnail_url' => (string)($row['thumbnail_url'] ?? ''),
             'image_url' => (string)($row['image_url'] ?? ''),
             'created_at' => (string)($row['created_at'] ?? ''),
+            'sort_created_at' => (string)($row['sort_created_at'] ?? ''),
             'is_viewed' => ((int)($row['is_viewed'] ?? 0) === 1),
         ];
+
+        return story_normalize_story_row_urls($item, 'mobile_list');
     }, $rows);
+}
+
+function story_normalize_story_row_urls(array $row, string $context = ''): array
+{
+    $row['thumbnail_url'] = story_public_url((string)($row['thumbnail_url'] ?? ''));
+    $row['image_url'] = story_public_url((string)($row['image_url'] ?? ''));
+
+    if ($context !== '') {
+        story_log('story urls normalized', [
+            'context' => $context,
+            'story_id' => (string)($row['id'] ?? ''),
+            'thumbnail_url' => (string)($row['thumbnail_url'] ?? ''),
+            'image_url' => (string)($row['image_url'] ?? ''),
+            'base_url' => story_public_base_url(),
+        ]);
+    }
+
+    return $row;
 }
 
 function story_mark_viewed(PDO $pdo, string $storyId, string $userId): array
