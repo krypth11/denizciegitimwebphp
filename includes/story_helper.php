@@ -12,9 +12,14 @@ function story_log(string $message, array $context = []): void
     error_log('[STORY] ' . $message);
 }
 
-function story_q(string $identifier): string
+function story_is_debug_mode(): bool
 {
-    return '`' . str_replace('`', '', $identifier) . '`';
+    $env = strtolower((string)getenv('APP_DEBUG'));
+    if (in_array($env, ['1', 'true', 'yes', 'on'], true)) {
+        return true;
+    }
+
+    return ini_get('display_errors') === '1';
 }
 
 function story_project_root(): string
@@ -22,58 +27,97 @@ function story_project_root(): string
     return dirname(__DIR__);
 }
 
-function story_ensure_schema(PDO $pdo): void
-{
-    $sqlStories = "CREATE TABLE IF NOT EXISTS `app_stories` (
-        `id` CHAR(36) NOT NULL,
-        `title` VARCHAR(191) NOT NULL,
-        `thumbnail_path` VARCHAR(255) NOT NULL,
-        `image_path` VARCHAR(255) NOT NULL,
-        `is_active` TINYINT(1) NOT NULL DEFAULT 1,
-        `is_deleted` TINYINT(1) NOT NULL DEFAULT 0,
-        `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        `updated_at` DATETIME NULL DEFAULT NULL,
-        `deleted_at` DATETIME NULL DEFAULT NULL,
-        `created_by` VARCHAR(36) NULL,
-        `updated_by` VARCHAR(36) NULL,
-        `deleted_by` VARCHAR(36) NULL,
-        PRIMARY KEY (`id`),
-        KEY `idx_stories_active_created` (`is_active`, `is_deleted`, `created_at`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
-
-    $sqlViews = "CREATE TABLE IF NOT EXISTS `app_story_views` (
-        `id` CHAR(36) NOT NULL,
-        `story_id` CHAR(36) NOT NULL,
-        `user_id` VARCHAR(36) NOT NULL,
-        `viewed_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (`id`),
-        UNIQUE KEY `uq_story_user` (`story_id`, `user_id`),
-        KEY `idx_story_views_user` (`user_id`, `viewed_at`)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
-
-    $pdo->exec($sqlStories);
-    $pdo->exec($sqlViews);
-}
-
 function story_upload_dirs(): array
 {
-    $baseRelative = 'uploads/stories';
-    $baseDir = story_project_root() . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'stories';
-    $thumbDir = $baseDir . DIRECTORY_SEPARATOR . 'thumbnails';
-    $imageDir = $baseDir . DIRECTORY_SEPARATOR . 'images';
+    $base = story_project_root() . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'stories';
+    $thumb = $base . DIRECTORY_SEPARATOR . 'thumbnails';
+    $image = $base . DIRECTORY_SEPARATOR . 'images';
 
-    foreach ([$baseDir, $thumbDir, $imageDir] as $dir) {
+    foreach ([$base, $thumb, $image] as $dir) {
         if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
             throw new RuntimeException('Upload dizini oluşturulamadı: ' . $dir);
         }
     }
 
     return [
-        'base_relative' => $baseRelative,
-        'base' => $baseDir,
-        'thumbnails' => $thumbDir,
-        'images' => $imageDir,
+        'base' => $base,
+        'thumbnails' => $thumb,
+        'images' => $image,
     ];
+}
+
+function story_table_exists(PDO $pdo, string $table): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?');
+    $stmt->execute([DB_NAME, $table]);
+    return ((int)$stmt->fetchColumn()) > 0;
+}
+
+function story_columns(PDO $pdo, string $table): array
+{
+    $stmt = $pdo->query('SHOW COLUMNS FROM `' . str_replace('`', '', $table) . '`');
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $map = [];
+    foreach ($rows as $row) {
+        $field = (string)($row['Field'] ?? '');
+        if ($field !== '') {
+            $map[$field] = $row;
+        }
+    }
+
+    return $map;
+}
+
+function story_schema(PDO $pdo): array
+{
+    static $cache = null;
+    if (is_array($cache)) {
+        return $cache;
+    }
+
+    if (!story_table_exists($pdo, 'app_stories')) {
+        throw new RuntimeException('app_stories tablosu bulunamadı.');
+    }
+
+    if (!story_table_exists($pdo, 'app_story_views')) {
+        throw new RuntimeException('app_story_views tablosu bulunamadı.');
+    }
+
+    $storyCols = story_columns($pdo, 'app_stories');
+    $viewCols = story_columns($pdo, 'app_story_views');
+
+    $requiredStory = ['id', 'title', 'thumbnail_url', 'image_url', 'is_active', 'sort_created_at', 'created_by', 'created_at', 'updated_at'];
+    foreach ($requiredStory as $col) {
+        if (!isset($storyCols[$col])) {
+            throw new RuntimeException('app_stories kolon eksik: ' . $col);
+        }
+    }
+
+    foreach (['story_id', 'user_id'] as $col) {
+        if (!isset($viewCols[$col])) {
+            throw new RuntimeException('app_story_views kolon eksik: ' . $col);
+        }
+    }
+
+    $cache = [
+        'stories_table' => 'app_stories',
+        'views_table' => 'app_story_views',
+        'story_columns' => $storyCols,
+        'view_columns' => $viewCols,
+        'view_has_id' => isset($viewCols['id']),
+        'view_has_viewed_at' => isset($viewCols['viewed_at']),
+    ];
+
+    return $cache;
+}
+
+function story_ensure_schema(PDO $pdo): void
+{
+    $schema = story_schema($pdo);
+    story_log('schema verified', [
+        'stories_table' => $schema['stories_table'],
+        'views_table' => $schema['views_table'],
+    ]);
 }
 
 function story_validate_upload(array $file, string $label): array
@@ -110,150 +154,203 @@ function story_validate_upload(array $file, string $label): array
 
     return [
         'tmp' => $tmp,
-        'mime' => $mime,
         'ext' => $allowed[$mime],
+        'mime' => $mime,
+        'size' => $size,
     ];
+}
+
+function story_build_public_url(string $relativePath): string
+{
+    $clean = ltrim(str_replace('\\', '/', trim($relativePath)), '/');
+    return rtrim((string)SITE_URL, '/') . '/' . $clean;
+}
+
+function story_public_url_to_abs(?string $url): string
+{
+    $url = trim((string)$url);
+    if ($url === '') {
+        return '';
+    }
+
+    $path = parse_url($url, PHP_URL_PATH);
+    if (!is_string($path) || trim($path) === '') {
+        return '';
+    }
+
+    $cleanPath = ltrim(str_replace(['..', '\\'], ['', '/'], $path), '/');
+    return story_project_root() . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $cleanPath);
 }
 
 function story_store_uploaded_image(array $file, string $type): string
 {
-    $type = $type === 'thumbnail' ? 'thumbnail' : 'image';
-    $validated = story_validate_upload($file, $type === 'thumbnail' ? 'Thumbnail' : 'Story görseli');
-    $dirs = story_upload_dirs();
+    $type = ($type === 'thumbnail') ? 'thumbnail' : 'image';
+    $label = $type === 'thumbnail' ? 'Thumbnail' : 'Story görseli';
 
-    $targetDir = $type === 'thumbnail' ? $dirs['thumbnails'] : $dirs['images'];
-    $relativePrefix = $type === 'thumbnail' ? 'uploads/stories/thumbnails/' : 'uploads/stories/images/';
+    $validated = story_validate_upload($file, $label);
+    $dirs = story_upload_dirs();
+    $dir = $type === 'thumbnail' ? $dirs['thumbnails'] : $dirs['images'];
+    $relativeDir = $type === 'thumbnail' ? 'uploads/stories/thumbnails' : 'uploads/stories/images';
 
     $filename = generate_uuid() . '.' . $validated['ext'];
-    $targetPath = $targetDir . DIRECTORY_SEPARATOR . $filename;
-    $relativePath = $relativePrefix . $filename;
-
-    if (!move_uploaded_file($validated['tmp'], $targetPath)) {
-        throw new RuntimeException('Dosya sunucuya taşınamadı.');
+    $target = $dir . DIRECTORY_SEPARATOR . $filename;
+    if (!move_uploaded_file($validated['tmp'], $target)) {
+        throw new RuntimeException($label . ' dosyası sunucuya taşınamadı.');
     }
 
-    return str_replace('\\', '/', $relativePath);
+    $url = story_build_public_url($relativeDir . '/' . $filename);
+
+    story_log('upload success', [
+        'type' => $type,
+        'mime' => $validated['mime'],
+        'size' => $validated['size'],
+        'url' => $url,
+    ]);
+
+    return $url;
 }
 
-function story_relative_to_abs(string $relativePath): string
+function story_delete_file_if_exists(?string $url): void
 {
-    $clean = ltrim(str_replace(['..', '\\'], ['', '/'], trim($relativePath)), '/');
-    return story_project_root() . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $clean);
-}
-
-function story_delete_file_if_exists(?string $relativePath): void
-{
-    $relativePath = trim((string)$relativePath);
-    if ($relativePath === '') {
-        return;
+    $abs = story_public_url_to_abs($url);
+    if ($abs !== '' && is_file($abs)) {
+        @unlink($abs);
     }
-
-    $absolutePath = story_relative_to_abs($relativePath);
-    if (is_file($absolutePath)) {
-        @unlink($absolutePath);
-    }
-}
-
-function story_public_url(?string $relativePath): string
-{
-    $relativePath = ltrim(trim((string)$relativePath), '/');
-    if ($relativePath === '') {
-        return '';
-    }
-
-    return rtrim((string)SITE_URL, '/') . '/' . $relativePath;
 }
 
 function story_find_by_id(PDO $pdo, string $storyId): ?array
 {
-    $stmt = $pdo->prepare('SELECT * FROM `app_stories` WHERE `id` = ? LIMIT 1');
+    $schema = story_schema($pdo);
+    $sql = 'SELECT * FROM `' . $schema['stories_table'] . '` WHERE `id` = ? LIMIT 1';
+    $stmt = $pdo->prepare($sql);
     $stmt->execute([$storyId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
 }
 
-function story_create(PDO $pdo, string $title, string $thumbnailPath, string $imagePath, ?string $adminId): string
+function story_create(PDO $pdo, string $title, string $thumbnailUrl, string $imageUrl, ?string $adminId): string
 {
+    $schema = story_schema($pdo);
     $id = generate_uuid();
-    $stmt = $pdo->prepare(
-        'INSERT INTO `app_stories` (`id`, `title`, `thumbnail_path`, `image_path`, `is_active`, `is_deleted`, `created_at`, `created_by`) '
-        . 'VALUES (?, ?, ?, ?, 1, 0, NOW(), ?)'
-    );
-    $stmt->execute([$id, $title, $thumbnailPath, $imagePath, $adminId]);
 
-    story_log('story created', ['story_id' => $id, 'title' => $title, 'admin_id' => $adminId]);
+    $payload = [
+        'id' => $id,
+        'title' => $title,
+        'thumbnail_url' => $thumbnailUrl,
+        'image_url' => $imageUrl,
+        'is_active' => 1,
+        'sort_created_at' => date('Y-m-d H:i:s'),
+        'created_by' => $adminId,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ];
+
+    story_log('insert payload', [
+        'columns' => array_keys($payload),
+        'story_id' => $id,
+    ]);
+
+    $sql = 'INSERT INTO `' . $schema['stories_table'] . '` (`id`,`title`,`thumbnail_url`,`image_url`,`is_active`,`sort_created_at`,`created_by`,`created_at`,`updated_at`) '
+        . 'VALUES (?,?,?,?,?,?,?,?,?)';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        $payload['id'],
+        $payload['title'],
+        $payload['thumbnail_url'],
+        $payload['image_url'],
+        $payload['is_active'],
+        $payload['sort_created_at'],
+        $payload['created_by'],
+        $payload['created_at'],
+        $payload['updated_at'],
+    ]);
+
+    story_log('story created', ['story_id' => $id, 'admin_id' => $adminId]);
     return $id;
 }
 
 function story_admin_list(PDO $pdo): array
 {
-    $stmt = $pdo->query('SELECT * FROM `app_stories` WHERE `is_deleted` = 0 ORDER BY `created_at` DESC');
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $schema = story_schema($pdo);
+    $order = isset($schema['story_columns']['sort_created_at']) ? '`sort_created_at` DESC' : '`created_at` DESC';
+
+    $sql = 'SELECT `id`,`title`,`thumbnail_url`,`image_url`,`is_active`,`created_at`,`sort_created_at` '
+        . 'FROM `' . $schema['stories_table'] . '` ORDER BY ' . $order;
+
+    $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    story_log('list query result', ['count' => count($rows)]);
 
     return array_map(static function (array $row): array {
         return [
             'id' => (string)($row['id'] ?? ''),
             'title' => (string)($row['title'] ?? ''),
-            'thumbnail_path' => (string)($row['thumbnail_path'] ?? ''),
-            'image_path' => (string)($row['image_path'] ?? ''),
-            'thumbnail_url' => story_public_url($row['thumbnail_path'] ?? ''),
-            'image_url' => story_public_url($row['image_path'] ?? ''),
+            'thumbnail_url' => (string)($row['thumbnail_url'] ?? ''),
+            'image_url' => (string)($row['image_url'] ?? ''),
             'is_active' => ((int)($row['is_active'] ?? 0) === 1) ? 1 : 0,
             'created_at' => (string)($row['created_at'] ?? ''),
+            'sort_created_at' => (string)($row['sort_created_at'] ?? ''),
         ];
     }, $rows);
 }
 
-function story_set_active(PDO $pdo, string $storyId, int $isActive, ?string $adminId): bool
+function story_set_active(PDO $pdo, string $storyId, int $isActive, ?string $adminId = null): bool
 {
-    $stmt = $pdo->prepare(
-        'UPDATE `app_stories` SET `is_active` = ?, `updated_at` = NOW(), `updated_by` = ? '
-        . 'WHERE `id` = ? AND `is_deleted` = 0'
-    );
-    $stmt->execute([$isActive ? 1 : 0, $adminId, $storyId]);
+    $schema = story_schema($pdo);
+    $sql = 'UPDATE `' . $schema['stories_table'] . '` SET `is_active` = ?, `updated_at` = NOW() WHERE `id` = ?';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$isActive ? 1 : 0, $storyId]);
     $updated = $stmt->rowCount() > 0;
 
-    story_log('story active toggled', [
+    story_log('toggle result', [
         'story_id' => $storyId,
         'is_active' => $isActive ? 1 : 0,
-        'admin_id' => $adminId,
         'updated' => $updated,
+        'admin_id' => $adminId,
     ]);
 
     return $updated;
 }
 
-function story_soft_delete(PDO $pdo, string $storyId, ?string $adminId): bool
+function story_soft_delete(PDO $pdo, string $storyId, ?string $adminId = null): bool
 {
+    $schema = story_schema($pdo);
     $story = story_find_by_id($pdo, $storyId);
-    if (!$story || ((int)($story['is_deleted'] ?? 0) === 1)) {
+    if (!$story) {
         return false;
     }
 
-    $stmt = $pdo->prepare(
-        'UPDATE `app_stories` SET `is_deleted` = 1, `is_active` = 0, `deleted_at` = NOW(), `deleted_by` = ?, `updated_at` = NOW(), `updated_by` = ? '
-        . 'WHERE `id` = ? LIMIT 1'
-    );
-    $stmt->execute([$adminId, $adminId, $storyId]);
-    $updated = $stmt->rowCount() > 0;
+    $stmt = $pdo->prepare('DELETE FROM `' . $schema['stories_table'] . '` WHERE `id` = ? LIMIT 1');
+    $stmt->execute([$storyId]);
+    $deleted = $stmt->rowCount() > 0;
 
-    if ($updated) {
-        story_delete_file_if_exists((string)($story['thumbnail_path'] ?? ''));
-        story_delete_file_if_exists((string)($story['image_path'] ?? ''));
+    if ($deleted) {
+        story_delete_file_if_exists((string)($story['thumbnail_url'] ?? ''));
+        story_delete_file_if_exists((string)($story['image_url'] ?? ''));
     }
 
-    story_log('story deleted', ['story_id' => $storyId, 'admin_id' => $adminId, 'deleted' => $updated]);
-    return $updated;
+    story_log('delete result', [
+        'story_id' => $storyId,
+        'deleted' => $deleted,
+        'admin_id' => $adminId,
+    ]);
+
+    return $deleted;
 }
 
 function story_mobile_list(PDO $pdo, string $userId): array
 {
-    $sql = 'SELECT s.`id`, s.`title`, s.`thumbnail_path`, s.`image_path`, s.`created_at`, '
-        . 'CASE WHEN v.`id` IS NULL THEN 0 ELSE 1 END AS `is_viewed` '
-        . 'FROM `app_stories` s '
-        . 'LEFT JOIN `app_story_views` v ON v.`story_id` = s.`id` AND v.`user_id` = ? '
-        . 'WHERE s.`is_deleted` = 0 AND s.`is_active` = 1 '
-        . 'ORDER BY s.`created_at` DESC';
+    $schema = story_schema($pdo);
+    $order = isset($schema['story_columns']['sort_created_at']) ? 's.`sort_created_at` DESC' : 's.`created_at` DESC';
+    $viewIdSelect = $schema['view_has_id'] ? 'v.`id`' : 'v.`story_id`';
+
+    $sql = 'SELECT s.`id`, s.`title`, s.`thumbnail_url`, s.`image_url`, s.`created_at`, '
+        . 'CASE WHEN ' . $viewIdSelect . ' IS NULL THEN 0 ELSE 1 END AS `is_viewed` '
+        . 'FROM `' . $schema['stories_table'] . '` s '
+        . 'LEFT JOIN `' . $schema['views_table'] . '` v ON v.`story_id` = s.`id` AND v.`user_id` = ? '
+        . 'WHERE s.`is_active` = 1 '
+        . 'ORDER BY ' . $order;
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$userId]);
@@ -263,8 +360,8 @@ function story_mobile_list(PDO $pdo, string $userId): array
         return [
             'id' => (string)($row['id'] ?? ''),
             'title' => (string)($row['title'] ?? ''),
-            'thumbnail_url' => story_public_url((string)($row['thumbnail_path'] ?? '')),
-            'image_url' => story_public_url((string)($row['image_path'] ?? '')),
+            'thumbnail_url' => (string)($row['thumbnail_url'] ?? ''),
+            'image_url' => (string)($row['image_url'] ?? ''),
             'created_at' => (string)($row['created_at'] ?? ''),
             'is_viewed' => ((int)($row['is_viewed'] ?? 0) === 1),
         ];
@@ -273,29 +370,48 @@ function story_mobile_list(PDO $pdo, string $userId): array
 
 function story_mark_viewed(PDO $pdo, string $storyId, string $userId): array
 {
-    $check = $pdo->prepare('SELECT `id` FROM `app_stories` WHERE `id` = ? AND `is_deleted` = 0 AND `is_active` = 1 LIMIT 1');
+    $schema = story_schema($pdo);
+
+    $check = $pdo->prepare('SELECT `id` FROM `' . $schema['stories_table'] . '` WHERE `id` = ? AND `is_active` = 1 LIMIT 1');
     $check->execute([$storyId]);
     if (!$check->fetchColumn()) {
         throw new RuntimeException('Story bulunamadı.');
     }
 
-    $viewId = generate_uuid();
-    $stmt = $pdo->prepare(
-        'INSERT INTO `app_story_views` (`id`, `story_id`, `user_id`, `viewed_at`) VALUES (?, ?, ?, NOW()) '
-        . 'ON DUPLICATE KEY UPDATE `viewed_at` = `viewed_at`'
-    );
-    $stmt->execute([$viewId, $storyId, $userId]);
-    $inserted = $stmt->rowCount() > 0;
+    $existsSql = 'SELECT COUNT(*) FROM `' . $schema['views_table'] . '` WHERE `story_id` = ? AND `user_id` = ?';
+    $existsStmt = $pdo->prepare($existsSql);
+    $existsStmt->execute([$storyId, $userId]);
+    $exists = ((int)$existsStmt->fetchColumn()) > 0;
+
+    if (!$exists) {
+        if ($schema['view_has_id'] && $schema['view_has_viewed_at']) {
+            $insertSql = 'INSERT INTO `' . $schema['views_table'] . '` (`id`, `story_id`, `user_id`, `viewed_at`) VALUES (?, ?, ?, NOW())';
+            $insertStmt = $pdo->prepare($insertSql);
+            $insertStmt->execute([generate_uuid(), $storyId, $userId]);
+        } elseif ($schema['view_has_id']) {
+            $insertSql = 'INSERT INTO `' . $schema['views_table'] . '` (`id`, `story_id`, `user_id`) VALUES (?, ?, ?)';
+            $insertStmt = $pdo->prepare($insertSql);
+            $insertStmt->execute([generate_uuid(), $storyId, $userId]);
+        } elseif ($schema['view_has_viewed_at']) {
+            $insertSql = 'INSERT INTO `' . $schema['views_table'] . '` (`story_id`, `user_id`, `viewed_at`) VALUES (?, ?, NOW())';
+            $insertStmt = $pdo->prepare($insertSql);
+            $insertStmt->execute([$storyId, $userId]);
+        } else {
+            $insertSql = 'INSERT INTO `' . $schema['views_table'] . '` (`story_id`, `user_id`) VALUES (?, ?)';
+            $insertStmt = $pdo->prepare($insertSql);
+            $insertStmt->execute([$storyId, $userId]);
+        }
+    }
 
     story_log('story viewed', [
         'story_id' => $storyId,
         'user_id' => $userId,
-        'already_viewed' => !$inserted,
+        'already_viewed' => $exists,
     ]);
 
     return [
         'story_id' => $storyId,
         'is_viewed' => true,
-        'already_viewed' => !$inserted,
+        'already_viewed' => $exists,
     ];
 }

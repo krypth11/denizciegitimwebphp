@@ -20,6 +20,18 @@ function stories_response(bool $success, string $message = '', array $data = [],
     exit;
 }
 
+function stories_safe_error_payload(Throwable $e): array
+{
+    if (!story_is_debug_mode()) {
+        return [];
+    }
+
+    return [
+        'error' => $e->getMessage(),
+        'type' => get_class($e),
+    ];
+}
+
 try {
     story_ensure_schema($pdo);
 
@@ -34,6 +46,13 @@ try {
         }
 
         case 'create': {
+            story_log('create request geldi', [
+                'has_title' => isset($_POST['title']),
+                'has_thumbnail' => isset($_FILES['thumbnail']),
+                'has_image' => isset($_FILES['image']),
+                'admin_id' => $adminId,
+            ]);
+
             $title = trim((string)($_POST['title'] ?? ''));
             if ($title === '') {
                 stories_response(false, 'Hikaye adı zorunludur.', [], 422, ['title' => 'required']);
@@ -106,5 +125,5 @@ try {
     }
 } catch (Throwable $e) {
     story_log('admin stories error', ['error' => $e->getMessage()]);
-    stories_response(false, 'İşlem sırasında bir sunucu hatası oluştu.', [], 500);
+    stories_response(false, 'İşlem sırasında bir sunucu hatası oluştu.', stories_safe_error_payload($e), 500);
 }
