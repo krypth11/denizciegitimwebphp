@@ -4,6 +4,7 @@ $menuGroups = [
         ['slug' => 'dashboard', 'url' => '/dashboard.php', 'icon' => 'bi-speedometer2', 'label' => 'Dashboard'],
     ],
     [
+        ['slug' => 'qualification-headings', 'url' => '/pages/qualification-headings.php', 'icon' => 'bi-diagram-3', 'label' => 'Yeterlilik Başlıkları'],
         ['slug' => 'qualifications', 'url' => '/pages/qualifications.php', 'icon' => 'bi-award', 'label' => 'Yeterlilikler'],
         ['slug' => 'courses', 'url' => '/pages/courses.php', 'icon' => 'bi-book', 'label' => 'Dersler'],
         ['slug' => 'topics', 'url' => '/pages/topics.php', 'icon' => 'bi-diagram-3', 'label' => 'Konular'],
@@ -86,6 +87,7 @@ function render_sidebar_menu($menuGroups, $current_page)
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
 
 
 
