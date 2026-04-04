@@ -242,6 +242,7 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
     $insufficient = [];
     $selected = [];
     $selectedCountByLength = [];
+    $pickIndex = 0;
 
     $countStmt = $pdo->prepare(
         'SELECT COUNT(*) FROM `' . $qSchema['table'] . '`
@@ -319,6 +320,7 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
                 'answer_text' => (string)$row['answer_text'],
                 'answer_normalized' => (string)$row['answer_normalized'],
                 'answer_length' => (int)$row['answer_length'],
+                '_pick_index' => $pickIndex++,
             ];
         }
     }
@@ -334,7 +336,44 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
         );
     }
 
-    shuffle($selected);
+    word_game_debug_log('selected questions before sort', [
+        'qualification_id' => $qualificationId,
+        'items' => array_values(array_map(
+            static fn(array $q): array => [
+                'id' => (string)($q['id'] ?? ''),
+                'answer_length' => (int)($q['answer_length'] ?? 0),
+                'pick_index' => (int)($q['_pick_index'] ?? 0),
+            ],
+            $selected
+        )),
+    ]);
+
+    usort($selected, static function (array $a, array $b): int {
+        $lenCmp = ((int)($a['answer_length'] ?? 0)) <=> ((int)($b['answer_length'] ?? 0));
+        if ($lenCmp !== 0) {
+            return $lenCmp;
+        }
+
+        return ((int)($a['_pick_index'] ?? 0)) <=> ((int)($b['_pick_index'] ?? 0));
+    });
+
+    word_game_debug_log('selected questions after sort', [
+        'qualification_id' => $qualificationId,
+        'items' => array_values(array_map(
+            static fn(array $q): array => [
+                'id' => (string)($q['id'] ?? ''),
+                'answer_length' => (int)($q['answer_length'] ?? 0),
+                'pick_index' => (int)($q['_pick_index'] ?? 0),
+            ],
+            $selected
+        )),
+    ]);
+
+    foreach ($selected as &$selectedQuestion) {
+        unset($selectedQuestion['_pick_index']);
+    }
+    unset($selectedQuestion);
+
     word_game_debug_log('selected question counts by length', [
         'qualification_id' => $qualificationId,
         'selected_counts' => $selectedCountByLength,
@@ -503,6 +542,18 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
             'user_id' => $userId,
             'qualification_id' => $qualificationId,
             'question_count' => count($createdQuestions),
+        ]);
+
+        word_game_debug_log('final question order with answer_length', [
+            'session_id' => $sessionId,
+            'items' => array_values(array_map(
+                static fn(array $q): array => [
+                    'question_order' => (int)($q['question_order'] ?? 0),
+                    'answer_length' => (int)($q['answer_length'] ?? 0),
+                    'session_question_id' => (string)($q['session_question_id'] ?? ''),
+                ],
+                $createdQuestions
+            )),
         ]);
 
         return [
