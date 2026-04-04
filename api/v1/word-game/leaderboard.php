@@ -36,9 +36,19 @@ try {
         'message' => $e->getMessage(),
     ]);
 
-    api_send_json([
+    $response = [
         'success' => false,
-        'message' => $e->getMessage(),
+        'message' => 'Liderlik tablosu yüklenemedi.',
         'data' => null,
-    ], 422);
+    ];
+
+    if (word_game_is_debug_enabled()) {
+        $response['debug'] = [
+            'error' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ];
+    }
+
+    api_send_json($response, 422);
 }

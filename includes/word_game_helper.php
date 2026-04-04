@@ -8,6 +8,38 @@ function word_game_debug_log(string $stage, array $context = []): void
     error_log($line !== false ? $line : ('[word_game][' . $stage . ']'));
 }
 
+function word_game_table_columns(PDO $pdo, string $table): array
+{
+    $table = trim($table);
+    if ($table === '') {
+        throw new RuntimeException('WORD_GAME_SCHEMA|Geçersiz tablo adı.');
+    }
+
+    $columns = function_exists('get_table_columns') ? get_table_columns($pdo, $table) : [];
+    if (!is_array($columns) || empty($columns)) {
+        throw new RuntimeException('WORD_GAME_SCHEMA|`' . $table . '` tablosu bulunamadı veya kolonları okunamadı.');
+    }
+
+    return $columns;
+}
+
+function word_game_pick_column(array $columns, array $candidates, bool $required = true): ?string
+{
+    foreach ($candidates as $candidate) {
+        if (in_array($candidate, $columns, true)) {
+            return $candidate;
+        }
+    }
+
+    if ($required) {
+        throw new RuntimeException(
+            'WORD_GAME_SCHEMA|Beklenen kolon bulunamadı. Adaylar: ' . implode(', ', $candidates)
+        );
+    }
+
+    return null;
+}
+
 function word_game_is_debug_enabled(): bool
 {
     $flags = [
@@ -42,41 +74,84 @@ function word_game_session_schema(PDO $pdo): array
         return $schema;
     }
 
-    $columns = function_exists('get_table_columns') ? get_table_columns($pdo, 'word_game_sessions') : [];
-    if (!is_array($columns)) {
-        $columns = [];
-    }
-
-    $required = [
-        'id',
-        'user_id',
-        'qualification_id',
-        'total_score',
-        'remaining_seconds',
-        'total_questions',
-        'completed_questions',
-        'correct_questions',
-        'wrong_questions',
-        'total_letters_taken',
-        'status',
-        'started_at',
-        'finished_at',
-    ];
-
-    if (!empty($columns)) {
-        $missing = array_values(array_diff($required, $columns));
-        if (!empty($missing)) {
-            throw new RuntimeException('word_game_sessions şemasında beklenen kolonlar eksik: ' . implode(', ', $missing));
-        }
-    }
+    $columns = word_game_table_columns($pdo, 'word_game_sessions');
 
     $schema = [
         'table' => 'word_game_sessions',
+        'id' => word_game_pick_column($columns, ['id']),
+        'user_id' => word_game_pick_column($columns, ['user_id']),
+        'qualification_id' => word_game_pick_column($columns, ['qualification_id']),
+        'total_score' => word_game_pick_column($columns, ['total_score']),
+        'remaining_seconds' => word_game_pick_column($columns, ['remaining_seconds', 'duration_seconds']),
+        'total_questions' => word_game_pick_column($columns, ['total_questions']),
+        'completed_questions' => word_game_pick_column($columns, ['completed_questions']),
+        'correct_questions' => word_game_pick_column($columns, ['correct_questions']),
+        'wrong_questions' => word_game_pick_column($columns, ['wrong_questions']),
+        'total_letters_taken' => word_game_pick_column($columns, ['total_letters_taken']),
+        'status' => word_game_pick_column($columns, ['status']),
+        'started_at' => word_game_pick_column($columns, ['started_at']),
+        'finished_at' => word_game_pick_column($columns, ['finished_at']),
+        'created_at' => word_game_pick_column($columns, ['created_at'], false),
+        'updated_at' => word_game_pick_column($columns, ['updated_at'], false),
     ];
 
-    foreach ($required as $column) {
-        $schema[$column] = $column;
+    return $schema;
+}
+
+function word_game_questions_schema(PDO $pdo): array
+{
+    static $schema = null;
+    if (is_array($schema)) {
+        return $schema;
     }
+
+    $columns = word_game_table_columns($pdo, 'word_game_questions');
+
+    $schema = [
+        'table' => 'word_game_questions',
+        'id' => word_game_pick_column($columns, ['id']),
+        'qualification_id' => word_game_pick_column($columns, ['qualification_id']),
+        'question_text' => word_game_pick_column($columns, ['question_text']),
+        'answer_text' => word_game_pick_column($columns, ['answer_text']),
+        'answer_normalized' => word_game_pick_column($columns, ['answer_normalized']),
+        'answer_length' => word_game_pick_column($columns, ['answer_length']),
+        'is_active' => word_game_pick_column($columns, ['is_active']),
+    ];
+
+    return $schema;
+}
+
+function word_game_session_questions_schema(PDO $pdo): array
+{
+    static $schema = null;
+    if (is_array($schema)) {
+        return $schema;
+    }
+
+    $columns = word_game_table_columns($pdo, 'word_game_session_questions');
+
+    $schema = [
+        'table' => 'word_game_session_questions',
+        'id' => word_game_pick_column($columns, ['id']),
+        'session_id' => word_game_pick_column($columns, ['session_id']),
+        'word_game_question_id' => word_game_pick_column($columns, ['word_game_question_id', 'question_id']),
+        'question_order' => word_game_pick_column($columns, ['question_order']),
+        'question_text' => word_game_pick_column($columns, ['question_text']),
+        'answer_text' => word_game_pick_column($columns, ['answer_text']),
+        'answer_normalized' => word_game_pick_column($columns, ['answer_normalized']),
+        'answer_length' => word_game_pick_column($columns, ['answer_length']),
+        'max_score' => word_game_pick_column($columns, ['max_score']),
+        'letters_taken_count' => word_game_pick_column($columns, ['letters_taken_count']),
+        'wrong_attempt_count' => word_game_pick_column($columns, ['wrong_attempt_count']),
+        'earned_score' => word_game_pick_column($columns, ['earned_score']),
+        'is_correct' => word_game_pick_column($columns, ['is_correct']),
+        'is_completed' => word_game_pick_column($columns, ['is_completed']),
+        'revealed_indexes_json' => word_game_pick_column($columns, ['revealed_indexes_json']),
+        'submitted_answer' => word_game_pick_column($columns, ['submitted_answer']),
+        'completed_at' => word_game_pick_column($columns, ['completed_at']),
+        'created_at' => word_game_pick_column($columns, ['created_at'], false),
+        'updated_at' => word_game_pick_column($columns, ['updated_at'], false),
+    ];
 
     return $schema;
 }
@@ -120,17 +195,17 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
         throw new InvalidArgumentException('qualification_id zorunludur.');
     }
 
+    $qSchema = word_game_questions_schema($pdo);
     $distribution = word_game_required_distribution();
     $insufficient = [];
     $selected = [];
     $selectedCountByLength = [];
 
     $countStmt = $pdo->prepare(
-        'SELECT COUNT(*)
-         FROM word_game_questions
-         WHERE qualification_id = ?
-           AND is_active = 1
-           AND answer_length = ?'
+        'SELECT COUNT(*) FROM `' . $qSchema['table'] . '`
+         WHERE `' . $qSchema['qualification_id'] . '` = ?
+           AND `' . $qSchema['is_active'] . '` = 1
+           AND `' . $qSchema['answer_length'] . '` = ?'
     );
 
     foreach ($distribution as $answerLength => $requiredCount) {
@@ -153,13 +228,26 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
 
     foreach ($distribution as $answerLength => $requiredCount) {
         $sql = sprintf(
-            'SELECT id, qualification_id, question_text, answer_length
-             FROM word_game_questions
-             WHERE qualification_id = ?
-               AND is_active = 1
-               AND answer_length = ?
+            'SELECT `%1$s` AS id,
+                    `%2$s` AS qualification_id,
+                    `%3$s` AS question_text,
+                    `%4$s` AS answer_text,
+                    `%5$s` AS answer_normalized,
+                    `%6$s` AS answer_length
+             FROM `%7$s`
+             WHERE `%2$s` = ?
+               AND `%8$s` = 1
+               AND `%6$s` = ?
              ORDER BY RAND()
              LIMIT %d',
+            $qSchema['id'],
+            $qSchema['qualification_id'],
+            $qSchema['question_text'],
+            $qSchema['answer_text'],
+            $qSchema['answer_normalized'],
+            $qSchema['answer_length'],
+            $qSchema['table'],
+            $qSchema['is_active'],
             (int)$requiredCount
         );
         $stmt = $pdo->prepare($sql);
@@ -172,6 +260,8 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
                 'id' => (string)$row['id'],
                 'qualification_id' => (string)$row['qualification_id'],
                 'question_text' => (string)$row['question_text'],
+                'answer_text' => (string)$row['answer_text'],
+                'answer_normalized' => (string)$row['answer_normalized'],
                 'answer_length' => (int)$row['answer_length'],
             ];
         }
@@ -213,6 +303,8 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
     $remainingSeconds = word_game_session_initial_remaining_seconds();
     $schema = word_game_session_schema($pdo);
 
+    $sqSchema = word_game_session_questions_schema($pdo);
+
     $pdo->beginTransaction();
     try {
         $payload = [
@@ -250,10 +342,15 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
             $schema['finished_at'],
         ];
 
+        if ($schema['created_at']) {
+            $columns[] = $schema['created_at'];
+        }
+        if ($schema['updated_at']) {
+            $columns[] = $schema['updated_at'];
+        }
+
         $colSql = implode(', ', array_map(static fn(string $column): string => '`' . $column . '`', $columns));
-        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
-        $stmt = $pdo->prepare('INSERT INTO `' . $schema['table'] . '` (' . $colSql . ') VALUES (' . $placeholders . ')');
-        $stmt->execute([
+        $values = [
             $payload['id'],
             $payload['user_id'],
             $payload['qualification_id'],
@@ -267,23 +364,19 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
             $payload['status'],
             $payload['started_at'],
             $payload['finished_at'],
-        ]);
+        ];
 
-        $questionStmt = $pdo->prepare(
-            'INSERT INTO word_game_session_questions (
-                id, session_id, question_id, question_order,
-                max_score, earned_score,
-                letters_taken_count, revealed_indexes_json,
-                wrong_attempt_count, is_correct, is_completed,
-                completed_at, created_at, updated_at
-            ) VALUES (
-                ?, ?, ?, ?,
-                ?, 0,
-                0, ?,
-                0, 0, 0,
-                NULL, NOW(), NOW()
-            )'
-        );
+        $placeholdersArr = array_fill(0, count($values), '?');
+        if ($schema['created_at']) {
+            $placeholdersArr[] = 'NOW()';
+        }
+        if ($schema['updated_at']) {
+            $placeholdersArr[] = 'NOW()';
+        }
+        $placeholders = implode(', ', $placeholdersArr);
+
+        $stmt = $pdo->prepare('INSERT INTO `' . $schema['table'] . '` (' . $colSql . ') VALUES (' . $placeholders . ')');
+        $stmt->execute($values);
 
         $createdQuestions = [];
         foreach (array_values($questions) as $idx => $question) {
@@ -292,14 +385,44 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
             $maxScore = word_game_question_max_score($answerLength);
             $questionOrder = $idx + 1;
 
-            $questionStmt->execute([
-                $sessionQuestionId,
-                $sessionId,
-                (string)$question['id'],
-                $questionOrder,
-                $maxScore,
-                '[]',
-            ]);
+            $snapshot = [
+                $sqSchema['id'] => $sessionQuestionId,
+                $sqSchema['session_id'] => $sessionId,
+                $sqSchema['word_game_question_id'] => (string)$question['id'],
+                $sqSchema['question_order'] => $questionOrder,
+                $sqSchema['question_text'] => (string)($question['question_text'] ?? ''),
+                $sqSchema['answer_text'] => (string)($question['answer_text'] ?? ''),
+                $sqSchema['answer_normalized'] => word_game_normalize_answer((string)($question['answer_normalized'] ?? $question['answer_text'] ?? '')),
+                $sqSchema['answer_length'] => $answerLength,
+                $sqSchema['max_score'] => $maxScore,
+                $sqSchema['letters_taken_count'] => 0,
+                $sqSchema['wrong_attempt_count'] => 0,
+                $sqSchema['earned_score'] => 0,
+                $sqSchema['is_correct'] => 0,
+                $sqSchema['is_completed'] => 0,
+                $sqSchema['revealed_indexes_json'] => '[]',
+                $sqSchema['submitted_answer'] => null,
+                $sqSchema['completed_at'] => null,
+            ];
+
+            $columnsSq = array_keys($snapshot);
+            $valuesSq = array_values($snapshot);
+            $placeholdersSq = implode(', ', array_fill(0, count($valuesSq), '?'));
+
+            if ($sqSchema['created_at']) {
+                $columnsSq[] = $sqSchema['created_at'];
+                $placeholdersSq .= ', NOW()';
+            }
+            if ($sqSchema['updated_at']) {
+                $columnsSq[] = $sqSchema['updated_at'];
+                $placeholdersSq .= ', NOW()';
+            }
+
+            $insertSqSql = 'INSERT INTO `' . $sqSchema['table'] . '` ('
+                . implode(', ', array_map(static fn(string $c): string => '`' . $c . '`', $columnsSq))
+                . ') VALUES (' . $placeholdersSq . ')';
+            $insertSqStmt = $pdo->prepare($insertSqSql);
+            $insertSqStmt->execute($valuesSq);
 
             $createdQuestions[] = [
                 'session_question_id' => $sessionQuestionId,
@@ -357,17 +480,33 @@ function word_game_find_session(PDO $pdo, string $sessionId, string $userId): ?a
 
 function word_game_find_session_question(PDO $pdo, string $sessionQuestionId, string $sessionId): ?array
 {
+    $sqSchema = word_game_session_questions_schema($pdo);
+
+    $select = [
+        '`' . $sqSchema['id'] . '` AS id',
+        '`' . $sqSchema['session_id'] . '` AS session_id',
+        '`' . $sqSchema['word_game_question_id'] . '` AS word_game_question_id',
+        '`' . $sqSchema['question_order'] . '` AS question_order',
+        '`' . $sqSchema['question_text'] . '` AS question_text',
+        '`' . $sqSchema['answer_text'] . '` AS answer_text',
+        '`' . $sqSchema['answer_normalized'] . '` AS answer_normalized',
+        '`' . $sqSchema['answer_length'] . '` AS answer_length',
+        '`' . $sqSchema['max_score'] . '` AS max_score',
+        '`' . $sqSchema['letters_taken_count'] . '` AS letters_taken_count',
+        '`' . $sqSchema['wrong_attempt_count'] . '` AS wrong_attempt_count',
+        '`' . $sqSchema['earned_score'] . '` AS earned_score',
+        '`' . $sqSchema['is_correct'] . '` AS is_correct',
+        '`' . $sqSchema['is_completed'] . '` AS is_completed',
+        '`' . $sqSchema['revealed_indexes_json'] . '` AS revealed_indexes_json',
+        '`' . $sqSchema['submitted_answer'] . '` AS submitted_answer',
+        '`' . $sqSchema['completed_at'] . '` AS completed_at',
+    ];
+
     $stmt = $pdo->prepare(
-        'SELECT
-            sq.*,
-            q.answer_normalized AS source_answer_normalized,
-            q.answer_text AS source_answer_text,
-            q.answer_length AS source_answer_length,
-            q.question_text AS source_question_text
-         FROM word_game_session_questions sq
-         INNER JOIN word_game_questions q ON q.id = sq.question_id
-         WHERE sq.id = ?
-           AND sq.session_id = ?
+        'SELECT ' . implode(', ', $select) . '
+         FROM `' . $sqSchema['table'] . '`
+         WHERE `' . $sqSchema['id'] . '` = ?
+           AND `' . $sqSchema['session_id'] . '` = ?
          LIMIT 1'
     );
     $stmt->execute([trim($sessionQuestionId), trim($sessionId)]);
@@ -378,14 +517,19 @@ function word_game_find_session_question(PDO $pdo, string $sessionQuestionId, st
 
 function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
 {
+    $sqSchema = word_game_session_questions_schema($pdo);
     $sessionQuestionId = (string)($sessionQuestion['id'] ?? '');
-    $answerRaw = (string)($sessionQuestion['source_answer_normalized'] ?? $sessionQuestion['source_answer_text'] ?? '');
+    $answerRaw = (string)($sessionQuestion['answer_normalized'] ?? $sessionQuestion['answer_text'] ?? '');
     $answer = word_game_normalize_answer($answerRaw);
-    $answerLength = (int)($sessionQuestion['source_answer_length'] ?? mb_strlen($answer, 'UTF-8'));
+    $answerLength = (int)($sessionQuestion['answer_length'] ?? mb_strlen($answer, 'UTF-8'));
     $maxScore = (int)($sessionQuestion['max_score'] ?? word_game_question_max_score($answerLength));
 
     if ($sessionQuestionId === '' || $answerLength <= 0 || $answer === '') {
         throw new RuntimeException('Soru verisi okunamadı.');
+    }
+
+    if ((int)($sessionQuestion['is_completed'] ?? 0) === 1) {
+        throw new RuntimeException('Tamamlanan soruda harf açılamaz.');
     }
 
     $revealedIndexes = json_decode((string)($sessionQuestion['revealed_indexes_json'] ?? '[]'), true);
@@ -414,13 +558,19 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
     $remainingScore = max(0, $maxScore - ($lettersTakenCount * 10));
     $revealedLetter = mb_substr($answer, $revealedIndex - 1, 1, 'UTF-8');
 
+    $updateParts = [
+        '`' . $sqSchema['revealed_indexes_json'] . '` = ?',
+        '`' . $sqSchema['letters_taken_count'] . '` = ?',
+        '`' . $sqSchema['earned_score'] . '` = ?',
+    ];
+    if ($sqSchema['updated_at']) {
+        $updateParts[] = '`' . $sqSchema['updated_at'] . '` = NOW()';
+    }
+
     $updateStmt = $pdo->prepare(
-        'UPDATE word_game_session_questions
-         SET revealed_indexes_json = ?,
-             letters_taken_count = ?,
-             earned_score = ?,
-             updated_at = NOW()
-         WHERE id = ?'
+        'UPDATE `' . $sqSchema['table'] . '`
+         SET ' . implode(', ', $updateParts) . '
+         WHERE `' . $sqSchema['id'] . '` = ?'
     );
     $updateStmt->execute([
         json_encode($revealedIndexes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
@@ -446,12 +596,13 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
 
 function word_game_check_answer(PDO $pdo, array $sessionQuestion, string $submittedAnswer): array
 {
+    $sqSchema = word_game_session_questions_schema($pdo);
     $sessionQuestionId = (string)($sessionQuestion['id'] ?? '');
-    $answerRaw = (string)($sessionQuestion['source_answer_normalized'] ?? $sessionQuestion['source_answer_text'] ?? '');
+    $answerRaw = (string)($sessionQuestion['answer_normalized'] ?? $sessionQuestion['answer_text'] ?? '');
     $correctAnswer = word_game_normalize_answer($answerRaw);
     $submittedNormalized = word_game_normalize_answer($submittedAnswer);
     $lettersTakenCount = (int)($sessionQuestion['letters_taken_count'] ?? 0);
-    $sourceLength = (int)($sessionQuestion['source_answer_length'] ?? mb_strlen($correctAnswer, 'UTF-8'));
+    $sourceLength = (int)($sessionQuestion['answer_length'] ?? mb_strlen($correctAnswer, 'UTF-8'));
     $maxScore = (int)($sessionQuestion['max_score'] ?? word_game_question_max_score($sourceLength));
     $wrongAttemptCount = (int)($sessionQuestion['wrong_attempt_count'] ?? 0);
 
@@ -464,16 +615,22 @@ function word_game_check_answer(PDO $pdo, array $sessionQuestion, string $submit
     if ($isCorrect) {
         $earnedScore = max(0, $maxScore - ($lettersTakenCount * 10));
 
+        $set = [
+            '`' . $sqSchema['is_correct'] . '` = 1',
+            '`' . $sqSchema['is_completed'] . '` = 1',
+            '`' . $sqSchema['completed_at'] . '` = NOW()',
+            '`' . $sqSchema['earned_score'] . '` = ?',
+            '`' . $sqSchema['submitted_answer'] . '` = ?',
+        ];
+        if ($sqSchema['updated_at']) {
+            $set[] = '`' . $sqSchema['updated_at'] . '` = NOW()';
+        }
         $stmt = $pdo->prepare(
-            'UPDATE word_game_session_questions
-             SET is_correct = 1,
-                 is_completed = 1,
-                 completed_at = NOW(),
-                 earned_score = ?,
-                 updated_at = NOW()
-             WHERE id = ?'
+            'UPDATE `' . $sqSchema['table'] . '`
+             SET ' . implode(', ', $set) . '
+             WHERE `' . $sqSchema['id'] . '` = ?'
         );
-        $stmt->execute([$earnedScore, $sessionQuestionId]);
+        $stmt->execute([$earnedScore, $submittedAnswer, $sessionQuestionId]);
 
         $result = [
             'is_correct' => true,
@@ -498,25 +655,37 @@ function word_game_check_answer(PDO $pdo, array $sessionQuestion, string $submit
     $remainingAttempts = max(0, 2 - $wrongAttemptCount);
 
     if ($isCompleted) {
+        $set = [
+            '`' . $sqSchema['wrong_attempt_count'] . '` = ?',
+            '`' . $sqSchema['is_correct'] . '` = 0',
+            '`' . $sqSchema['is_completed'] . '` = 1',
+            '`' . $sqSchema['completed_at'] . '` = NOW()',
+            '`' . $sqSchema['earned_score'] . '` = 0',
+            '`' . $sqSchema['submitted_answer'] . '` = ?',
+        ];
+        if ($sqSchema['updated_at']) {
+            $set[] = '`' . $sqSchema['updated_at'] . '` = NOW()';
+        }
         $stmt = $pdo->prepare(
-            'UPDATE word_game_session_questions
-             SET wrong_attempt_count = ?,
-                 is_correct = 0,
-                 is_completed = 1,
-                 completed_at = NOW(),
-                 earned_score = 0,
-                 updated_at = NOW()
-             WHERE id = ?'
+            'UPDATE `' . $sqSchema['table'] . '`
+             SET ' . implode(', ', $set) . '
+             WHERE `' . $sqSchema['id'] . '` = ?'
         );
-        $stmt->execute([$wrongAttemptCount, $sessionQuestionId]);
+        $stmt->execute([$wrongAttemptCount, $submittedAnswer, $sessionQuestionId]);
     } else {
+        $set = [
+            '`' . $sqSchema['wrong_attempt_count'] . '` = ?',
+            '`' . $sqSchema['submitted_answer'] . '` = ?',
+        ];
+        if ($sqSchema['updated_at']) {
+            $set[] = '`' . $sqSchema['updated_at'] . '` = NOW()';
+        }
         $stmt = $pdo->prepare(
-            'UPDATE word_game_session_questions
-             SET wrong_attempt_count = ?,
-                 updated_at = NOW()
-             WHERE id = ?'
+            'UPDATE `' . $sqSchema['table'] . '`
+             SET ' . implode(', ', $set) . '
+             WHERE `' . $sqSchema['id'] . '` = ?'
         );
-        $stmt->execute([$wrongAttemptCount, $sessionQuestionId]);
+        $stmt->execute([$wrongAttemptCount, $submittedAnswer, $sessionQuestionId]);
     }
 
     $result = [
@@ -543,15 +712,17 @@ function word_game_refresh_session_totals(PDO $pdo, string $sessionId): void
         return;
     }
 
+    $sqSchema = word_game_session_questions_schema($pdo);
+
     $stmt = $pdo->prepare(
         'SELECT
-            COALESCE(SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END), 0) AS completed_questions,
-            COALESCE(SUM(CASE WHEN is_completed = 1 AND is_correct = 1 THEN 1 ELSE 0 END), 0) AS correct_questions,
-            COALESCE(SUM(CASE WHEN is_completed = 1 AND is_correct = 0 THEN 1 ELSE 0 END), 0) AS wrong_questions,
-            COALESCE(SUM(COALESCE(letters_taken_count, 0)), 0) AS total_letters_taken,
-            COALESCE(SUM(COALESCE(earned_score, 0)), 0) AS total_score
-         FROM word_game_session_questions
-         WHERE session_id = ?'
+            COALESCE(SUM(CASE WHEN `' . $sqSchema['is_completed'] . '` = 1 THEN 1 ELSE 0 END), 0) AS completed_questions,
+            COALESCE(SUM(CASE WHEN `' . $sqSchema['is_completed'] . '` = 1 AND `' . $sqSchema['is_correct'] . '` = 1 THEN 1 ELSE 0 END), 0) AS correct_questions,
+            COALESCE(SUM(CASE WHEN `' . $sqSchema['is_completed'] . '` = 1 AND `' . $sqSchema['is_correct'] . '` = 0 THEN 1 ELSE 0 END), 0) AS wrong_questions,
+            COALESCE(SUM(COALESCE(`' . $sqSchema['letters_taken_count'] . '`, 0)), 0) AS total_letters_taken,
+            COALESCE(SUM(COALESCE(`' . $sqSchema['earned_score'] . '`, 0)), 0) AS total_score
+         FROM `' . $sqSchema['table'] . '`
+         WHERE `' . $sqSchema['session_id'] . '` = ?'
     );
     $stmt->execute([$sessionId]);
     $totals = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -600,12 +771,19 @@ function word_game_finish_session(PDO $pdo, string $sessionId, string $userId, i
     }
 
     $schema = word_game_session_schema($pdo);
+    $set = [
+        '`' . $schema['status'] . '` = ?',
+        '`' . $schema['remaining_seconds'] . '` = ?',
+        '`' . $schema['total_score'] . '` = ?',
+        '`' . $schema['finished_at'] . '` = NOW()',
+    ];
+    if ($schema['updated_at']) {
+        $set[] = '`' . $schema['updated_at'] . '` = NOW()';
+    }
+
     $stmt = $pdo->prepare(
         'UPDATE `' . $schema['table'] . '`
-         SET `' . $schema['status'] . '` = ?,
-             `' . $schema['remaining_seconds'] . '` = ?,
-             `' . $schema['total_score'] . '` = ?,
-             `' . $schema['finished_at'] . '` = NOW()
+         SET ' . implode(', ', $set) . '
          WHERE `' . $schema['id'] . '` = ?
            AND `' . $schema['user_id'] . '` = ?'
     );
@@ -691,4 +869,28 @@ function word_game_get_leaderboard(PDO $pdo, string $qualificationId, int $limit
     ]);
 
     return $items;
+}
+
+if (!function_exists('word_game_normalize_answer')) {
+    function word_game_normalize_answer(string $answer): string
+    {
+        $value = trim($answer);
+        if ($value === '') {
+            return '';
+        }
+
+        $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+        $value = strtr($value, [
+            'ç' => 'c', 'Ç' => 'C',
+            'ğ' => 'g', 'Ğ' => 'G',
+            'ı' => 'i', 'I' => 'I', 'İ' => 'I', 'i' => 'i',
+            'ö' => 'o', 'Ö' => 'O',
+            'ş' => 's', 'Ş' => 'S',
+            'ü' => 'u', 'Ü' => 'U',
+        ]);
+        $value = mb_strtoupper($value, 'UTF-8');
+        $value = preg_replace('/[^A-Z]+/u', '', $value) ?? '';
+
+        return trim($value);
+    }
 }
