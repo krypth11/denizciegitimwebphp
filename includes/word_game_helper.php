@@ -93,6 +93,7 @@ function word_game_build_error_response(string $message, Throwable $e): array
 
     if (word_game_is_debug_enabled()) {
         $response['debug'] = [
+            'error' => $errorMessage,
             'message' => $errorMessage,
             'file' => $e->getFile(),
             'line' => $e->getLine(),
@@ -253,6 +254,13 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
         $countStmt->execute([$qualificationId, (int)$answerLength]);
         $available = (int)$countStmt->fetchColumn();
 
+        word_game_debug_log('word game length pool count', [
+            'qualification_id' => $qualificationId,
+            'answer_length' => (int)$answerLength,
+            'required_count' => (int)$requiredCount,
+            'available_count' => $available,
+        ]);
+
         if ($available < $requiredCount) {
             $insufficient[] = [
                 'answer_length' => (int)$answerLength,
@@ -268,33 +276,40 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
     }
 
     foreach ($distribution as $answerLength => $requiredCount) {
-        $sql = sprintf(
-            'SELECT `%1$s` AS id,
-                    `%2$s` AS qualification_id,
-                    `%3$s` AS question_text,
-                    `%4$s` AS answer_text,
-                    `%5$s` AS answer_normalized,
-                    `%6$s` AS answer_length
-             FROM `%7$s`
-             WHERE `%2$s` = ?
-               AND `%8$s` = 1
-               AND `%6$s` = ?
-             ORDER BY RAND()
-             LIMIT %d',
-            $qSchema['id'],
-            $qSchema['qualification_id'],
-            $qSchema['question_text'],
-            $qSchema['answer_text'],
-            $qSchema['answer_normalized'],
-            $qSchema['answer_length'],
-            $qSchema['table'],
-            $qSchema['is_active'],
-            (int)$requiredCount
-        );
+        $finalLimit = (int)$requiredCount;
+        $sql = 'SELECT `' . $qSchema['id'] . '` AS id,
+                       `' . $qSchema['qualification_id'] . '` AS qualification_id,
+                       `' . $qSchema['question_text'] . '` AS question_text,
+                       `' . $qSchema['answer_text'] . '` AS answer_text,
+                       `' . $qSchema['answer_normalized'] . '` AS answer_normalized,
+                       `' . $qSchema['answer_length'] . '` AS answer_length
+                FROM `' . $qSchema['table'] . '`
+                WHERE `' . $qSchema['qualification_id'] . '` = ?
+                  AND `' . $qSchema['is_active'] . '` = 1
+                  AND `' . $qSchema['answer_length'] . '` = ?
+                ORDER BY RAND()
+                LIMIT ' . $finalLimit;
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$qualificationId, (int)$answerLength]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $selectedCountByLength[(string)$answerLength] = count($rows);
+
+        word_game_debug_log('word game length selection result', [
+            'qualification_id' => $qualificationId,
+            'answer_length' => (int)$answerLength,
+            'required_count' => (int)$requiredCount,
+            'selected_count' => count($rows),
+            'final_sql_limit' => $finalLimit,
+        ]);
+
+        word_game_debug_log('selected question ids by length', [
+            'qualification_id' => $qualificationId,
+            'answer_length' => (int)$answerLength,
+            'question_ids' => array_values(array_map(
+                static fn(array $r): string => (string)($r['id'] ?? ''),
+                $rows
+            )),
+        ]);
 
         foreach ($rows as $row) {
             $selected[] = [
@@ -309,7 +324,14 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
     }
 
     if (count($selected) !== 10) {
-        throw new RuntimeException('Soru seçiminde beklenmeyen bir hata oluştu.');
+        $details = [
+            'expected_total' => 10,
+            'actual_total' => count($selected),
+            'selected_counts_by_length' => $selectedCountByLength,
+        ];
+        throw new RuntimeException(
+            'WORD_GAME_SELECTION_MISMATCH|' . json_encode($details, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        );
     }
 
     shuffle($selected);
@@ -857,24 +879,19 @@ function word_game_get_leaderboard(PDO $pdo, string $qualificationId, int $limit
     $limit = max(1, min(100, (int)$limit));
     $schema = word_game_session_schema($pdo);
 
-    $sql = sprintf(
-        'SELECT `%1$s` AS id, `%2$s` AS user_id, `%3$s` AS total_score, `%4$s` AS remaining_seconds, `%5$s` AS finished_at
-         FROM `%6$s`
-         WHERE `%7$s` = ?
-           AND `%8$s` IN (\'completed\', \'timeout\')
-           AND `%5$s` IS NOT NULL
-         ORDER BY `%3$s` DESC, `%4$s` DESC, `%5$s` ASC
-         LIMIT %d',
-        $schema['id'],
-        $schema['user_id'],
-        $schema['total_score'],
-        $schema['remaining_seconds'],
-        $schema['finished_at'],
-        $schema['table'],
-        $schema['qualification_id'],
-        $schema['status'],
-        $limit
-    );
+    $sql = 'SELECT `' . $schema['id'] . '` AS id,
+                   `' . $schema['user_id'] . '` AS user_id,
+                   `' . $schema['total_score'] . '` AS total_score,
+                   `' . $schema['remaining_seconds'] . '` AS remaining_seconds,
+                   `' . $schema['finished_at'] . '` AS finished_at
+            FROM `' . $schema['table'] . '`
+            WHERE `' . $schema['qualification_id'] . '` = ?
+              AND `' . $schema['status'] . '` IN (\'completed\', \'timeout\')
+              AND `' . $schema['finished_at'] . '` IS NOT NULL
+            ORDER BY `' . $schema['total_score'] . '` DESC,
+                     `' . $schema['remaining_seconds'] . '` DESC,
+                     `' . $schema['finished_at'] . '` ASC
+            LIMIT ' . $limit;
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$qualificationId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);

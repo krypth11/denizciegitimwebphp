@@ -12,9 +12,21 @@ try {
     $userId = (string)($auth['user']['id'] ?? '');
 
     $qualificationId = word_game_get_current_qualification_id($pdo, $userId);
+    $qualificationName = null;
+    if ($qualificationId !== null && $qualificationId !== '') {
+        try {
+            $qStmt = $pdo->prepare('SELECT name FROM qualifications WHERE id = ? LIMIT 1');
+            $qStmt->execute([$qualificationId]);
+            $qualificationName = $qStmt->fetchColumn() ?: null;
+        } catch (Throwable $ignored) {
+            $qualificationName = null;
+        }
+    }
+
     word_game_debug_log('word game start current qualification', [
         'user_id' => $userId,
         'qualification_id' => $qualificationId,
+        'qualification_name' => $qualificationName,
     ]);
 
     if (!$qualificationId) {
@@ -50,6 +62,24 @@ try {
     }
 
     $created = word_game_session_create($pdo, $userId, $qualificationId, $questions);
+
+    $selectedDistribution = [];
+    foreach (($questions ?? []) as $q) {
+        $len = (int)($q['answer_length'] ?? 0);
+        if ($len <= 0) {
+            continue;
+        }
+        $key = (string)$len;
+        $selectedDistribution[$key] = (int)($selectedDistribution[$key] ?? 0) + 1;
+    }
+    ksort($selectedDistribution, SORT_NUMERIC);
+
+    word_game_debug_log('word game start selected distribution result', [
+        'user_id' => $userId,
+        'qualification_id' => $qualificationId,
+        'selected_distribution' => $selectedDistribution,
+        'selected_total' => count($questions),
+    ]);
 
     api_send_json([
         'success' => true,
