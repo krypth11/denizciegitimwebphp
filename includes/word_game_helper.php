@@ -8,6 +8,79 @@ function word_game_debug_log(string $stage, array $context = []): void
     error_log($line !== false ? $line : ('[word_game][' . $stage . ']'));
 }
 
+function word_game_is_debug_enabled(): bool
+{
+    $flags = [
+        getenv('APP_DEBUG'),
+        getenv('DEBUG'),
+        ini_get('display_errors'),
+    ];
+
+    foreach ($flags as $flag) {
+        if ($flag === null || $flag === false) {
+            continue;
+        }
+
+        $normalized = strtolower(trim((string)$flag));
+        if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function word_game_session_initial_remaining_seconds(): int
+{
+    return 400;
+}
+
+function word_game_session_schema(PDO $pdo): array
+{
+    static $schema = null;
+    if (is_array($schema)) {
+        return $schema;
+    }
+
+    $columns = function_exists('get_table_columns') ? get_table_columns($pdo, 'word_game_sessions') : [];
+    if (!is_array($columns)) {
+        $columns = [];
+    }
+
+    $required = [
+        'id',
+        'user_id',
+        'qualification_id',
+        'total_score',
+        'remaining_seconds',
+        'total_questions',
+        'completed_questions',
+        'correct_questions',
+        'wrong_questions',
+        'total_letters_taken',
+        'status',
+        'started_at',
+        'finished_at',
+    ];
+
+    if (!empty($columns)) {
+        $missing = array_values(array_diff($required, $columns));
+        if (!empty($missing)) {
+            throw new RuntimeException('word_game_sessions şemasında beklenen kolonlar eksik: ' . implode(', ', $missing));
+        }
+    }
+
+    $schema = [
+        'table' => 'word_game_sessions',
+    ];
+
+    foreach ($required as $column) {
+        $schema[$column] = $column;
+    }
+
+    return $schema;
+}
+
 function word_game_get_current_qualification_id(PDO $pdo, string $userId): ?string
 {
     $userId = trim($userId);
@@ -137,32 +210,63 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
     }
 
     $sessionId = function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16));
-    $durationSeconds = 400;
+    $remainingSeconds = word_game_session_initial_remaining_seconds();
+    $schema = word_game_session_schema($pdo);
 
     $pdo->beginTransaction();
     try {
-        $sessionStmt = $pdo->prepare(
-            'INSERT INTO word_game_sessions (
-                id, user_id, qualification_id, status,
-                duration_seconds, remaining_seconds,
-                completed_questions, correct_questions, wrong_questions,
-                total_letters_taken, total_score,
-                started_at, finished_at, created_at, updated_at
-            ) VALUES (
-                ?, ?, ?, ?,
-                ?, ?,
-                0, 0, 0,
-                0, 0,
-                NOW(), NULL, NOW(), NOW()
-            )'
-        );
-        $sessionStmt->execute([
-            $sessionId,
-            $userId,
-            $qualificationId,
-            'active',
-            $durationSeconds,
-            $durationSeconds,
+        $payload = [
+            'id' => $sessionId,
+            'user_id' => $userId,
+            'qualification_id' => $qualificationId,
+            'total_score' => 0,
+            'remaining_seconds' => $remainingSeconds,
+            'total_questions' => count($questions),
+            'completed_questions' => 0,
+            'correct_questions' => 0,
+            'wrong_questions' => 0,
+            'total_letters_taken' => 0,
+            'status' => 'active',
+            'started_at' => date('Y-m-d H:i:s'),
+            'finished_at' => null,
+        ];
+
+        word_game_debug_log('session insert payload', $payload);
+        word_game_debug_log('remaining_seconds set to 400', ['remaining_seconds' => $remainingSeconds]);
+
+        $columns = [
+            $schema['id'],
+            $schema['user_id'],
+            $schema['qualification_id'],
+            $schema['total_score'],
+            $schema['remaining_seconds'],
+            $schema['total_questions'],
+            $schema['completed_questions'],
+            $schema['correct_questions'],
+            $schema['wrong_questions'],
+            $schema['total_letters_taken'],
+            $schema['status'],
+            $schema['started_at'],
+            $schema['finished_at'],
+        ];
+
+        $colSql = implode(', ', array_map(static fn(string $column): string => '`' . $column . '`', $columns));
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+        $stmt = $pdo->prepare('INSERT INTO `' . $schema['table'] . '` (' . $colSql . ') VALUES (' . $placeholders . ')');
+        $stmt->execute([
+            $payload['id'],
+            $payload['user_id'],
+            $payload['qualification_id'],
+            $payload['total_score'],
+            $payload['remaining_seconds'],
+            $payload['total_questions'],
+            $payload['completed_questions'],
+            $payload['correct_questions'],
+            $payload['wrong_questions'],
+            $payload['total_letters_taken'],
+            $payload['status'],
+            $payload['started_at'],
+            $payload['finished_at'],
         ]);
 
         $questionStmt = $pdo->prepare(
@@ -218,7 +322,7 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
         return [
             'session_id' => $sessionId,
             'qualification_id' => $qualificationId,
-            'duration_seconds' => $durationSeconds,
+            'duration_seconds' => $remainingSeconds,
             'questions' => $createdQuestions,
         ];
     } catch (Throwable $e) {
@@ -231,7 +335,20 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
 
 function word_game_find_session(PDO $pdo, string $sessionId, string $userId): ?array
 {
-    $stmt = $pdo->prepare('SELECT * FROM word_game_sessions WHERE id = ? AND user_id = ? LIMIT 1');
+    $schema = word_game_session_schema($pdo);
+
+    $selectKeys = [
+        'id', 'user_id', 'qualification_id', 'total_score', 'remaining_seconds',
+        'total_questions', 'completed_questions', 'correct_questions', 'wrong_questions',
+        'total_letters_taken', 'status', 'started_at', 'finished_at',
+    ];
+    $selectSql = implode(', ', array_map(static fn(string $key): string => '`' . $schema[$key] . '` AS `' . $key . '`', $selectKeys));
+
+    $stmt = $pdo->prepare(
+        'SELECT ' . $selectSql
+        . ' FROM `' . $schema['table'] . '`'
+        . ' WHERE `' . $schema['id'] . '` = ? AND `' . $schema['user_id'] . '` = ? LIMIT 1'
+    );
     $stmt->execute([trim($sessionId), trim($userId)]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -439,15 +556,15 @@ function word_game_refresh_session_totals(PDO $pdo, string $sessionId): void
     $stmt->execute([$sessionId]);
     $totals = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
+    $schema = word_game_session_schema($pdo);
     $update = $pdo->prepare(
-        'UPDATE word_game_sessions
-         SET completed_questions = ?,
-             correct_questions = ?,
-             wrong_questions = ?,
-             total_letters_taken = ?,
-             total_score = ?,
-             updated_at = NOW()
-         WHERE id = ?'
+        'UPDATE `' . $schema['table'] . '`
+         SET `' . $schema['completed_questions'] . '` = ?,
+             `' . $schema['correct_questions'] . '` = ?,
+             `' . $schema['wrong_questions'] . '` = ?,
+             `' . $schema['total_letters_taken'] . '` = ?,
+             `' . $schema['total_score'] . '` = ?
+         WHERE `' . $schema['id'] . '` = ?'
     );
     $update->execute([
         (int)($totals['completed_questions'] ?? 0),
@@ -469,7 +586,7 @@ function word_game_finish_session(PDO $pdo, string $sessionId, string $userId, i
         throw new InvalidArgumentException('status geçersiz.');
     }
 
-    $remainingSeconds = max(0, min(400, $remainingSeconds));
+    $remainingSeconds = max(0, min(word_game_session_initial_remaining_seconds(), $remainingSeconds));
     word_game_refresh_session_totals($pdo, $sessionId);
 
     $session = word_game_find_session($pdo, $sessionId, $userId);
@@ -482,15 +599,15 @@ function word_game_finish_session(PDO $pdo, string $sessionId, string $userId, i
         $totalScore = 0;
     }
 
+    $schema = word_game_session_schema($pdo);
     $stmt = $pdo->prepare(
-        'UPDATE word_game_sessions
-         SET status = ?,
-             remaining_seconds = ?,
-             total_score = ?,
-             finished_at = NOW(),
-             updated_at = NOW()
-         WHERE id = ?
-           AND user_id = ?'
+        'UPDATE `' . $schema['table'] . '`
+         SET `' . $schema['status'] . '` = ?,
+             `' . $schema['remaining_seconds'] . '` = ?,
+             `' . $schema['total_score'] . '` = ?,
+             `' . $schema['finished_at'] . '` = NOW()
+         WHERE `' . $schema['id'] . '` = ?
+           AND `' . $schema['user_id'] . '` = ?'
     );
     $stmt->execute([$status, $remainingSeconds, $totalScore, $sessionId, $userId]);
 
@@ -519,15 +636,24 @@ function word_game_get_leaderboard(PDO $pdo, string $qualificationId, int $limit
 {
     $qualificationId = trim($qualificationId);
     $limit = max(1, min(100, (int)$limit));
+    $schema = word_game_session_schema($pdo);
 
     $sql = sprintf(
-        'SELECT id, user_id, total_score, remaining_seconds, finished_at
-         FROM word_game_sessions
-         WHERE qualification_id = ?
-           AND status IN (\'completed\', \'timeout\')
-           AND finished_at IS NOT NULL
-         ORDER BY total_score DESC, remaining_seconds DESC, finished_at ASC
+        'SELECT `%1$s` AS id, `%2$s` AS user_id, `%3$s` AS total_score, `%4$s` AS remaining_seconds, `%5$s` AS finished_at
+         FROM `%6$s`
+         WHERE `%7$s` = ?
+           AND `%8$s` IN (\'completed\', \'timeout\')
+           AND `%5$s` IS NOT NULL
+         ORDER BY `%3$s` DESC, `%4$s` DESC, `%5$s` ASC
          LIMIT %d',
+        $schema['id'],
+        $schema['user_id'],
+        $schema['total_score'],
+        $schema['remaining_seconds'],
+        $schema['finished_at'],
+        $schema['table'],
+        $schema['qualification_id'],
+        $schema['status'],
         $limit
     );
     $stmt = $pdo->prepare($sql);

@@ -25,6 +25,11 @@ try {
     $remainingSeconds = filter_var($payload['remaining_seconds'] ?? null, FILTER_VALIDATE_INT);
     $status = strtolower(trim((string)($payload['status'] ?? '')));
 
+    word_game_debug_log('reveal/check/finish session ids', [
+        'endpoint' => 'word-game/finish',
+        'session_id' => $sessionId,
+    ]);
+
     if ($sessionId === '' || $remainingSeconds === false || $status === '') {
         api_send_json([
             'success' => false,
@@ -61,6 +66,11 @@ try {
         'data' => $result,
     ]);
 } catch (Throwable $e) {
+    word_game_debug_log('SQL error', [
+        'endpoint' => 'word-game/finish',
+        'message' => $e->getMessage(),
+    ]);
+
     api_send_json([
         'success' => false,
         'message' => $e->getMessage(),

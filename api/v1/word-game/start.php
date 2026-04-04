@@ -12,6 +12,11 @@ try {
     $userId = (string)($auth['user']['id'] ?? '');
 
     $qualificationId = word_game_get_current_qualification_id($pdo, $userId);
+    word_game_debug_log('word game start current qualification', [
+        'user_id' => $userId,
+        'qualification_id' => $qualificationId,
+    ]);
+
     if (!$qualificationId) {
         api_send_json([
             'success' => false,
@@ -56,9 +61,26 @@ try {
         ],
     ]);
 } catch (Throwable $e) {
-    api_send_json([
-        'success' => false,
+    word_game_debug_log('SQL error', [
+        'endpoint' => 'word-game/start',
         'message' => $e->getMessage(),
+    ]);
+
+    $safeMessage = 'Word game başlatılamadı. Lütfen tekrar deneyin.';
+
+    $response = [
+        'success' => false,
+        'message' => $safeMessage,
         'data' => null,
-    ], 422);
+    ];
+
+    if (word_game_is_debug_enabled()) {
+        $response['debug'] = [
+            'error' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ];
+    }
+
+    api_send_json($response, 422);
 }

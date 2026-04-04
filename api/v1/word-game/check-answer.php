@@ -25,6 +25,12 @@ try {
     $sessionQuestionId = trim((string)($payload['session_question_id'] ?? ''));
     $submittedAnswer = (string)($payload['submitted_answer'] ?? '');
 
+    word_game_debug_log('reveal/check/finish session ids', [
+        'endpoint' => 'word-game/check-answer',
+        'session_id' => $sessionId,
+        'session_question_id' => $sessionQuestionId,
+    ]);
+
     if ($sessionId === '' || $sessionQuestionId === '' || trim($submittedAnswer) === '') {
         api_send_json([
             'success' => false,
@@ -75,6 +81,11 @@ try {
         'data' => $response,
     ]);
 } catch (Throwable $e) {
+    word_game_debug_log('SQL error', [
+        'endpoint' => 'word-game/check-answer',
+        'message' => $e->getMessage(),
+    ]);
+
     api_send_json([
         'success' => false,
         'message' => $e->getMessage(),

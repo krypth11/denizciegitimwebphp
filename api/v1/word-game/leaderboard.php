@@ -31,6 +31,11 @@ try {
         ],
     ]);
 } catch (Throwable $e) {
+    word_game_debug_log('SQL error', [
+        'endpoint' => 'word-game/leaderboard',
+        'message' => $e->getMessage(),
+    ]);
+
     api_send_json([
         'success' => false,
         'message' => $e->getMessage(),

@@ -24,6 +24,12 @@ try {
     $sessionId = trim((string)($payload['session_id'] ?? ''));
     $sessionQuestionId = trim((string)($payload['session_question_id'] ?? ''));
 
+    word_game_debug_log('reveal/check/finish session ids', [
+        'endpoint' => 'word-game/reveal-letter',
+        'session_id' => $sessionId,
+        'session_question_id' => $sessionQuestionId,
+    ]);
+
     if ($sessionId === '' || $sessionQuestionId === '') {
         api_send_json([
             'success' => false,
@@ -68,6 +74,11 @@ try {
         ],
     ]);
 } catch (Throwable $e) {
+    word_game_debug_log('SQL error', [
+        'endpoint' => 'word-game/reveal-letter',
+        'message' => $e->getMessage(),
+    ]);
+
     api_send_json([
         'success' => false,
         'message' => $e->getMessage(),
