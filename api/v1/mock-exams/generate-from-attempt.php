@@ -28,7 +28,11 @@ try {
         api_error('qualification_id zorunludur.', 422);
     }
 
-    api_assert_requested_qualification_matches_current($pdo, $auth, $qualificationId, 'mock-exams.generate-from-attempt.payload');
+    api_qualification_access_log('requested qualification', [
+        'context' => 'mock-exams.generate-from-attempt.payload',
+        'requested_qualification_id' => $qualificationId,
+        'current_qualification_id' => $currentQualificationId,
+    ]);
     $qualificationId = $currentQualificationId;
 
     $mode = (string)($payload['mode'] ?? 'similar');
@@ -36,6 +40,13 @@ try {
     $poolType = (string)($payload['pool_type'] ?? ($sourceAttempt['pool_type'] ?? 'random'));
 
     $activeDetail = mock_exam_fetch_active_attempt_detail($pdo, $userId);
+    if ($activeDetail) {
+        $activeQualificationId = trim((string)(($activeDetail['attempt']['qualification_id'] ?? null) ?: ''));
+        if ($activeQualificationId !== '' && $activeQualificationId !== $currentQualificationId) {
+            $activeDetail = null;
+        }
+    }
+
     if ($activeDetail) {
         $activeQuestions = $activeDetail['questions'] ?? [];
         if (empty($activeQuestions)) {
@@ -73,6 +84,11 @@ try {
         'context' => 'mock-exams.generate-from-attempt',
         'count' => 1,
         'current_qualification_id' => $currentQualificationId,
+    ]);
+
+    api_qualification_access_log('exam qualification returned', [
+        'context' => 'mock-exams.generate-from-attempt',
+        'exam qualification returned' => $currentQualificationId,
     ]);
 
     api_success('Yeni deneme oluşturuldu.', [

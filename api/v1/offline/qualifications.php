@@ -18,6 +18,11 @@ try {
         'current_qualification_id' => $currentQualificationId,
     ]);
 
+    api_qualification_access_log('offline qualification returned', [
+        'context' => 'offline.qualifications',
+        'offline qualification returned' => $currentQualificationId,
+    ]);
+
     api_success('Offline indirilebilir yeterlilikler getirildi.', [
         'qualifications' => $items,
     ]);

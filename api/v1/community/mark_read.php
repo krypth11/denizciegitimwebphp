@@ -9,7 +9,7 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
-    $userQualificationId = api_get_current_user_qualification_id($pdo, $auth);
+    $userQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'community.mark_read');
     $profile = community_get_profile_by_user_id($pdo, $userId);
     if (!$profile) {
         api_error('Kullanıcı profili bulunamadı.', 404);
@@ -58,6 +58,14 @@ try {
             'room_id' => $roomId,
         ]);
         api_error('Bu oda için erişim yetkiniz yok.', 403);
+    }
+
+    if ((string)($roomRow['type'] ?? '') === 'qualification') {
+        api_qualification_access_log('community qualification room returned', [
+            'context' => 'community.mark_read',
+            'current_qualification_id' => $userQualificationId,
+            'community qualification room returned' => (string)(($roomRow['qualification_id'] ?? null) ?: ''),
+        ]);
     }
 
     $msgStmt = $pdo->prepare("SELECT `{$msg['id']}` FROM `{$msg['table']}` WHERE `{$msg['id']}` = ? AND `{$msg['room_id']}` = ? LIMIT 1");

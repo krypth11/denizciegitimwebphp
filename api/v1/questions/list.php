@@ -159,6 +159,11 @@ try {
         'current_qualification_id' => $currentQualificationId,
     ]);
 
+    api_qualification_access_log('study qualification returned', [
+        'context' => 'questions.list',
+        'study qualification returned' => $currentQualificationId,
+    ]);
+
     api_success('Soru listesi getirildi.', [
         'questions' => $questions,
     ]);

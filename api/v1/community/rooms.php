@@ -9,7 +9,7 @@ api_require_method('GET');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
-    $userQualificationId = api_get_current_user_qualification_id($pdo, $auth);
+    $userQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'community.rooms');
     api_qualification_access_log('user current qualification', [
         'context' => 'community.rooms',
         'user_id' => $userId,
@@ -90,6 +90,19 @@ try {
     }
 
     $ordered = community_sort_rooms_for_user($enriched, $userQualificationId !== '' ? $userQualificationId : null);
+
+    $returnedQualificationRooms = [];
+    foreach ($ordered as $roomItem) {
+        if ((string)($roomItem['type'] ?? '') === 'qualification') {
+            $returnedQualificationRooms[] = (string)(($roomItem['qualification_id'] ?? null) ?: '');
+        }
+    }
+
+    api_qualification_access_log('community qualification room returned', [
+        'context' => 'community.rooms',
+        'current_qualification_id' => $userQualificationId,
+        'community qualification room returned' => $returnedQualificationRooms,
+    ]);
 
     api_qualification_access_log('community rooms returned count', [
         'context' => 'community.rooms',

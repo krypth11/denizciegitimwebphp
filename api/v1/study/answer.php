@@ -197,6 +197,12 @@ try {
     }
 
     $debugStep = 'response_success';
+    api_qualification_access_log('study qualification returned', [
+        'context' => 'study.answer',
+        'study qualification returned' => $currentQualificationId,
+        'question_id' => $questionId,
+    ]);
+
     api_success('Cevap kaydedildi.', [
         'progress' => $progress,
         'event_insert_warning' => $eventInsertWarning,

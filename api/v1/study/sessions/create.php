@@ -35,6 +35,12 @@ try {
 
     $session = study_insert_session($pdo, $userId, $payload);
 
+    api_qualification_access_log('study qualification returned', [
+        'context' => 'study.sessions.create',
+        'study qualification returned' => $currentQualificationId,
+        'session_id' => ($session['id'] ?? null),
+    ]);
+
     api_success('Study session oluşturuldu.', [
         'session' => $session,
     ]);

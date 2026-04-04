@@ -34,6 +34,11 @@ try {
         'current_qualification_id' => $currentQualificationId,
     ]);
 
+    api_qualification_access_log('study qualification returned', [
+        'context' => 'qualifications.list',
+        'study qualification returned' => $currentQualificationId,
+    ]);
+
     api_success('Yeterlilik listesi getirildi.', [
         'qualifications' => $qualifications,
     ]);

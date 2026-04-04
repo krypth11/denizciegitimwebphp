@@ -299,9 +299,14 @@ function api_get_current_user_qualification_id(PDO $pdo, array $auth): ?string
         return null;
     }
 
-    $fromAuth = trim((string)($user['current_qualification_id'] ?? ''));
-    if ($fromAuth !== '') {
-        return $fromAuth;
+    return get_current_user_qualification_id($pdo, $userId);
+}
+
+function get_current_user_qualification_id(PDO $pdo, string $userId): ?string
+{
+    $userId = trim($userId);
+    if ($userId === '') {
+        return null;
     }
 
     $profile = api_find_profile_by_user_id($pdo, $userId);
@@ -309,8 +314,8 @@ function api_get_current_user_qualification_id(PDO $pdo, array $auth): ?string
         return null;
     }
 
-    $fromProfile = trim((string)($profile['current_qualification_id'] ?? ''));
-    return $fromProfile !== '' ? $fromProfile : null;
+    $currentQualificationId = trim((string)($profile['current_qualification_id'] ?? ''));
+    return $currentQualificationId !== '' ? $currentQualificationId : null;
 }
 
 function api_require_current_user_qualification_id(PDO $pdo, array $auth, string $context = 'unknown'): string
@@ -318,10 +323,21 @@ function api_require_current_user_qualification_id(PDO $pdo, array $auth, string
     $currentQualificationId = api_get_current_user_qualification_id($pdo, $auth);
     $userId = (string)(($auth['user']['id'] ?? $auth['id']) ?? '');
 
+    api_qualification_access_log('requested user id', [
+        'context' => $context,
+        'user_id' => $userId,
+    ]);
+
     api_qualification_access_log('user current qualification', [
         'context' => $context,
         'user_id' => $userId,
         'current_qualification_id' => $currentQualificationId,
+    ]);
+
+    api_qualification_access_log('current qualification resolved', [
+        'context' => $context,
+        'requested user id' => $userId,
+        'current qualification resolved' => $currentQualificationId,
     ]);
 
     if ($currentQualificationId === null || trim($currentQualificationId) === '') {

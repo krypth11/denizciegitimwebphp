@@ -7,6 +7,7 @@ api_require_method('GET');
 
 try {
     $auth = api_require_auth($pdo);
+    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'topics.list');
 
     $courseId = api_require_query_param('course_id', 191);
 
@@ -44,6 +45,11 @@ try {
         'context' => 'topics.list',
         'count' => count($topics),
         'requested_qualification_id' => $requestedQualificationId,
+    ]);
+
+    api_qualification_access_log('study qualification returned', [
+        'context' => 'topics.list',
+        'study qualification returned' => $currentQualificationId,
     ]);
 
     api_success('Konu listesi getirildi.', [

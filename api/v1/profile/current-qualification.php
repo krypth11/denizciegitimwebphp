@@ -35,6 +35,13 @@ try {
 
     api_update_profile_fields($pdo, $userId, $updates);
 
+    $resolvedQualificationId = get_current_user_qualification_id($pdo, $userId);
+    api_qualification_access_log('profile current qualification updated to', [
+        'context' => 'profile.current-qualification',
+        'user_id' => $userId,
+        'profile current qualification updated to' => $resolvedQualificationId,
+    ]);
+
     $profile = api_find_profile_by_user_id($pdo, $userId);
     if (!$profile) {
         api_error('Profil bulunamadı.', 404);

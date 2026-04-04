@@ -13,7 +13,11 @@ try {
     $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'mock-exams.availability');
 
     $qualificationId = api_require_query_param('qualification_id');
-    api_assert_requested_qualification_matches_current($pdo, $auth, $qualificationId, 'mock-exams.availability.query');
+    api_qualification_access_log('requested qualification', [
+        'context' => 'mock-exams.availability.query',
+        'requested_qualification_id' => $qualificationId,
+        'current_qualification_id' => $currentQualificationId,
+    ]);
     $qualificationId = $currentQualificationId;
     $requested = api_get_int_query('requested_question_count', 20, 1, 100);
 
@@ -55,6 +59,11 @@ try {
         $remain = $requested - $wrongCount;
         $wrongMsg = 'Yanlış yaptığınız ' . $wrongCount . ' soru bulundu. Kalan ' . $remain . ' soru rastgele tamamlanacaktır.';
     }
+
+    api_qualification_access_log('exam qualification returned', [
+        'context' => 'mock-exams.availability',
+        'exam qualification returned' => $currentQualificationId,
+    ]);
 
     api_success('Deneme uygunluk bilgisi alındı.', [
         'available_pool_counts' => $counts,

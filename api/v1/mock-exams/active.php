@@ -33,13 +33,26 @@ try {
             'current_qualification_id' => $currentQualificationId,
             'attempt_id' => ($detail['attempt']['id'] ?? null),
         ]);
-        api_error('Bu deneme için erişim yetkiniz yok.', 403);
+        api_success('Aktif deneme yok.', [
+            'attempt' => null,
+            'questions' => [],
+            'summary' => null,
+            'lesson_report' => [],
+            'strongest_course' => null,
+            'weakest_course' => null,
+            'most_blank_course' => null,
+        ]);
     }
 
     $questions = $detail['questions'] ?? [];
     if (empty($questions)) {
         api_error('Bu kriterlere uygun deneme soruları oluşturulamadı.', 422);
     }
+
+    api_qualification_access_log('exam qualification returned', [
+        'context' => 'mock-exams.active',
+        'exam qualification returned' => $currentQualificationId,
+    ]);
 
     api_success('Aktif deneme detayı alındı.', [
         'attempt' => $detail['attempt'] ?? null,

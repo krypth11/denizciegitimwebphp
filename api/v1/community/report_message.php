@@ -9,7 +9,7 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
-    $userQualificationId = api_get_current_user_qualification_id($pdo, $auth);
+    $userQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'community.report_message');
     $profile = community_get_profile_by_user_id($pdo, $userId);
     if (!$profile) {
         api_error('Kullanıcı profili bulunamadı.', 404);
@@ -66,6 +66,14 @@ try {
             'message_id' => $messageId,
         ]);
         api_error('Bu oda için erişim yetkiniz yok.', 403);
+    }
+
+    if ((string)($message['room_type'] ?? '') === 'qualification') {
+        api_qualification_access_log('community qualification room returned', [
+            'context' => 'community.report_message',
+            'current_qualification_id' => $userQualificationId,
+            'community qualification room returned' => (string)(($message['room_qualification_id'] ?? null) ?: ''),
+        ]);
     }
 
     $dupSql = "SELECT COUNT(*) FROM `{$report['table']}` WHERE `{$report['message_id']}` = ? AND `{$reportedByCol}` = ?";

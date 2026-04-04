@@ -9,7 +9,7 @@ api_require_method('GET');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
-    $userQualificationId = api_get_current_user_qualification_id($pdo, $auth);
+    $userQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'community.messages');
 
     $roomId = trim((string)($_GET['room_id'] ?? ''));
     if ($roomId === '') {
@@ -45,6 +45,14 @@ try {
             'room_id' => $roomId,
         ]);
         api_error('Bu oda için erişim yetkiniz yok.', 403);
+    }
+
+    if ((string)($roomRow['type'] ?? '') === 'qualification') {
+        api_qualification_access_log('community qualification room returned', [
+            'context' => 'community.messages',
+            'current_qualification_id' => $userQualificationId,
+            'community qualification room returned' => (string)(($roomRow['qualification_id'] ?? null) ?: ''),
+        ]);
     }
 
     $fullNameExpr = $profile['full_name'] ? "u.`{$profile['full_name']}`" : "''";

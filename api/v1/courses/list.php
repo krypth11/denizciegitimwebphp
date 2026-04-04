@@ -9,7 +9,13 @@ try {
     $auth = api_require_auth($pdo);
 
     $qualificationId = api_require_query_param('qualification_id', 191);
-    $currentQualificationId = api_assert_requested_qualification_matches_current($pdo, $auth, $qualificationId, 'courses.list');
+    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'courses.list');
+
+    api_qualification_access_log('requested qualification', [
+        'context' => 'courses.list.query',
+        'requested_qualification_id' => $qualificationId,
+        'current_qualification_id' => $currentQualificationId,
+    ]);
 
     $stmt = $pdo->prepare(
         'SELECT id, qualification_id, name, description, icon, order_index, created_at
@@ -36,6 +42,11 @@ try {
         'context' => 'courses.list',
         'count' => count($courses),
         'current_qualification_id' => $currentQualificationId,
+    ]);
+
+    api_qualification_access_log('study qualification returned', [
+        'context' => 'courses.list',
+        'study qualification returned' => $currentQualificationId,
     ]);
 
     api_success('Kurs listesi getirildi.', [

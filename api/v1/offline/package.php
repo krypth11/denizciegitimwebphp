@@ -10,7 +10,12 @@ try {
     $auth = api_require_auth($pdo);
 
     $qualificationId = api_require_query_param('qualification_id', 191);
-    $currentQualificationId = api_assert_requested_qualification_matches_current($pdo, $auth, $qualificationId, 'offline.package');
+    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'offline.package');
+    api_qualification_access_log('requested qualification', [
+        'context' => 'offline.package.query',
+        'requested_qualification_id' => $qualificationId,
+        'current_qualification_id' => $currentQualificationId,
+    ]);
 
     $pkg = offline_get_qualification_package_data($pdo, $currentQualificationId);
     if (!$pkg) {
@@ -21,6 +26,11 @@ try {
         'context' => 'offline.package',
         'count' => 1,
         'current_qualification_id' => $currentQualificationId,
+    ]);
+
+    api_qualification_access_log('offline qualification returned', [
+        'context' => 'offline.package',
+        'offline qualification returned' => $currentQualificationId,
     ]);
 
     api_success('Offline paket getirildi.', [

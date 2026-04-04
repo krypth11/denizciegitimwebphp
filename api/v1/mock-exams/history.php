@@ -16,7 +16,11 @@ try {
     $sort = strtolower(trim((string)($_GET['sort'] ?? 'newest')));
     $qualificationId = api_validate_optional_id((string)($_GET['qualification_id'] ?? ''), 'qualification_id');
     if ($qualificationId !== '') {
-        api_assert_requested_qualification_matches_current($pdo, $auth, $qualificationId, 'mock-exams.history.query');
+        api_qualification_access_log('requested qualification', [
+            'context' => 'mock-exams.history.query',
+            'requested_qualification_id' => $qualificationId,
+            'current_qualification_id' => $currentQualificationId,
+        ]);
     }
     $qualificationId = $currentQualificationId;
     $page = api_get_int_query('page', 1, 1, 100000);
@@ -34,6 +38,11 @@ try {
         'context' => 'mock-exams.history',
         'count' => 1,
         'current_qualification_id' => $currentQualificationId,
+    ]);
+
+    api_qualification_access_log('exam qualification returned', [
+        'context' => 'mock-exams.history',
+        'exam qualification returned' => $currentQualificationId,
     ]);
 
     api_success('Deneme geçmişi alındı.', $result);

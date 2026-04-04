@@ -22,7 +22,11 @@ try {
         api_error('qualification_id zorunludur.', 422);
     }
 
-    api_assert_requested_qualification_matches_current($pdo, $auth, $qualificationId, 'mock-exams.start.payload');
+    api_qualification_access_log('requested qualification', [
+        'context' => 'mock-exams.start.payload',
+        'requested_qualification_id' => $qualificationId,
+        'current_qualification_id' => $currentQualificationId,
+    ]);
     $qualificationId = $currentQualificationId;
 
     if (!in_array($poolType, ['random', 'unseen', 'seen', 'wrong'], true)) {
@@ -34,6 +38,13 @@ try {
     }
 
     $activeDetail = mock_exam_fetch_active_attempt_detail($pdo, $userId);
+    if ($activeDetail) {
+        $activeQualificationId = trim((string)(($activeDetail['attempt']['qualification_id'] ?? null) ?: ''));
+        if ($activeQualificationId !== '' && $activeQualificationId !== $currentQualificationId) {
+            $activeDetail = null;
+        }
+    }
+
     if ($activeDetail) {
         $activeQuestions = $activeDetail['questions'] ?? [];
         if (empty($activeQuestions)) {
@@ -71,6 +82,11 @@ try {
         'context' => 'mock-exams.start',
         'count' => 1,
         'current_qualification_id' => $currentQualificationId,
+    ]);
+
+    api_qualification_access_log('exam qualification returned', [
+        'context' => 'mock-exams.start',
+        'exam qualification returned' => $currentQualificationId,
     ]);
 
     api_success('Deneme başlatıldı.', [
