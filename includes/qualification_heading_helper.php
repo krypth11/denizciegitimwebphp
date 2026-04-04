@@ -99,52 +99,13 @@ function qualification_heading_toggle_active(PDO $pdo, string $id, bool $isActiv
 
 function qualification_heading_attach_item(PDO $pdo, string $headingId, string $qualificationId, int $orderIndex = 0): array
 {
-    $headingId = trim($headingId);
-    $qualificationId = trim($qualificationId);
-
-    if ($headingId === '' || $qualificationId === '') {
-        throw new InvalidArgumentException('Başlık ve yeterlilik alanları zorunludur.');
+    $result = qualification_heading_attach_items($pdo, $headingId, [$qualificationId]);
+    if (!empty($result['attached'][0])) {
+        return $result['attached'][0];
     }
 
-    $headingStmt = $pdo->prepare('SELECT COUNT(*) FROM qualification_headings WHERE id = ?');
-    $headingStmt->execute([$headingId]);
-    if ((int)$headingStmt->fetchColumn() < 1) {
-        throw new RuntimeException('Başlık bulunamadı.');
-    }
-
-    $qualSql = qualification_heading_qualification_base_sql($pdo, true);
-    $qualStmt = $pdo->prepare('SELECT q.id, q.name, q.description FROM qualifications q WHERE q.id = ? AND ' . $qualSql['where']);
-    $qualStmt->execute([$qualificationId]);
-    $qualification = $qualStmt->fetch(PDO::FETCH_ASSOC);
-    if (!$qualification) {
-        throw new RuntimeException('Seçilen yeterlilik aktif/geçerli değil veya bulunamadı.');
-    }
-
-    $dupStmt = $pdo->prepare('SELECT COUNT(*) FROM qualification_heading_items WHERE heading_id = ? AND qualification_id = ?');
-    $dupStmt->execute([$headingId, $qualificationId]);
-    if ((int)$dupStmt->fetchColumn() > 0) {
-        throw new RuntimeException('Bu yeterlilik bu başlık altında zaten mevcut.');
-    }
-
-    if ($orderIndex <= 0) {
-        $maxStmt = $pdo->prepare('SELECT COALESCE(MAX(order_index), 0) FROM qualification_heading_items WHERE heading_id = ?');
-        $maxStmt->execute([$headingId]);
-        $orderIndex = ((int)$maxStmt->fetchColumn()) + 1;
-    }
-
-    $itemId = generate_uuid();
-    $stmt = $pdo->prepare('INSERT INTO qualification_heading_items (id, heading_id, qualification_id, order_index, created_at)
-                           VALUES (?, ?, ?, ?, NOW())');
-    $stmt->execute([$itemId, $headingId, $qualificationId, $orderIndex]);
-
-    error_log('[QUALIFICATION_HEADING] qualification attached | heading_id=' . $headingId . ' | qualification_id=' . $qualificationId);
-
-    return [
-        'id' => $itemId,
-        'heading_id' => $headingId,
-        'qualification_id' => $qualificationId,
-        'order_index' => $orderIndex,
-    ];
+    $message = (string)($result['message'] ?? 'Yeterlilik başlığa eklenemedi.');
+    throw new RuntimeException($message);
 }
 
 function qualification_heading_detach_item(PDO $pdo, string $headingId, string $qualificationId): void
@@ -254,26 +215,160 @@ function qualification_onboarding_groups(PDO $pdo): array
 
 function qualification_heading_active_qualifications(PDO $pdo, ?string $headingId = null): array
 {
-    $headingId = $headingId !== null ? trim($headingId) : null;
+    return qualification_heading_available_qualifications($pdo);
+}
+
+function qualification_heading_available_qualifications(PDO $pdo): array
+{
     $meta = qualification_heading_qualification_base_sql($pdo, true);
     $sql = 'SELECT q.id, q.name, q.description, q.order_index
             FROM qualifications q
-            WHERE ' . $meta['where'];
-
-    $params = [];
-    if ($headingId !== null && $headingId !== '') {
-        $sql .= ' AND NOT EXISTS (
+            WHERE ' . $meta['where'] . '
+              AND NOT EXISTS (
                     SELECT 1 FROM qualification_heading_items i
-                    WHERE i.heading_id = ? AND i.qualification_id = q.id
-                 )';
-        $params[] = $headingId;
+                    WHERE i.qualification_id = q.id
+              )
+            ORDER BY COALESCE(q.order_index, 0) ASC, q.name ASC';
+
+    $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    error_log('[QUALIFICATION_HEADING] available qualification count = ' . count($rows));
+    return $rows;
+}
+
+function qualification_heading_attach_items(PDO $pdo, string $headingId, array $qualificationIds): array
+{
+    $headingId = trim($headingId);
+    if ($headingId === '') {
+        throw new InvalidArgumentException('Başlık ID alanı zorunludur.');
     }
 
-    $sql .= ' ORDER BY COALESCE(q.order_index, 0) ASC, q.name ASC';
+    $normalized = [];
+    foreach ($qualificationIds as $qid) {
+        $qid = trim((string)$qid);
+        if ($qid !== '' && !in_array($qid, $normalized, true)) {
+            $normalized[] = $qid;
+        }
+    }
 
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    error_log('[QUALIFICATION_HEADING] requested qualification ids = ' . json_encode($normalized, JSON_UNESCAPED_UNICODE));
+
+    if (empty($normalized)) {
+        throw new InvalidArgumentException('En az bir yeterlilik seçmelisiniz.');
+    }
+
+    $headingStmt = $pdo->prepare('SELECT COUNT(*) FROM qualification_headings WHERE id = ?');
+    $headingStmt->execute([$headingId]);
+    if ((int)$headingStmt->fetchColumn() < 1) {
+        throw new RuntimeException('Başlık bulunamadı.');
+    }
+
+    $meta = qualification_heading_qualification_base_sql($pdo, true);
+    $placeholders = implode(',', array_fill(0, count($normalized), '?'));
+
+    $validStmt = $pdo->prepare('SELECT q.id
+                                FROM qualifications q
+                                WHERE q.id IN (' . $placeholders . ')
+                                  AND ' . $meta['where']);
+    $validStmt->execute($normalized);
+    $validIds = $validStmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+    $validMap = array_fill_keys(array_map('strval', $validIds), true);
+
+    $assignedStmt = $pdo->prepare('SELECT qualification_id, heading_id
+                                   FROM qualification_heading_items
+                                   WHERE qualification_id IN (' . $placeholders . ')');
+    $assignedStmt->execute($normalized);
+    $assignedRows = $assignedStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $assignedMap = [];
+    foreach ($assignedRows as $row) {
+        $assignedMap[(string)$row['qualification_id']] = (string)$row['heading_id'];
+    }
+
+    error_log('[QUALIFICATION_HEADING] already assigned qualification ids = ' . json_encode(array_keys($assignedMap), JSON_UNESCAPED_UNICODE));
+
+    $attachable = [];
+    $rejected = [];
+
+    foreach ($normalized as $qid) {
+        if (!isset($validMap[$qid])) {
+            $rejected[] = [
+                'qualification_id' => $qid,
+                'reason' => 'Seçilen yeterlilik aktif/geçerli değil veya bulunamadı.',
+            ];
+            continue;
+        }
+
+        if (isset($assignedMap[$qid])) {
+            $assignedHeading = $assignedMap[$qid];
+            $rejected[] = [
+                'qualification_id' => $qid,
+                'reason' => $assignedHeading === $headingId
+                    ? 'Bu yeterlilik bu başlık altında zaten mevcut.'
+                    : 'Bu yeterlilik zaten başka bir başlığa eklenmiş.',
+            ];
+            continue;
+        }
+
+        $attachable[] = $qid;
+    }
+
+    $attached = [];
+
+    if (!empty($attachable)) {
+        $startedTx = false;
+        if (!$pdo->inTransaction()) {
+            $pdo->beginTransaction();
+            $startedTx = true;
+        }
+
+        try {
+            $maxStmt = $pdo->prepare('SELECT COALESCE(MAX(order_index), 0) FROM qualification_heading_items WHERE heading_id = ?');
+            $maxStmt->execute([$headingId]);
+            $nextOrder = (int)$maxStmt->fetchColumn();
+
+            $insertStmt = $pdo->prepare('INSERT INTO qualification_heading_items (id, heading_id, qualification_id, order_index, created_at)
+                                         VALUES (?, ?, ?, ?, NOW())');
+
+            foreach ($attachable as $qid) {
+                $nextOrder++;
+                $itemId = generate_uuid();
+                $insertStmt->execute([$itemId, $headingId, $qid, $nextOrder]);
+                $attached[] = [
+                    'id' => $itemId,
+                    'heading_id' => $headingId,
+                    'qualification_id' => $qid,
+                    'order_index' => $nextOrder,
+                ];
+            }
+
+            if ($startedTx && $pdo->inTransaction()) {
+                $pdo->commit();
+            }
+        } catch (Throwable $e) {
+            if ($startedTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    $attachedIds = array_map(static fn(array $r): string => (string)$r['qualification_id'], $attached);
+    $rejectedIds = array_map(static fn(array $r): string => (string)$r['qualification_id'], $rejected);
+    error_log('[QUALIFICATION_HEADING] attached qualification ids = ' . json_encode($attachedIds, JSON_UNESCAPED_UNICODE));
+    error_log('[QUALIFICATION_HEADING] rejected qualification ids = ' . json_encode($rejectedIds, JSON_UNESCAPED_UNICODE));
+
+    if (empty($attached) && !empty($rejected)) {
+        $firstReason = (string)($rejected[0]['reason'] ?? 'Seçilen yeterlilikler eklenemedi.');
+        throw new RuntimeException($firstReason);
+    }
+
+    return [
+        'attached' => $attached,
+        'rejected' => $rejected,
+        'message' => !empty($rejected)
+            ? 'Bazı yeterlilikler eklenemedi.'
+            : 'Yeterlilikler başarıyla eklendi.',
+    ];
 }
 
 function qualification_heading_reorder_heading(PDO $pdo, string $id, int $orderIndex): void

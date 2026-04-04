@@ -116,18 +116,15 @@ include '../includes/sidebar.php';
                 <input type="hidden" id="manage_heading_id">
 
                 <div class="row g-2 align-items-end mb-3">
-                    <div class="col-md-7">
+                    <div class="col-md-10">
                         <label class="form-label">Yeterlilik Ekle</label>
-                        <select class="form-select" id="attach_qualification_id">
-                            <option value="">Seçiniz...</option>
-                        </select>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label">Sıra</label>
-                        <input type="number" class="form-control" id="attach_order_index" value="0">
+                        <input type="search" class="form-control form-control-sm mb-2" id="attach_search" placeholder="Yeterlilik ara...">
+                        <div id="attachQualificationList" class="border rounded p-2" style="max-height:220px; overflow:auto;">
+                            <div class="text-muted small">Yükleniyor...</div>
+                        </div>
                     </div>
                     <div class="col-md-2 d-grid">
-                        <button type="button" class="btn btn-primary" id="attachBtn">Ekle</button>
+                        <button type="button" class="btn btn-primary" id="attachBtn">Seçilenleri Ekle</button>
                     </div>
                 </div>
 
@@ -155,6 +152,7 @@ $extra_js = <<<'JAVASCRIPT'
 <script>
 $(function () {
     const esc = (v) => $('<div>').text(v ?? '').html();
+    let availableQualifications = [];
 
     async function api(action, method = 'GET', data = {}) {
         return await window.appAjax({
@@ -212,11 +210,9 @@ $(function () {
         $('#manage_heading_id').val(heading.id || '');
         $('.modal-title', '#manageItemsModal').text('Başlık Yeterlilikleri - ' + (heading.name || ''));
 
-        const $select = $('#attach_qualification_id');
-        $select.html('<option value="">Seçiniz...</option>');
-        available.forEach(q => {
-            $select.append(`<option value="${esc(q.id)}">${esc(q.name)}</option>`);
-        });
+        availableQualifications = available;
+        $('#attach_search').val('');
+        renderAvailableQualifications();
 
         const $body = $('#headingItemsBody');
         if (!items.length) {
@@ -241,6 +237,29 @@ $(function () {
                     </button>
                 </td>
             </tr>
+        `).join(''));
+    }
+
+    function renderAvailableQualifications() {
+        const query = ($('#attach_search').val() || '').toString().toLowerCase().trim();
+        const filtered = availableQualifications.filter(q => {
+            const text = `${q.name || ''} ${q.description || ''}`.toLowerCase();
+            return !query || text.includes(query);
+        });
+
+        const $list = $('#attachQualificationList');
+        if (!filtered.length) {
+            $list.html('<div class="text-muted small">Uygun yeterlilik bulunamadı.</div>');
+            return;
+        }
+
+        $list.html(filtered.map(q => `
+            <div class="form-check mb-1">
+                <input class="form-check-input attach-qualification-check" type="checkbox" value="${esc(q.id)}" id="attach_q_${esc(q.id)}">
+                <label class="form-check-label" for="attach_q_${esc(q.id)}">
+                    ${esc(q.name)}
+                </label>
+            </div>
         `).join(''));
     }
 
@@ -308,17 +327,25 @@ $(function () {
         bootstrap.Modal.getOrCreateInstance(document.getElementById('manageItemsModal')).show();
     });
 
+    $('#attach_search').on('input', renderAvailableQualifications);
+
     $('#attachBtn').on('click', async function () {
         const heading_id = $('#manage_heading_id').val() || '';
-        const qualification_id = $('#attach_qualification_id').val() || '';
-        const order_index = Number($('#attach_order_index').val() || 0);
+        const qualification_ids = $('.attach-qualification-check:checked').map(function () {
+            return $(this).val();
+        }).get();
 
-        if (!qualification_id) {
-            return window.showAppAlert('Uyarı', 'Lütfen eklenecek yeterliliği seçin.', 'warning');
+        if (!qualification_ids.length) {
+            return window.showAppAlert('Uyarı', 'Lütfen en az bir yeterlilik seçin.', 'warning');
         }
 
-        const res = await api('attach_qualification', 'POST', { heading_id, qualification_id, order_index });
+        const res = await api('attach_qualifications', 'POST', { heading_id, qualification_ids });
         if (!res.success) return window.showAppAlert('Hata', res.message || 'Ekleme yapılamadı.', 'error');
+
+        if (Array.isArray(res.data?.rejected) && res.data.rejected.length > 0) {
+            const detail = res.data.rejected.map(r => `• ${r.qualification_id}: ${r.reason}`).join('\n');
+            await window.showAppAlert('Kısmi Sonuç', (res.message || 'Bazı yeterlilikler eklenemedi.') + '\n' + detail, 'warning');
+        }
 
         const data = await loadHeadingDetail(heading_id);
         if (data) renderDetail(data);

@@ -36,7 +36,7 @@ try {
 
             qh_json(true, '', [
                 'heading' => qualification_heading_detail($pdo, $headingId),
-                'available_qualifications' => qualification_heading_active_qualifications($pdo, $headingId),
+                'available_qualifications' => qualification_heading_available_qualifications($pdo),
             ]);
             break;
 
@@ -76,10 +76,20 @@ try {
         case 'attach_qualification':
             $headingId = trim((string)($_POST['heading_id'] ?? ''));
             $qualificationId = trim((string)($_POST['qualification_id'] ?? ''));
-            $orderIndex = (int)($_POST['order_index'] ?? 0);
+            $result = qualification_heading_attach_items($pdo, $headingId, [$qualificationId]);
+            qh_json(true, $result['message'] ?? 'Yeterlilik başlığa eklendi.', $result);
+            break;
 
-            $item = qualification_heading_attach_item($pdo, $headingId, $qualificationId, $orderIndex);
-            qh_json(true, 'Yeterlilik başlığa eklendi.', ['item' => $item]);
+        case 'attach_qualifications':
+            $headingId = trim((string)($_POST['heading_id'] ?? ''));
+            $qualificationIds = $_POST['qualification_ids'] ?? [];
+
+            if (!is_array($qualificationIds)) {
+                $qualificationIds = [$qualificationIds];
+            }
+
+            $result = qualification_heading_attach_items($pdo, $headingId, $qualificationIds);
+            qh_json(true, $result['message'] ?? 'Yeterlilikler başlığa eklendi.', $result);
             break;
 
         case 'detach_qualification':
