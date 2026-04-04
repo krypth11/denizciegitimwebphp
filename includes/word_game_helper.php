@@ -2,6 +2,10 @@
 
 require_once __DIR__ . '/word_game_question_helper.php';
 
+if (!defined('WORD_GAME_FORCE_DEBUG')) {
+    define('WORD_GAME_FORCE_DEBUG', true);
+}
+
 function word_game_debug_log(string $stage, array $context = []): void
 {
     $line = '[word_game][' . $stage . '] ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -42,6 +46,10 @@ function word_game_pick_column(array $columns, array $candidates, bool $required
 
 function word_game_is_debug_enabled(): bool
 {
+    if (defined('WORD_GAME_FORCE_DEBUG') && WORD_GAME_FORCE_DEBUG === true) {
+        return true;
+    }
+
     $flags = [
         getenv('APP_DEBUG'),
         getenv('DEBUG'),
@@ -60,6 +68,39 @@ function word_game_is_debug_enabled(): bool
     }
 
     return false;
+}
+
+function word_game_build_error_response(string $message, Throwable $e): array
+{
+    $errorMessage = (string)$e->getMessage();
+
+    $firstTrace = $e->getTrace()[0] ?? [];
+    $traceHint = '';
+    if (is_array($firstTrace) && !empty($firstTrace)) {
+        $traceHint = trim((string)(
+            ($firstTrace['class'] ?? '')
+            . ($firstTrace['type'] ?? '')
+            . ($firstTrace['function'] ?? '')
+        ));
+    }
+
+    $response = [
+        'success' => false,
+        'message' => $message,
+        'error' => $errorMessage,
+        'data' => null,
+    ];
+
+    if (word_game_is_debug_enabled()) {
+        $response['debug'] = [
+            'message' => $errorMessage,
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'trace_hint' => $traceHint,
+        ];
+    }
+
+    return $response;
 }
 
 function word_game_session_initial_remaining_seconds(): int

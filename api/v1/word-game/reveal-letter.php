@@ -79,19 +79,5 @@ try {
         'message' => $e->getMessage(),
     ]);
 
-    $response = [
-        'success' => false,
-        'message' => 'Harf açma işlemi başarısız oldu.',
-        'data' => null,
-    ];
-
-    if (word_game_is_debug_enabled()) {
-        $response['debug'] = [
-            'error' => $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine(),
-        ];
-    }
-
-    api_send_json($response, 422);
+    api_send_json(word_game_build_error_response('Harf açma işlemi başarısız oldu.', $e), 422);
 }

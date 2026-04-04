@@ -66,21 +66,5 @@ try {
         'message' => $e->getMessage(),
     ]);
 
-    $safeMessage = 'Word game başlatılamadı. Lütfen tekrar deneyin.';
-
-    $response = [
-        'success' => false,
-        'message' => $safeMessage,
-        'data' => null,
-    ];
-
-    if (word_game_is_debug_enabled()) {
-        $response['debug'] = [
-            'error' => $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine(),
-        ];
-    }
-
-    api_send_json($response, 422);
+    api_send_json(word_game_build_error_response('Word game başlatılamadı.', $e), 422);
 }
