@@ -9,6 +9,7 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
+    $userQualificationId = api_get_current_user_qualification_id($pdo, $auth);
     $profile = community_get_profile_by_user_id($pdo, $userId);
     if (!$profile) {
         api_error('Kullanıcı profili bulunamadı.', 404);
@@ -37,10 +38,26 @@ try {
         api_error('Okundu şeması uygun değil.', 500);
     }
 
-    $roomStmt = $pdo->prepare("SELECT `{$room['id']}` FROM `{$room['table']}` WHERE `{$room['id']}` = ? AND `{$room['is_active']}` = 1 LIMIT 1");
+    $roomStmt = $pdo->prepare("SELECT `{$room['id']}` AS id, `{$room['type']}` AS type"
+        . ($room['qualification_id'] ? ", `{$room['qualification_id']}` AS qualification_id" : ', NULL AS qualification_id')
+        . " FROM `{$room['table']}` WHERE `{$room['id']}` = ? AND `{$room['is_active']}` = 1 LIMIT 1");
     $roomStmt->execute([$roomId]);
-    if (!$roomStmt->fetchColumn()) {
+    $roomRow = $roomStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$roomRow) {
         api_error('Oda bulunamadı veya aktif değil.', 404);
+    }
+
+    if (!community_user_can_access_room([
+        'type' => (string)($roomRow['type'] ?? ''),
+        'qualification_id' => (string)(($roomRow['qualification_id'] ?? null) ?: ''),
+    ], $userQualificationId)) {
+        api_qualification_access_log('qualification access rejected', [
+            'context' => 'community.mark_read.room',
+            'requested_qualification_id' => ($roomRow['qualification_id'] ?? null),
+            'current_qualification_id' => $userQualificationId,
+            'room_id' => $roomId,
+        ]);
+        api_error('Bu oda için erişim yetkiniz yok.', 403);
     }
 
     $msgStmt = $pdo->prepare("SELECT `{$msg['id']}` FROM `{$msg['table']}` WHERE `{$msg['id']}` = ? AND `{$msg['room_id']}` = ? LIMIT 1");

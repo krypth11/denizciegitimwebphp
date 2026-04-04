@@ -397,17 +397,27 @@ function offline_get_qualification_package_data(PDO $pdo, string $qualificationI
     ];
 }
 
-function offline_get_downloadable_qualifications(PDO $pdo): array
+function offline_get_downloadable_qualifications(PDO $pdo, ?string $qualificationIdFilter = null): array
 {
     $qual = offline_schema_qualifications($pdo);
     $sql = 'SELECT '
         . offline_q($qual['id']) . ' AS id, '
         . offline_q($qual['name']) . ' AS name, '
         . ($qual['description'] ? offline_q($qual['description']) : "''") . ' AS description '
-        . 'FROM ' . offline_q($qual['table'])
-        . ' ORDER BY ' . offline_q($qual['name']) . ' ASC';
+        . 'FROM ' . offline_q($qual['table']);
 
-    $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $params = [];
+    $qualificationIdFilter = trim((string)$qualificationIdFilter);
+    if ($qualificationIdFilter !== '') {
+        $sql .= ' WHERE ' . offline_q($qual['id']) . ' = ?';
+        $params[] = $qualificationIdFilter;
+    }
+
+    $sql .= ' ORDER BY ' . offline_q($qual['name']) . ' ASC';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     $items = [];
 
     foreach ($rows as $row) {

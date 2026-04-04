@@ -8,6 +8,7 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
+    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'study.question-report');
 
     $payload = api_get_request_data();
 
@@ -30,9 +31,20 @@ try {
         api_error('report_text çok uzun.', 422);
     }
 
-    $questionMeta = study_get_question_meta($pdo, $questionId);
+    $questionMeta = study_get_question_meta_with_relations($pdo, $questionId);
     if (!$questionMeta['exists']) {
         api_error('Soru bulunamadı.', 404);
+    }
+
+    $questionQualificationId = trim((string)($questionMeta['qualification_id'] ?? ''));
+    if ($questionQualificationId !== '' && $questionQualificationId !== $currentQualificationId) {
+        api_qualification_access_log('qualification access rejected', [
+            'context' => 'study.question-report.question_id',
+            'requested_qualification_id' => $questionQualificationId,
+            'current_qualification_id' => $currentQualificationId,
+            'question_id' => $questionId,
+        ]);
+        api_error('Bu soru için erişim yetkiniz yok.', 403);
     }
 
     try {

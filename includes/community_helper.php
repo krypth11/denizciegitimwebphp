@@ -515,6 +515,25 @@ if (!function_exists('community_sort_rooms_for_user')) {
     }
 }
 
+if (!function_exists('community_user_can_access_room')) {
+    function community_user_can_access_room(array $roomRow, ?string $userQualificationId): bool
+    {
+        $type = strtolower(trim((string)($roomRow['type'] ?? '')));
+        $roomQualificationId = trim((string)($roomRow['qualification_id'] ?? ''));
+        $userQualificationId = trim((string)$userQualificationId);
+
+        if ($type === 'general' || $type === 'custom') {
+            return true;
+        }
+
+        if ($type === 'qualification') {
+            return $roomQualificationId !== '' && $userQualificationId !== '' && $roomQualificationId === $userQualificationId;
+        }
+
+        return false;
+    }
+}
+
 if (!function_exists('community_sync_qualification_room')) {
     function community_sync_qualification_room(PDO $pdo, string $qualificationId, string $qualificationName, bool $isActive = true): void
     {

@@ -10,6 +10,7 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
+    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'mock-exams.start');
     $payload = api_get_request_data();
 
     $qualificationId = trim((string)($payload['qualification_id'] ?? ''));
@@ -20,6 +21,9 @@ try {
     if ($qualificationId === '') {
         api_error('qualification_id zorunludur.', 422);
     }
+
+    api_assert_requested_qualification_matches_current($pdo, $auth, $qualificationId, 'mock-exams.start.payload');
+    $qualificationId = $currentQualificationId;
 
     if (!in_array($poolType, ['random', 'unseen', 'seen', 'wrong'], true)) {
         api_error('pool_type geçersiz. Desteklenen değerler: random, unseen, seen, wrong', 422);
@@ -62,6 +66,12 @@ try {
     if (empty($createdQuestions)) {
         api_error('Bu kriterlere uygun deneme soruları oluşturulamadı.', 422);
     }
+
+    api_qualification_access_log('exam qualifications returned count', [
+        'context' => 'mock-exams.start',
+        'count' => 1,
+        'current_qualification_id' => $currentQualificationId,
+    ]);
 
     api_success('Deneme başlatıldı.', [
         'attempt' => $created['attempt'] ?? null,

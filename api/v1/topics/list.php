@@ -6,9 +6,19 @@ require_once dirname(__DIR__) . '/auth_helper.php';
 api_require_method('GET');
 
 try {
-    api_require_auth($pdo);
+    $auth = api_require_auth($pdo);
 
     $courseId = api_require_query_param('course_id', 191);
+
+    $courseStmt = $pdo->prepare('SELECT qualification_id FROM courses WHERE id = ? LIMIT 1');
+    $courseStmt->execute([$courseId]);
+    $courseRow = $courseStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$courseRow) {
+        api_error('Kurs bulunamadı.', 404);
+    }
+
+    $requestedQualificationId = trim((string)($courseRow['qualification_id'] ?? ''));
+    api_assert_requested_qualification_matches_current($pdo, $auth, $requestedQualificationId, 'topics.list');
 
     $stmt = $pdo->prepare(
         'SELECT id, course_id, name, content, order_index, created_at
@@ -29,6 +39,12 @@ try {
             'created_at' => $row['created_at'] ?? null,
         ];
     }, $rows);
+
+    api_qualification_access_log('study qualifications returned count', [
+        'context' => 'topics.list',
+        'count' => count($topics),
+        'requested_qualification_id' => $requestedQualificationId,
+    ]);
 
     api_success('Konu listesi getirildi.', [
         'topics' => $topics,

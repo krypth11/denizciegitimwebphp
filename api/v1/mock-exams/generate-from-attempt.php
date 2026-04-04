@@ -10,6 +10,7 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
+    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'mock-exams.generate-from-attempt');
     $payload = api_get_request_data();
 
     $sourceAttemptId = trim((string)($payload['source_attempt_id'] ?? ''));
@@ -26,6 +27,9 @@ try {
     if (trim($qualificationId) === '') {
         api_error('qualification_id zorunludur.', 422);
     }
+
+    api_assert_requested_qualification_matches_current($pdo, $auth, $qualificationId, 'mock-exams.generate-from-attempt.payload');
+    $qualificationId = $currentQualificationId;
 
     $mode = (string)($payload['mode'] ?? 'similar');
     $requestedQuestionCount = (int)($payload['requested_question_count'] ?? ($sourceAttempt['requested_question_count'] ?? 20));
@@ -64,6 +68,12 @@ try {
     if (empty($createdQuestions)) {
         api_error('Bu kriterlere uygun deneme soruları oluşturulamadı.', 422);
     }
+
+    api_qualification_access_log('exam qualifications returned count', [
+        'context' => 'mock-exams.generate-from-attempt',
+        'count' => 1,
+        'current_qualification_id' => $currentQualificationId,
+    ]);
 
     api_success('Yeni deneme oluşturuldu.', [
         'attempt' => $created['attempt'] ?? null,

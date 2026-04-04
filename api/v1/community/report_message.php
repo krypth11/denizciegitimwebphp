@@ -9,6 +9,7 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
+    $userQualificationId = api_get_current_user_qualification_id($pdo, $auth);
     $profile = community_get_profile_by_user_id($pdo, $userId);
     if (!$profile) {
         api_error('Kullanıcı profili bulunamadı.', 404);
@@ -36,17 +37,35 @@ try {
 
     $msg = community_message_schema($pdo);
     $report = community_report_schema($pdo);
+    $room = community_room_schema($pdo);
 
     $reportedByCol = $report['reported_by_user_id'] ?? $report['reporter_user_id'] ?? null;
     if (!$reportedByCol) {
         api_error('Raporlama şeması uygun değil.', 500);
     }
 
-    $msgStmt = $pdo->prepare("SELECT `{$msg['id']}` AS id, `{$msg['user_id']}` AS user_id FROM `{$msg['table']}` WHERE `{$msg['id']}` = ? LIMIT 1");
+    $msgStmt = $pdo->prepare("SELECT m.`{$msg['id']}` AS id, m.`{$msg['user_id']}` AS user_id, m.`{$msg['room_id']}` AS room_id, r.`{$room['type']}` AS room_type"
+        . ($room['qualification_id'] ? ", r.`{$room['qualification_id']}` AS room_qualification_id" : ', NULL AS room_qualification_id')
+        . " FROM `{$msg['table']}` m"
+        . " LEFT JOIN `{$room['table']}` r ON r.`{$room['id']}` = m.`{$msg['room_id']}`"
+        . " WHERE m.`{$msg['id']}` = ? LIMIT 1");
     $msgStmt->execute([$messageId]);
     $message = $msgStmt->fetch(PDO::FETCH_ASSOC);
     if (!$message) {
         api_error('Mesaj bulunamadı.', 404);
+    }
+
+    if (!community_user_can_access_room([
+        'type' => (string)($message['room_type'] ?? ''),
+        'qualification_id' => (string)(($message['room_qualification_id'] ?? null) ?: ''),
+    ], $userQualificationId)) {
+        api_qualification_access_log('qualification access rejected', [
+            'context' => 'community.report_message.room',
+            'requested_qualification_id' => ($message['room_qualification_id'] ?? null),
+            'current_qualification_id' => $userQualificationId,
+            'message_id' => $messageId,
+        ]);
+        api_error('Bu oda için erişim yetkiniz yok.', 403);
     }
 
     $dupSql = "SELECT COUNT(*) FROM `{$report['table']}` WHERE `{$report['message_id']}` = ? AND `{$reportedByCol}` = ?";

@@ -9,6 +9,7 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
+    $userQualificationId = api_get_current_user_qualification_id($pdo, $auth);
     $profile = community_get_profile_by_user_id($pdo, $userId);
     if (!$profile) {
         api_error('Kullanıcı profili bulunamadı.', 404);
@@ -35,7 +36,9 @@ try {
     $room = community_room_schema($pdo);
     $msg = community_message_schema($pdo);
 
-    $roomStmt = $pdo->prepare("SELECT `{$room['id']}` AS id, `{$room['is_active']}` AS is_active FROM `{$room['table']}` WHERE `{$room['id']}` = ? LIMIT 1");
+    $roomStmt = $pdo->prepare("SELECT `{$room['id']}` AS id, `{$room['is_active']}` AS is_active, `{$room['type']}` AS type"
+        . ($room['qualification_id'] ? ", `{$room['qualification_id']}` AS qualification_id" : ', NULL AS qualification_id')
+        . " FROM `{$room['table']}` WHERE `{$room['id']}` = ? LIMIT 1");
     $roomStmt->execute([$roomId]);
     $roomRow = $roomStmt->fetch(PDO::FETCH_ASSOC);
     if (!$roomRow) {
@@ -43,6 +46,19 @@ try {
     }
     if ((int)($roomRow['is_active'] ?? 0) !== 1) {
         api_error('Bu oda pasif olduğu için mesaj gönderemezsiniz.', 422);
+    }
+
+    if (!community_user_can_access_room([
+        'type' => (string)($roomRow['type'] ?? ''),
+        'qualification_id' => (string)(($roomRow['qualification_id'] ?? null) ?: ''),
+    ], $userQualificationId)) {
+        api_qualification_access_log('qualification access rejected', [
+            'context' => 'community.send_message.room',
+            'requested_qualification_id' => ($roomRow['qualification_id'] ?? null),
+            'current_qualification_id' => $userQualificationId,
+            'room_id' => $roomId,
+        ]);
+        api_error('Bu oda için erişim yetkiniz yok.', 403);
     }
 
     $mute = community_is_user_muted($pdo, $userId);

@@ -9,13 +9,19 @@ api_require_method('GET');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
+    $userQualificationId = api_get_current_user_qualification_id($pdo, $auth);
+    api_qualification_access_log('user current qualification', [
+        'context' => 'community.rooms',
+        'user_id' => $userId,
+        'current_qualification_id' => $userQualificationId,
+    ]);
+
     $profile = community_get_profile_by_user_id($pdo, $userId);
     if (!$profile) {
         api_error('Kullanıcı profili bulunamadı.', 404);
     }
 
     $isGuest = (int)($profile['is_guest'] ?? 0) === 1;
-    $userQualificationId = trim((string)($profile['current_qualification_id'] ?? ''));
 
     community_ensure_general_room($pdo);
     $quals = $pdo->query('SELECT id, name FROM qualifications')->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -38,6 +44,15 @@ try {
 
     $enriched = [];
     foreach ($rooms as $r) {
+        $roomType = (string)($r['type'] ?? '');
+        $roomQualificationId = (string)(($r['qualification_id'] ?? null) ?: '');
+        if (!community_user_can_access_room([
+            'type' => $roomType,
+            'qualification_id' => $roomQualificationId,
+        ], $userQualificationId)) {
+            continue;
+        }
+
         $roomId = (string)$r['id'];
         $lastSql = "SELECT `{$msg['message_text']}` AS message_text, `{$msg['created_at']}` AS created_at FROM `{$msg['table']}` WHERE `{$msg['room_id']}` = ?";
         $params = [$roomId];
@@ -75,6 +90,12 @@ try {
     }
 
     $ordered = community_sort_rooms_for_user($enriched, $userQualificationId !== '' ? $userQualificationId : null);
+
+    api_qualification_access_log('community rooms returned count', [
+        'context' => 'community.rooms',
+        'count' => count($ordered),
+        'current_qualification_id' => $userQualificationId,
+    ]);
 
     api_success('Topluluk odaları getirildi.', [
         'rooms' => $ordered,

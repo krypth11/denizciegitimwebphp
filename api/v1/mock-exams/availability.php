@@ -10,8 +10,11 @@ api_require_method('GET');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
+    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'mock-exams.availability');
 
     $qualificationId = api_require_query_param('qualification_id');
+    api_assert_requested_qualification_matches_current($pdo, $auth, $qualificationId, 'mock-exams.availability.query');
+    $qualificationId = $currentQualificationId;
     $requested = api_get_int_query('requested_question_count', 20, 1, 100);
 
     $counts = mock_exam_calculate_pool_counts($pdo, $userId, $qualificationId);

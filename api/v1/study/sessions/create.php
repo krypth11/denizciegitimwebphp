@@ -8,8 +8,20 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
+    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'study.sessions.create');
 
     $payload = api_get_request_data();
+
+    if (array_key_exists('qualification_id', $payload)) {
+        api_assert_requested_qualification_matches_current(
+            $pdo,
+            $auth,
+            (string)($payload['qualification_id'] ?? ''),
+            'study.sessions.create.payload'
+        );
+    }
+
+    $payload['qualification_id'] = $currentQualificationId;
 
     $intFields = ['requested_question_count', 'served_question_count', 'correct_count', 'wrong_count', 'duration_seconds'];
     foreach ($intFields as $field) {

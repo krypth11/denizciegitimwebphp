@@ -284,6 +284,80 @@ function api_require_auth(PDO $pdo): array
     return $auth;
 }
 
+function api_qualification_access_log(string $stage, array $context = []): void
+{
+    $line = '[qualification_access][' . $stage . '] ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    error_log($line !== false ? $line : ('[qualification_access][' . $stage . ']'));
+}
+
+function api_get_current_user_qualification_id(PDO $pdo, array $auth): ?string
+{
+    $user = $auth['user'] ?? $auth;
+    $userId = trim((string)($user['id'] ?? ''));
+
+    if ($userId === '') {
+        return null;
+    }
+
+    $fromAuth = trim((string)($user['current_qualification_id'] ?? ''));
+    if ($fromAuth !== '') {
+        return $fromAuth;
+    }
+
+    $profile = api_find_profile_by_user_id($pdo, $userId);
+    if (!$profile) {
+        return null;
+    }
+
+    $fromProfile = trim((string)($profile['current_qualification_id'] ?? ''));
+    return $fromProfile !== '' ? $fromProfile : null;
+}
+
+function api_require_current_user_qualification_id(PDO $pdo, array $auth, string $context = 'unknown'): string
+{
+    $currentQualificationId = api_get_current_user_qualification_id($pdo, $auth);
+    $userId = (string)(($auth['user']['id'] ?? $auth['id']) ?? '');
+
+    api_qualification_access_log('user current qualification', [
+        'context' => $context,
+        'user_id' => $userId,
+        'current_qualification_id' => $currentQualificationId,
+    ]);
+
+    if ($currentQualificationId === null || trim($currentQualificationId) === '') {
+        api_error('Current qualification bulunamadı. Önce yeterlilik seçmelisiniz.', 403);
+    }
+
+    return $currentQualificationId;
+}
+
+function api_assert_requested_qualification_matches_current(
+    PDO $pdo,
+    array $auth,
+    ?string $requestedQualificationId,
+    string $context = 'unknown'
+): string {
+    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, $context);
+    $requested = trim((string)$requestedQualificationId);
+
+    api_qualification_access_log('requested qualification', [
+        'context' => $context,
+        'requested_qualification_id' => ($requested !== '' ? $requested : null),
+        'current_qualification_id' => $currentQualificationId,
+    ]);
+
+    if ($requested !== '' && $requested !== $currentQualificationId) {
+        api_qualification_access_log('qualification access rejected', [
+            'context' => $context,
+            'requested_qualification_id' => $requested,
+            'current_qualification_id' => $currentQualificationId,
+        ]);
+        api_error('Bu yeterlilik için erişim yetkiniz yok.', 403);
+    }
+
+    return $currentQualificationId;
+}
+
 function api_revoke_hashed_token(PDO $pdo, string $tokenHash): void
 {
     api_assert_tokens_table_ready($pdo);

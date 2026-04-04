@@ -6,7 +6,8 @@ require_once dirname(__DIR__) . '/auth_helper.php';
 api_require_method('GET');
 
 try {
-    api_require_auth($pdo);
+    $auth = api_require_auth($pdo);
+    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'questions.list');
 
     $columns = get_table_columns($pdo, 'questions');
     if (!$columns) {
@@ -44,6 +45,57 @@ try {
 
     $where = [];
     $params = [];
+
+    $qualificationFilterApplied = false;
+    if ($hasCol('qualification_id')) {
+        $where[] = 'qualification_id = ?';
+        $params[] = $currentQualificationId;
+        $qualificationFilterApplied = true;
+    }
+
+    if ($hasCol('course_id')) {
+        if ($courseId !== '') {
+            $courseGuardStmt = $pdo->prepare('SELECT qualification_id FROM courses WHERE id = ? LIMIT 1');
+            $courseGuardStmt->execute([$courseId]);
+            $courseGuardRow = $courseGuardStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$courseGuardRow) {
+                api_error('Kurs bulunamadı.', 404);
+            }
+            api_assert_requested_qualification_matches_current(
+                $pdo,
+                $auth,
+                (string)($courseGuardRow['qualification_id'] ?? ''),
+                'questions.list.course_guard'
+            );
+        }
+
+        if (!$qualificationFilterApplied) {
+            $where[] = 'course_id IN (SELECT id FROM courses WHERE qualification_id = ?)';
+            $params[] = $currentQualificationId;
+            $qualificationFilterApplied = true;
+        }
+    }
+
+    if ($topicId !== '' && $hasCol('topic_id')) {
+        $topicGuardStmt = $pdo->prepare(
+            'SELECT c.qualification_id
+             FROM topics t
+             INNER JOIN courses c ON t.course_id = c.id
+             WHERE t.id = ?
+             LIMIT 1'
+        );
+        $topicGuardStmt->execute([$topicId]);
+        $topicGuardRow = $topicGuardStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$topicGuardRow) {
+            api_error('Konu bulunamadı.', 404);
+        }
+        api_assert_requested_qualification_matches_current(
+            $pdo,
+            $auth,
+            (string)($topicGuardRow['qualification_id'] ?? ''),
+            'questions.list.topic_guard'
+        );
+    }
 
     if ($courseId !== '') {
         if ($hasCol('course_id')) {
@@ -100,6 +152,12 @@ try {
             'created_at' => $row['created_at'] ?? null,
         ];
     }, $rows);
+
+    api_qualification_access_log('study qualifications returned count', [
+        'context' => 'questions.list',
+        'count' => count($questions),
+        'current_qualification_id' => $currentQualificationId,
+    ]);
 
     api_success('Soru listesi getirildi.', [
         'questions' => $questions,
