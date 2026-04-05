@@ -313,12 +313,28 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
         ]);
 
         foreach ($rows as $row) {
+            $originalAnswerText = (string)$row['answer_text'];
+            $normalizedAnswer = (string)$row['answer_normalized'];
+
+            word_game_debug_log('original answer_text from pool', [
+                'qualification_id' => $qualificationId,
+                'question_id' => (string)$row['id'],
+                'answer_length' => (int)$row['answer_length'],
+                'answer_text' => $originalAnswerText,
+            ]);
+
+            word_game_debug_log('normalized answer', [
+                'qualification_id' => $qualificationId,
+                'question_id' => (string)$row['id'],
+                'answer_normalized' => $normalizedAnswer,
+            ]);
+
             $selected[] = [
                 'id' => (string)$row['id'],
                 'qualification_id' => (string)$row['qualification_id'],
                 'question_text' => (string)$row['question_text'],
-                'answer_text' => (string)$row['answer_text'],
-                'answer_normalized' => (string)$row['answer_normalized'],
+                'answer_text' => $originalAnswerText,
+                'answer_normalized' => $normalizedAnswer,
                 'answer_length' => (int)$row['answer_length'],
                 '_pick_index' => $pickIndex++,
             ];
@@ -486,6 +502,16 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
             $answerLength = (int)($question['answer_length'] ?? 0);
             $maxScore = word_game_question_max_score($answerLength);
             $questionOrder = $idx + 1;
+            $snapshotAnswerText = (string)($question['answer_text'] ?? '');
+            $snapshotAnswerNormalized = word_game_normalize_answer((string)($question['answer_normalized'] ?? $question['answer_text'] ?? ''));
+
+            word_game_debug_log('session snapshot answer_text', [
+                'session_id' => $sessionId,
+                'question_id' => (string)($question['id'] ?? ''),
+                'question_order' => $questionOrder,
+                'answer_text' => $snapshotAnswerText,
+                'answer_normalized' => $snapshotAnswerNormalized,
+            ]);
 
             $snapshot = [
                 $sqSchema['id'] => $sessionQuestionId,
@@ -493,8 +519,8 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
                 $sqSchema['word_game_question_id'] => (string)$question['id'],
                 $sqSchema['question_order'] => $questionOrder,
                 $sqSchema['question_text'] => (string)($question['question_text'] ?? ''),
-                $sqSchema['answer_text'] => (string)($question['answer_text'] ?? ''),
-                $sqSchema['answer_normalized'] => word_game_normalize_answer((string)($question['answer_normalized'] ?? $question['answer_text'] ?? '')),
+                $sqSchema['answer_text'] => $snapshotAnswerText,
+                $sqSchema['answer_normalized'] => $snapshotAnswerNormalized,
                 $sqSchema['answer_length'] => $answerLength,
                 $sqSchema['max_score'] => $maxScore,
                 $sqSchema['letters_taken_count'] => 0,
@@ -532,6 +558,7 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
                 'question_text' => (string)($question['question_text'] ?? ''),
                 'answer_length' => $answerLength,
                 'max_score' => $maxScore,
+                'answer_text_debug' => $snapshotAnswerText,
             ];
         }
 
