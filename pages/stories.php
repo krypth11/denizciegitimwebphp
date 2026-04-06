@@ -53,10 +53,11 @@ include '../includes/sidebar.php';
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Yeni Hikaye Ekle</h5>
+                <h5 class="modal-title" id="storyModalTitle">Yeni Hikaye Ekle</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form id="storyForm" enctype="multipart/form-data" autocomplete="off">
+                <input type="hidden" name="story_id" id="storyId">
                 <div class="modal-body">
                     <div class="row g-3">
                         <div class="col-12">
@@ -64,12 +65,18 @@ include '../includes/sidebar.php';
                             <input type="text" class="form-control" name="title" id="storyTitle" maxlength="191" required>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Thumbnail Görseli *</label>
+                            <label class="form-label" id="storyThumbnailLabel">Thumbnail Görseli *</label>
+                            <div class="mb-2 d-none" id="storyCurrentThumbnailWrap">
+                                <img src="" alt="Mevcut thumbnail" id="storyCurrentThumbnail" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;">
+                            </div>
                             <input type="file" class="form-control" name="thumbnail" id="storyThumbnail" accept="image/jpeg,image/png,image/webp" required>
                             <small class="text-muted">JPG, PNG, WEBP - max 5MB</small>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Story Görseli *</label>
+                            <label class="form-label" id="storyImageLabel">Story Görseli *</label>
+                            <div class="mb-2 d-none" id="storyCurrentImageWrap">
+                                <img src="" alt="Mevcut story görseli" id="storyCurrentImage" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;border:1px solid #e5e7eb;">
+                            </div>
                             <input type="file" class="form-control" name="image" id="storyImage" accept="image/jpeg,image/png,image/webp" required>
                             <small class="text-muted">JPG, PNG, WEBP - max 5MB</small>
                         </div>
@@ -90,6 +97,7 @@ $extra_js = <<<'JAVASCRIPT'
 $(document).ready(function () {
     const endpoint = '../ajax/stories.php';
     let stories = [];
+    let modalMode = 'create';
 
     const appAlert = (title, message, type = 'info') =>
         window.showAppAlert ? window.showAppAlert({ title, message, type }) : Promise.resolve();
@@ -158,6 +166,7 @@ $(document).ready(function () {
                     <td><small class="text-muted">${formatDateSafe(s.created_at)}</small></td>
                     <td class="text-end">
                         <div class="d-inline-flex gap-2">
+                            <button class="btn btn-sm btn-outline-primary edit-btn" data-id="${esc(s.id)}"><i class="bi bi-pencil-square"></i> Düzenle</button>
                             <button class="btn btn-sm ${toggleClass} toggle-btn" data-id="${esc(s.id)}" data-next="${nextStatus}">${toggleLabel}</button>
                             <button class="btn btn-sm btn-danger delete-btn" data-id="${esc(s.id)}"><i class="bi bi-trash"></i></button>
                         </div>
@@ -177,6 +186,7 @@ $(document).ready(function () {
                             </div>
                         </div>
                         <div class="d-flex gap-2 mt-3">
+                            <button class="btn btn-sm btn-outline-primary edit-btn" data-id="${esc(s.id)}"><i class="bi bi-pencil-square"></i> Düzenle</button>
                             <button class="btn btn-sm ${toggleClass} toggle-btn" data-id="${esc(s.id)}" data-next="${nextStatus}">${toggleLabel}</button>
                             <button class="btn btn-sm btn-danger delete-btn" data-id="${esc(s.id)}"><i class="bi bi-trash"></i> Sil</button>
                         </div>
@@ -184,6 +194,61 @@ $(document).ready(function () {
                 </div>
             `);
         });
+    }
+
+    function setPreview($wrap, $img, url) {
+        if (url) {
+            $img.attr('src', url);
+            $wrap.removeClass('d-none');
+            return;
+        }
+        $img.attr('src', '');
+        $wrap.addClass('d-none');
+    }
+
+    function setCreateMode() {
+        modalMode = 'create';
+        $('#storyModalTitle').text('Yeni Hikaye Ekle');
+        $('#saveStoryBtn').text('Kaydet');
+        $('#storyThumbnailLabel').text('Thumbnail Görseli *');
+        $('#storyImageLabel').text('Story Görseli *');
+        $('#storyThumbnail').prop('required', true);
+        $('#storyImage').prop('required', true);
+        $('#storyId').val('');
+        setPreview($('#storyCurrentThumbnailWrap'), $('#storyCurrentThumbnail'), '');
+        setPreview($('#storyCurrentImageWrap'), $('#storyCurrentImage'), '');
+    }
+
+    function setEditMode(story) {
+        modalMode = 'edit';
+        $('#storyModalTitle').text('Hikayeyi Düzenle');
+        $('#saveStoryBtn').text('Güncelle');
+        $('#storyThumbnailLabel').text('Thumbnail Görseli (Opsiyonel)');
+        $('#storyImageLabel').text('Story Görseli (Opsiyonel)');
+        $('#storyThumbnail').prop('required', false);
+        $('#storyImage').prop('required', false);
+        $('#storyId').val(story?.id || '');
+        $('#storyTitle').val(story?.title || '');
+        setPreview($('#storyCurrentThumbnailWrap'), $('#storyCurrentThumbnail'), story?.thumbnail_url || '');
+        setPreview($('#storyCurrentImageWrap'), $('#storyCurrentImage'), story?.image_url || '');
+    }
+
+    async function openEditModal(storyId) {
+        const res = await api('get', 'GET', { story_id: storyId });
+        if (!res.success) {
+            await appAlert('Hata', res.message || 'Hikaye detayı alınamadı.', 'error');
+            return;
+        }
+
+        const story = res.data?.story || null;
+        if (!story || !story.id) {
+            await appAlert('Hata', 'Hikaye detayı bulunamadı.', 'error');
+            return;
+        }
+
+        $('#storyForm')[0].reset();
+        setEditMode(story);
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('storyModal')).show();
     }
 
     async function loadStories() {
@@ -198,10 +263,21 @@ $(document).ready(function () {
 
     $('#addStoryBtn').on('click', function () {
         $('#storyForm')[0].reset();
+        setCreateMode();
         bootstrap.Modal.getOrCreateInstance(document.getElementById('storyModal')).show();
     });
 
+    $('#storyModal').on('hidden.bs.modal', function () {
+        $('#storyForm')[0].reset();
+        setCreateMode();
+    });
+
     $('#refreshStoriesBtn').on('click', loadStories);
+
+    $(document).on('click', '.edit-btn', async function () {
+        const storyId = $(this).data('id');
+        await openEditModal(storyId);
+    });
 
     $('#storyForm').on('submit', async function (e) {
         e.preventDefault();
@@ -214,19 +290,35 @@ $(document).ready(function () {
 
         const thumb = $('#storyThumbnail')[0].files?.[0];
         const image = $('#storyImage')[0].files?.[0];
-        if (!thumb || !image) {
+        const storyId = ($('#storyId').val() || '').trim();
+
+        if (modalMode === 'create' && (!thumb || !image)) {
             await appAlert('Uyarı', 'Thumbnail ve story görseli zorunludur.', 'warning');
+            return;
+        }
+
+        if (modalMode === 'edit' && !storyId) {
+            await appAlert('Hata', 'Düzenleme için story_id bulunamadı.', 'error');
             return;
         }
 
         const fd = new FormData();
         fd.append('title', title);
-        fd.append('thumbnail', thumb);
-        fd.append('image', image);
+        if (modalMode === 'edit') {
+            fd.append('story_id', storyId);
+        }
+        if (thumb) {
+            fd.append('thumbnail', thumb);
+        }
+        if (image) {
+            fd.append('image', image);
+        }
 
         const $btn = $('#saveStoryBtn');
-        if (typeof window.appSetButtonLoading === 'function') window.appSetButtonLoading($btn, true, 'Kaydediliyor...');
-        const res = await api('create', 'POST', fd, true);
+        const loadingText = modalMode === 'edit' ? 'Güncelleniyor...' : 'Kaydediliyor...';
+        if (typeof window.appSetButtonLoading === 'function') window.appSetButtonLoading($btn, true, loadingText);
+        const action = modalMode === 'edit' ? 'update' : 'create';
+        const res = await api(action, 'POST', fd, true);
         if (typeof window.appSetButtonLoading === 'function') window.appSetButtonLoading($btn, false);
 
         if (!res.success) {
@@ -239,7 +331,7 @@ $(document).ready(function () {
         }
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('storyModal')).hide();
-        await appAlert('Başarılı', res.message || 'Hikaye oluşturuldu.', 'success');
+        await appAlert('Başarılı', res.message || (modalMode === 'edit' ? 'Hikaye güncellendi.' : 'Hikaye oluşturuldu.'), 'success');
         await loadStories();
     });
 
@@ -275,6 +367,7 @@ $(document).ready(function () {
     });
 
     loadStories();
+    setCreateMode();
 });
 </script>
 JAVASCRIPT;

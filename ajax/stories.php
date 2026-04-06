@@ -47,6 +47,35 @@ try {
             break;
         }
 
+        case 'get': {
+            $storyId = trim((string)($_GET['story_id'] ?? $_POST['story_id'] ?? ''));
+            story_log('story get requested', [
+                'story_id' => $storyId,
+                'admin_id' => $adminId,
+            ]);
+
+            if ($storyId === '') {
+                stories_response(false, 'story_id zorunludur.', [], 422, ['story_id' => 'required']);
+            }
+
+            $story = story_find_by_id($pdo, $storyId);
+            if (!$story) {
+                stories_response(false, 'Hikaye bulunamadı.', [], 404);
+            }
+
+            $item = story_normalize_story_row_urls([
+                'id' => (string)($story['id'] ?? ''),
+                'title' => (string)($story['title'] ?? ''),
+                'thumbnail_url' => (string)($story['thumbnail_url'] ?? ''),
+                'image_url' => (string)($story['image_url'] ?? ''),
+                'is_active' => ((int)($story['is_active'] ?? 0) === 1) ? 1 : 0,
+                'created_at' => (string)($story['created_at'] ?? ''),
+            ], 'admin_get');
+
+            stories_response(true, '', ['story' => $item]);
+            break;
+        }
+
         case 'create': {
             story_log('create request geldi', [
                 'has_title' => isset($_POST['title']),
@@ -122,6 +151,102 @@ try {
             }
 
             stories_response(true, $isActive === 1 ? 'Hikaye aktif edildi.' : 'Hikaye pasife alındı.');
+            break;
+        }
+
+        case 'update': {
+            $storyId = trim((string)($_POST['story_id'] ?? ''));
+            $title = trim((string)($_POST['title'] ?? ''));
+
+            story_log('story update started', [
+                'story_id' => $storyId,
+                'title_length' => mb_strlen($title),
+                'has_thumbnail' => isset($_FILES['thumbnail']) && ((int)($_FILES['thumbnail']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE),
+                'has_image' => isset($_FILES['image']) && ((int)($_FILES['image']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE),
+                'admin_id' => $adminId,
+            ]);
+
+            if ($storyId === '') {
+                stories_response(false, 'story_id zorunludur.', [], 422, ['story_id' => 'required']);
+            }
+            if ($title === '') {
+                stories_response(false, 'Hikaye adı zorunludur.', [], 422, ['title' => 'required']);
+            }
+            if (mb_strlen($title) > 191) {
+                stories_response(false, 'Hikaye adı en fazla 191 karakter olabilir.', [], 422, ['title' => 'max_191']);
+            }
+
+            $current = story_find_by_id($pdo, $storyId);
+            if (!$current) {
+                stories_response(false, 'Hikaye bulunamadı.', [], 404);
+            }
+
+            $oldThumb = (string)($current['thumbnail_url'] ?? '');
+            $oldImage = (string)($current['image_url'] ?? '');
+
+            $newThumb = null;
+            $newImage = null;
+
+            try {
+                if (isset($_FILES['thumbnail']) && (int)($_FILES['thumbnail']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+                    $newThumb = story_store_uploaded_image($_FILES['thumbnail'], 'thumbnail');
+                    story_log('uploaded new thumbnail', ['story_id' => $storyId, 'new_thumbnail' => $newThumb]);
+                }
+
+                if (isset($_FILES['image']) && (int)($_FILES['image']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+                    $newImage = story_store_uploaded_image($_FILES['image'], 'image');
+                    story_log('uploaded new image', ['story_id' => $storyId, 'new_image' => $newImage]);
+                }
+
+                $updated = story_update($pdo, $storyId, $title, $newThumb, $newImage, $adminId);
+                if (!$updated) {
+                    throw new RuntimeException('Hikaye güncellenemedi.');
+                }
+
+                story_log('story update db success', [
+                    'story_id' => $storyId,
+                    'title_updated' => true,
+                    'thumbnail_updated' => $newThumb !== null,
+                    'image_updated' => $newImage !== null,
+                ]);
+
+                if ($newThumb !== null && $oldThumb !== '' && $oldThumb !== $newThumb) {
+                    story_delete_file_if_exists($oldThumb);
+                    story_log('old thumbnail deleted', ['story_id' => $storyId, 'old_thumbnail' => $oldThumb]);
+                }
+
+                if ($newImage !== null && $oldImage !== '' && $oldImage !== $newImage) {
+                    story_delete_file_if_exists($oldImage);
+                    story_log('old image deleted', ['story_id' => $storyId, 'old_image' => $oldImage]);
+                }
+            } catch (Throwable $e) {
+                if ($newThumb !== null) {
+                    story_delete_file_if_exists($newThumb);
+                    story_log('rollback deleted new upload', [
+                        'story_id' => $storyId,
+                        'type' => 'thumbnail',
+                        'path' => $newThumb,
+                    ]);
+                }
+                if ($newImage !== null) {
+                    story_delete_file_if_exists($newImage);
+                    story_log('rollback deleted new upload', [
+                        'story_id' => $storyId,
+                        'type' => 'image',
+                        'path' => $newImage,
+                    ]);
+                }
+
+                story_log('update error', [
+                    'story_id' => $storyId,
+                    'error' => $e->getMessage(),
+                    'type' => get_class($e),
+                ]);
+
+                throw $e;
+            }
+
+            stories_response(true, 'Hikaye güncellendi.', ['story_id' => $storyId]);
             break;
         }
 

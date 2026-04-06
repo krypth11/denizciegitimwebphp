@@ -479,6 +479,46 @@ function story_create(PDO $pdo, string $title, string $thumbnailUrl, string $ima
     return $id;
 }
 
+function story_update(PDO $pdo, string $storyId, string $title, ?string $thumbnailUrl, ?string $imageUrl, ?string $adminId = null): bool
+{
+    $schema = story_schema($pdo);
+
+    $sets = ['`title` = ?', '`updated_at` = NOW()'];
+    $params = [$title];
+
+    if ($thumbnailUrl !== null) {
+        $sets[] = '`thumbnail_url` = ?';
+        $params[] = $thumbnailUrl;
+    }
+
+    if ($imageUrl !== null) {
+        $sets[] = '`image_url` = ?';
+        $params[] = $imageUrl;
+    }
+
+    $params[] = $storyId;
+
+    $sql = 'UPDATE `' . $schema['stories_table'] . '` SET ' . implode(', ', $sets) . ' WHERE `id` = ? LIMIT 1';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+
+    $updated = $stmt->rowCount() > 0;
+    if (!$updated) {
+        $updated = story_find_by_id($pdo, $storyId) !== null;
+    }
+
+    story_log('story update helper result', [
+        'story_id' => $storyId,
+        'title_length' => mb_strlen($title),
+        'thumbnail_updated' => $thumbnailUrl !== null,
+        'image_updated' => $imageUrl !== null,
+        'updated' => $updated,
+        'admin_id' => $adminId,
+    ]);
+
+    return $updated;
+}
+
 function story_admin_list(PDO $pdo): array
 {
     return story_list_for_admin($pdo);
