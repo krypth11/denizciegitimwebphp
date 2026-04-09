@@ -841,19 +841,19 @@ function convertInlineParentheticalMathToCanonicalLatex(text) {
 function normalizeLatexEscapesForStorage(value) {
     let text = String(value ?? '');
 
-    // Önce boşluklu/çift kaçışlı delimiter kalıplarını toparla (örn: "\\ \(" -> "\(")
-    text = text.replace(/\\{2,}\s*\\([\[\]\(\)])/g, '\\$1');
-    // Delimiter önünde istemsiz fazla kaçışları tek canonical hale indir
-    text = text.replace(/\\{2,}([\[\]\(\)])/g, '\\$1');
-
-    const latexCommands = [
-        'text', 'approx', 'qquad', 'eta', 'Delta', 'pi', 'frac', 'times', 'circ'
-    ];
-    const cmdGroup = latexCommands.join('|');
-    const cmdRegexWithInnerSlash = new RegExp('\\\\{2,}\\\\(' + cmdGroup + ')(?=\\b|[^A-Za-z])', 'g');
-    const cmdRegex = new RegExp('\\\\{2,}(' + cmdGroup + ')(?=\\b|[^A-Za-z])', 'g');
-    text = text.replace(cmdRegexWithInnerSlash, '\\$1');
-    text = text.replace(cmdRegex, '\\$1');
+    // Sadece açıkça istenen güvenli düzeltmeleri uygula.
+    text = text
+        .replace(/\\{3}\[/g, '\\[')
+        .replace(/\\{3}\]/g, '\\]')
+        .replace(/\\{3}\(/g, '\\(')
+        .replace(/\\{3}\)/g, '\\)')
+        .replace(/\\{2}text\b/g, '\\text')
+        .replace(/\\{2}frac\b/g, '\\frac')
+        .replace(/\\{2}eta\b/g, '\\eta')
+        .replace(/\\{2}Delta\b/g, '\\Delta')
+        .replace(/\\{2}approx\b/g, '\\approx')
+        .replace(/\\{2}qquad\b/g, '\\qquad')
+        .replace(/\\{2}circ\b/g, '\\circ');
 
     return text;
 }
@@ -899,16 +899,22 @@ function canonicalizeLatexBulkInput(normalizedText) {
         const optionMatch = String(line || '').match(/^(\s*[ABCDE]\s*\)\s*)(.*)$/i);
         if (optionMatch) {
             const prefix = optionMatch[1] || '';
-            const rest = optionMatch[2] || '';
-            const converted = prefix + convertInlineParentheticalMathToCanonicalLatex(rest);
+            const rest = String(optionMatch[2] || '');
+            const inlineOnlyMath = rest.trim().match(/^\(\s*([\s\S]+?)\s*\)$/);
+            const converted = inlineOnlyMath
+                ? `${prefix}\\(${inlineOnlyMath[1].trim()}\\)`
+                : `${prefix}${rest}`;
             return sanitizeCanonicalLatexString(converted);
         }
 
         const correctLineMatch = String(line || '').match(/^(\s*Doğru\s*Cevap\s*:\s*[ABCDE]\s*\)\s*)(.*)$/i);
         if (correctLineMatch) {
             const prefix = correctLineMatch[1] || '';
-            const rest = correctLineMatch[2] || '';
-            const converted = prefix + convertInlineParentheticalMathToCanonicalLatex(rest);
+            const rest = String(correctLineMatch[2] || '');
+            const inlineOnlyMath = rest.trim().match(/^\(\s*([\s\S]+?)\s*\)$/);
+            const converted = inlineOnlyMath
+                ? `${prefix}\\(${inlineOnlyMath[1].trim()}\\)`
+                : `${prefix}${rest}`;
             return sanitizeCanonicalLatexString(converted);
         }
 
@@ -936,7 +942,192 @@ function canonicalizeLatexBulkInput(normalizedText) {
     };
 }
 
-function normalizeLatexMultilineFieldByHeuristics(value) {
+function detectLatexBrokenLineIssue(line) {
+    const t = String(line || '').trim();
+    if (!t) return null;
+
+    if (/^={4,}$/.test(t)) {
+        return 'geçersiz ayraç satırı bulundu: `========` satırı kaldırılmalı veya formüle dönüştürülmeli';
+    }
+    if (/^#\s*\\?frac\b/i.test(t)) {
+        return 'geçersiz latex satırı bulundu (# ile başlayan satır)';
+    }
+    if (/\^\{\s*,[^}]*\}/.test(t)) {
+        return 'geçersiz latex satırı bulundu (üs ifadesinde hatalı virgül)';
+    }
+    if (/\d\s*,\s*[A-Za-z_\\]/.test(t) && /[=_^{}\\]/.test(t)) {
+        return 'latex dışı kritik noktalama hatası bulundu (ör. `0.60,L_1`)';
+    }
+
+    return null;
+}
+
+function validateCanonicalLatexQuestions(canonicalText) {
+    const source = String(canonicalText || '').replace(/\r\n?/g, '\n').trim();
+    const errors = [];
+    const warnings = [];
+    const lineErrors = [];
+    const questions = [];
+
+    if (!source) {
+        return {
+            success: false,
+            errors: ['Metin boş.'],
+            warnings,
+            line_errors: lineErrors,
+            question_summaries: questions,
+        };
+    }
+
+    const lines = source.split('\n');
+    let inAnswerKey = false;
+    let current = null;
+
+    const pushQuestion = () => {
+        if (current) questions.push(current);
+    };
+
+    const registerLineError = (questionNo, lineNo, message, lineText = '') => {
+        const prefix = Number.isFinite(questionNo)
+            ? `${questionNo}. soruda`
+            : 'Metinde';
+        const msg = `${prefix} ${message}${lineText ? `: \`${lineText}\`` : ''}`;
+        lineErrors.push({ question_number: questionNo || null, line: lineNo, message: msg, line_text: lineText || '' });
+    };
+
+    const countMatches = (txt, regex) => (String(txt || '').match(regex) || []).length;
+    const inlineOpen = countMatches(source, /\\\(/g);
+    const inlineClose = countMatches(source, /\\\)/g);
+    const blockOpen = countMatches(source, /\\\[/g);
+    const blockClose = countMatches(source, /\\\]/g);
+
+    if (inlineOpen !== inlineClose) {
+        errors.push('Canonical inline math delimiter sayıları dengesiz (\\( ve \\)).');
+    }
+    if (blockOpen !== blockClose) {
+        errors.push('Canonical block math delimiter sayıları dengesiz (\\[ ve \\]).');
+    }
+
+    lines.forEach((raw, index) => {
+        const line = String(raw || '').replace(/[ \t]+$/g, '');
+        const t = line.trim();
+        const lineNo = index + 1;
+
+        if (/^Cevap\s+Anahtarı\s*:?$/i.test(t)) {
+            inAnswerKey = true;
+            return;
+        }
+
+        if (!inAnswerKey) {
+            const qStart = t.match(/^(\d+)\.(.*)$/);
+            if (qStart) {
+                pushQuestion();
+                current = {
+                    number: parseInt(qStart[1], 10),
+                    has_question_text: !!String(qStart[2] || '').trim(),
+                    options: { A: false, B: false, C: false, D: false, E: false },
+                    has_explanation: false,
+                    has_correct_answer: false,
+                    raw_lines: [line],
+                };
+                return;
+            }
+
+            if (!current) return;
+
+            current.raw_lines.push(line);
+
+            const opt = t.match(/^([ABCDE])\)\s*(.*)$/i);
+            if (opt) {
+                current.options[opt[1].toUpperCase()] = true;
+                return;
+            }
+            if (/^A[çc]ıklama\s*:/i.test(t)) {
+                current.has_explanation = true;
+                return;
+            }
+            if (/^Doğru\s*Cevap\s*:\s*([ABCDE])\)\s*(.*)$/i.test(t)) {
+                current.has_correct_answer = true;
+                return;
+            }
+
+            const issue = detectLatexBrokenLineIssue(t);
+            if (issue) {
+                registerLineError(current.number, lineNo, issue, t);
+            }
+        }
+    });
+
+    pushQuestion();
+
+    if (!questions.length) {
+        errors.push('Soru başlangıcı bulunamadı. Her soru `1.` / `2.` formatında başlamalıdır.');
+    }
+
+    questions.forEach((q) => {
+        if (!q.has_question_text) {
+            errors.push(`${q.number}. soruda question_text eksik.`);
+        }
+        ['A', 'B', 'C', 'D'].forEach((k) => {
+            if (!q.options[k]) {
+                errors.push(`${q.number}. soruda ${k}) seçeneği eksik.`);
+            }
+        });
+        if (!q.has_correct_answer) {
+            errors.push(`${q.number}. soruda Doğru Cevap satırı bulunamadı.`);
+        }
+    });
+
+    lineErrors.forEach((e) => errors.push(e.message));
+
+    return {
+        success: errors.length === 0,
+        errors,
+        warnings,
+        line_errors: lineErrors,
+        question_summaries: questions,
+    };
+}
+
+function buildLatexValidationErrorMessage(validationResult) {
+    const errors = Array.isArray(validationResult?.errors) ? validationResult.errors : [];
+    if (!errors.length) {
+        return 'LaTeX içerik doğrulaması başarısız.';
+    }
+
+    const top = errors.slice(0, 6).map((e) => `• ${e}`).join('\n');
+    const extra = errors.length > 6 ? `\n• ... ve ${errors.length - 6} hata daha` : '';
+    return `LaTeX preview doğrulaması başarısız:\n${top}${extra}`;
+}
+
+function buildCanonicalLatexTextFromQuestions(questions) {
+    return (questions || []).map((q, i) => {
+        const idx = i + 1;
+        const lines = [];
+        lines.push(`${idx}. ${String(q.question_text || '').trim()}`);
+        lines.push(`A) ${String(q.option_a || '').trim()}`);
+        lines.push(`B) ${String(q.option_b || '').trim()}`);
+        lines.push(`C) ${String(q.option_c || '').trim()}`);
+        lines.push(`D) ${String(q.option_d || '').trim()}`);
+        if (String(q.option_e || '').trim()) {
+            lines.push(`E) ${String(q.option_e || '').trim()}`);
+        }
+        lines.push('Açıklama:');
+        if (String(q.explanation || '').trim()) {
+            lines.push(...String(q.explanation || '').replace(/\r\n?/g, '\n').split('\n'));
+        }
+        lines.push(`Doğru Cevap: ${String(q.correct_answer || '').toUpperCase()})`);
+        return lines.join('\n');
+    }).join('\n⸻\n');
+}
+
+function validateLatexApprovedQuestionsForSave(questions) {
+    const canonicalText = buildCanonicalLatexTextFromQuestions(questions);
+    return validateCanonicalLatexQuestions(canonicalText);
+}
+
+function normalizeLatexMultilineFieldByHeuristics(value, options = {}) {
+    const opts = options || {};
     const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
 
     const rightTrim = (line) => String(line || '').replace(/[ \t]+$/g, '');
@@ -949,18 +1140,28 @@ function normalizeLatexMultilineFieldByHeuristics(value) {
         return /^[A-Za-zÇĞİÖŞÜçğıöşü0-9_\-–—().,/+\s:]+$/.test(t);
     };
 
+    const hasCanonicalInline = (line) => /^\\\(.+\\\)$/.test(normalizeSpaces(line));
+    const hasCanonicalBlockSingle = (line) => /^\\\[.+\\\]$/.test(normalizeSpaces(line));
+
     const isMathHeavyLine = (line) => {
         const t = normalizeSpaces(line);
         if (!t) return false;
+        if (hasCanonicalInline(t) || hasCanonicalBlockSingle(t)) return true;
 
-        if (/\\(frac|dfrac|cfrac|sum|prod|int|sqrt|begin|left|right|overline|underline|lim|cdot|times|mathbf|mathrm|operatorname|vec|hat|bar)\b/.test(t)) {
+        const hasLatexCommand = /\\[A-Za-z]+/.test(t);
+        const hasCoreMathToken = /[_^=≈<>≤≥]|\\approx/.test(t);
+        const hasGreekLike = /[ΔδθΘπηαβγλμω]|\\(eta|theta|Theta|Delta|alpha|beta|gamma|pi|lambda|mu|omega)\b/.test(t);
+
+        if (/\\(frac|dfrac|cfrac|sum|prod|int|sqrt|begin|left|right|overline|underline|lim|cdot|times|mathbf|mathrm|operatorname|vec|hat|bar|text|qquad|circ)\b/.test(t)) {
             return true;
         }
         if (/\{[^}]*\}/.test(t)) return true;
         if (/\\\\/.test(t)) return true;
 
         const operatorCount = (t.match(/[=<>^_+\-/*]/g) || []).length;
-        return operatorCount >= 6;
+        if (operatorCount >= 6) return true;
+
+        return hasLatexCommand || (hasCoreMathToken && hasGreekLike);
     };
 
     const isShortDataLine = (line) => {
@@ -985,6 +1186,40 @@ function normalizeLatexMultilineFieldByHeuristics(value) {
         return true;
     };
 
+    const isDenseFormulaLine = (line) => {
+        const t = normalizeSpaces(line);
+        if (!t) return false;
+        if (/\\(frac|dfrac|cfrac|sum|prod|int|begin|left|right|operatorname|text|qquad)\b/.test(t)) return true;
+        const operatorCount = (t.match(/[=<>^_+\-/*]/g) || []).length;
+        return operatorCount >= 8 || t.length > 120;
+    };
+
+    const maybeCanonicalizeSingleLineMath = (line) => {
+        const t = normalizeSpaces(line);
+        if (!t) return line;
+        if (hasCanonicalInline(t) || hasCanonicalBlockSingle(t)) return t;
+        if (isHeadingLikeLine(t)) return line;
+        if (!isMathHeavyLine(t)) return line;
+        if (isShortDataLine(t)) return line;
+
+        const withHeadingPrefix = t.match(/^([^:]{2,80}:)\s*(.+)$/);
+        if (withHeadingPrefix) {
+            const prefix = withHeadingPrefix[1];
+            const rhs = withHeadingPrefix[2];
+            if (rhs && isMathHeavyLine(rhs) && !hasCanonicalInline(rhs) && !hasCanonicalBlockSingle(rhs)) {
+                const wrappedRhs = `\\(${rhs}\\)`;
+                return `${prefix} ${wrappedRhs}`;
+            }
+            return line;
+        }
+
+        const forceInline = !!opts.preferInlineMath;
+        const allowSingleLineBlock = opts.allowSingleLineBlockMath !== false;
+        const shouldBlock = !forceInline && allowSingleLineBlock && isDenseFormulaLine(t);
+
+        return shouldBlock ? `\\[${t}\\]` : `\\(${t}\\)`;
+    };
+
     const finalizeMultiline = (items) => {
         const out = [];
         let blankCount = 0;
@@ -996,7 +1231,22 @@ function normalizeLatexMultilineFieldByHeuristics(value) {
                 continue;
             }
             blankCount = 0;
-            out.push(line);
+            const canonicalized = maybeCanonicalizeSingleLineMath(line);
+            out.push(canonicalized);
+        }
+        if (opts.stripTrailingCorrectAnswerLine) {
+            while (out.length) {
+                const tail = normalizeSpaces(out[out.length - 1]);
+                if (!tail) {
+                    out.pop();
+                    continue;
+                }
+                if (/^doğru\s*cevap\s*:\s*[ABCDE]\s*[\)\.]?(?:\s+.*)?$/i.test(tail)) {
+                    out.pop();
+                    continue;
+                }
+                break;
+            }
         }
         while (out.length && !String(out[0] || '').trim()) out.shift();
         while (out.length && !String(out[out.length - 1] || '').trim()) out.pop();
@@ -1088,12 +1338,23 @@ function sanitizeLatexBulkFieldValue(value, options = {}) {
         }
     }
 
-    if (opts.inlineMath) text = convertInlineParentheticalMathToCanonicalLatex(text);
-
     text = sanitizeCanonicalLatexString(text);
 
-    if (opts.applyLineHeuristics) {
-        text = normalizeLatexMultilineFieldByHeuristics(text);
+    if (opts.stripTrailingCorrectAnswerLine) {
+        const lines = String(text || '').split('\n');
+        while (lines.length) {
+            const tail = String(lines[lines.length - 1] || '').trim();
+            if (!tail) {
+                lines.pop();
+                continue;
+            }
+            if (/^doğru\s*cevap\s*:\s*[ABCDE]\s*[\)\.]?(?:\s+.*)?$/i.test(tail)) {
+                lines.pop();
+                continue;
+            }
+            break;
+        }
+        text = lines.join('\n');
     }
 
     return text;
@@ -1103,20 +1364,17 @@ function sanitizeLatexBulkParsedQuestion(question) {
     const q = { ...(question || {}) };
     q.question_text = sanitizeLatexBulkFieldValue(q.question_text, {
         allowBlockMath: true,
-        inlineMath: false,
         preserveMultiline: true,
-        applyLineHeuristics: true,
     });
-    q.option_a = sanitizeLatexBulkFieldValue(q.option_a, { allowBlockMath: true, inlineMath: true });
-    q.option_b = sanitizeLatexBulkFieldValue(q.option_b, { allowBlockMath: true, inlineMath: true });
-    q.option_c = sanitizeLatexBulkFieldValue(q.option_c, { allowBlockMath: true, inlineMath: true });
-    q.option_d = sanitizeLatexBulkFieldValue(q.option_d, { allowBlockMath: true, inlineMath: true });
-    q.option_e = q.option_e ? sanitizeLatexBulkFieldValue(q.option_e, { allowBlockMath: true, inlineMath: true }) : null;
+    q.option_a = sanitizeLatexBulkFieldValue(q.option_a, { allowBlockMath: true });
+    q.option_b = sanitizeLatexBulkFieldValue(q.option_b, { allowBlockMath: true });
+    q.option_c = sanitizeLatexBulkFieldValue(q.option_c, { allowBlockMath: true });
+    q.option_d = sanitizeLatexBulkFieldValue(q.option_d, { allowBlockMath: true });
+    q.option_e = q.option_e ? sanitizeLatexBulkFieldValue(q.option_e, { allowBlockMath: true }) : null;
     q.explanation = sanitizeLatexBulkFieldValue(q.explanation, {
         allowBlockMath: true,
-        inlineMath: false,
         preserveMultiline: true,
-        applyLineHeuristics: true,
+        stripTrailingCorrectAnswerLine: true,
     });
     return q;
 }
@@ -1238,27 +1496,10 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         if (!m) return null;
         return { rest: (m[1] || '').trim() };
     };
-    const getCorrectFromLine = (line) => {
-        const t = String(line || '').trim();
-        if (!t) return '';
-
-        const direct = t.match(/^doğru\s*cevap\s*:?\s*([ABCDE])\s*[\)\.]?\s*$/i);
-        if (direct) return direct[1].toUpperCase();
-
-        const altDirect = t.match(/^cevap\s*:?\s*([ABCDE])\s*[\)\.]?\s*$/i);
-        if (altDirect) return altDirect[1].toUpperCase();
-
-        const inSentence = t.match(/doğru\s*cevap\s*[:\-]?\s*([ABCDE])\b/i)
-            || t.match(/([ABCDE])\s*seçene(?:ğ|g)i(?:dir|\s*doğrudur)?/i);
-        if (inSentence) return (inSentence[1] || '').toUpperCase();
-
-        return '';
-    };
-
     const getExplicitCorrectAnswerFromLine = (line) => {
         const t = String(line || '').trim();
         if (!t) return '';
-        const m = t.match(/^doğru\s*cevap\s*:\s*([ABCDE])\s*[\)\.]?\s*$/i);
+        const m = t.match(/^doğru\s*cevap\s*:\s*([ABCDE])\s*[\)\.]?(?:\s+.*)?$/i);
         return m ? m[1].toUpperCase() : '';
     };
 
@@ -1389,7 +1630,6 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         let currentOption = '';
         let explicitCorrect = '';
         let answerSource = '';
-        let inferredCorrect = '';
         let optionFoundCount = 0;
         let explanationFound = false;
 
@@ -1429,9 +1669,6 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
                 optionFoundCount += 1;
                 const optText = cleanOptionText(optionStart.rest || '');
                 if (optText) options[currentOption].push(optText);
-                if (/^\s*[*✓✔]/.test(optionStart.rest || '') || /\(\s*doğru\s*\)/i.test(optionStart.rest || '')) {
-                    inferredCorrect = currentOption;
-                }
                 continue;
             }
 
@@ -1457,15 +1694,11 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         if (optionFoundCount > 0) result.debug.blocks_with_options += 1;
         if (explanationFound || explanation) result.debug.blocks_with_explanation += 1;
 
-        let correctAnswer = (explicitCorrect || inferredCorrect || answerMap[block.number] || '').toUpperCase();
+        let correctAnswer = (explicitCorrect || answerMap[block.number] || '').toUpperCase();
         if (!answerSource && correctAnswer && answerMap[block.number] === correctAnswer) {
             answerSource = 'answer_key';
         }
-        if (!correctAnswer && explanation) {
-            correctAnswer = getCorrectFromLine(explanation);
-            if (correctAnswer) answerSource = 'explanation_sentence';
-        }
-        if (!answerSource && inferredCorrect) answerSource = 'option_marker';
+        if (!answerSource && explicitCorrect) answerSource = 'final_correct_line';
         if (correctAnswer) result.debug.blocks_with_answer += 1;
 
         result.debug.questions.push({
@@ -1595,7 +1828,10 @@ function statusCounts() {
 
 function renderAiPreview() {
     const counts = statusCounts();
-    $('#saveAiQuestionsBtn').text(counts.approved + ' Soruyu Kaydet').prop('disabled', counts.approved === 0);
+    const latexValidationFailed = generationMeta?.source === 'latex_bulk' && generationMeta?.latex_validation?.success === false;
+    $('#saveAiQuestionsBtn')
+        .text(counts.approved + ' Soruyu Kaydet')
+        .prop('disabled', counts.approved === 0 || latexValidationFailed);
 
     let html = '';
 
@@ -1608,6 +1844,17 @@ function renderAiPreview() {
           <div class="alert alert-info">
             ${sourceLabel} • Toplam blok: <strong>${total}</strong> • Ayrıştırılan: <strong>${parsed}</strong> • Atlanan: <strong>${skipped}</strong>
           </div>`;
+
+        if (generationMeta.source === 'latex_bulk' && generationMeta?.latex_validation?.success === false) {
+            const issues = (generationMeta.latex_validation.errors || []).slice(0, 8);
+            const issueHtml = issues.map((err) => `<li>${esc(err)}</li>`).join('');
+            const moreCount = Math.max(0, (generationMeta.latex_validation.errors || []).length - 8);
+            html += `
+              <div class="alert alert-danger">
+                <strong>LaTeX doğrulama hataları nedeniyle kayıt engellendi.</strong>
+                <ul class="mb-0 mt-2">${issueHtml}${moreCount ? `<li>... ve ${moreCount} hata daha</li>` : ''}</ul>
+              </div>`;
+        }
     } else if (generationMeta) {
         const requested = generationMeta.requested_count ?? generatedQuestions.length;
         const generated = generationMeta.generated_count ?? generatedQuestions.length;
@@ -2514,6 +2761,15 @@ $(document).ready(function() {
             return appAlert('Hata', buildLatexNormalizeErrorMessage(canonicalResult), 'error');
         }
 
+        const validationResult = validateCanonicalLatexQuestions(canonicalResult.canonical_text);
+        if (!validationResult.success) {
+            console.log('LATEX_VALIDATION_DEBUG', {
+                validation: validationResult,
+                canonical_text_preview: (canonicalResult.canonical_text || '').slice(0, 3000)
+            });
+            return appAlert('Hata', buildLatexValidationErrorMessage(validationResult), 'error');
+        }
+
         const parsedResult = parseLatexBulkQuestions(canonicalResult.canonical_text, questionType, courseId, topicId);
         if (!parsedResult.parsed_count) {
             console.log('LATEX_PARSE_DEBUG', {
@@ -2537,6 +2793,7 @@ $(document).ready(function() {
             parsed_count: parsedResult.parsed_count,
             skipped_count: parsedResult.skipped_count,
             total_blocks: parsedResult.total_blocks,
+            latex_validation: validationResult,
             normalized_text_preview: (normalizedResult.normalized_text || '').slice(0, 800),
             canonical_text_preview: (canonicalResult.canonical_text || '').slice(0, 800)
         };
@@ -2754,6 +3011,13 @@ $(document).ready(function() {
             }
             return item;
         });
+
+        if (generationMeta?.source === 'latex_bulk') {
+            const saveValidation = validateLatexApprovedQuestionsForSave(normalizedApproved);
+            if (!saveValidation.success) {
+                return appAlert('Hata', buildLatexValidationErrorMessage(saveValidation), 'error');
+            }
+        }
 
         const ok = await appConfirm(
             'Kaydetme Onayı',
