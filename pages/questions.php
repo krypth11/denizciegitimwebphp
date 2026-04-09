@@ -543,7 +543,58 @@ function normalizeLatexBulkInput(rawText) {
         .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
         .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-    const isQuestionStart = (line) => /^\s*\d+\./.test(line || '');
+    const analyzeQuestionStart = (line) => {
+        const trimmed = String(line || '').trim();
+        const m = trimmed.match(/^(\d+)\.(.*)$/);
+        if (!m) {
+            return { isRawStart: false, isValidStart: false, reason: 'not_start' };
+        }
+
+        const number = parseInt(m[1], 10);
+        const rest = String(m[2] || '').trim();
+
+        if (!Number.isFinite(number) || number <= 0) {
+            return { isRawStart: true, isValidStart: false, reason: 'invalid_number' };
+        }
+        if (!rest) {
+            return { isRawStart: true, isValidStart: false, reason: 'empty_rest' };
+        }
+
+        // Cevap anahtarı benzeri satırlar soru başlangıcı sayılmamalı (örn: 1.A)
+        if (/^[-−–—).:]?\s*[ABCDE]\s*$/i.test(rest)) {
+            return { isRawStart: true, isValidStart: false, reason: 'answer_key_style' };
+        }
+
+        // Salt numerik/ondalıklı kalıntılar soru başlangıcı değildir (örn: 17.34)
+        if (/^\d+(?:[.,]\d+)?\s*$/.test(rest)) {
+            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
+        }
+
+        // Tek bir ölçü satırı formu (örn: 0.1068 kg/s, 2.85 g/çevrim)
+        const compactLine = `${number}.${rest}`;
+        if (/^\d+\.\d+(?:\s+[^\s]{1,12})?\s*$/i.test(compactLine)) {
+            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
+        }
+
+        // Rest kısmı sayı ile başlıyorsa metinsel içerik zayıfsa ele
+        if (/^\d/.test(rest) && !/\b[A-Za-zÇĞİÖŞÜçğıöşü]{4,}\b/.test(rest)) {
+            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
+        }
+
+        if (!/[A-Za-zÇĞİÖŞÜçğıöşü]/.test(rest)) {
+            return { isRawStart: true, isValidStart: false, reason: 'non_text_rest' };
+        }
+
+        return {
+            isRawStart: true,
+            isValidStart: true,
+            number,
+            rest,
+            reason: 'ok'
+        };
+    };
+
+    const isQuestionStart = (line) => analyzeQuestionStart(line).isValidStart;
     const isOptionStart = (line) => /^\s*[ABCDE]\s*\)/i.test(line || '');
     const isExplanationStart = (line) => /^\s*a[çc]ıklama\s*:?/i.test(line || '');
     const isAnswerStart = (line) => /^\s*doğru\s*cevap\s*:?/i.test(line || '');
@@ -559,6 +610,9 @@ function normalizeLatexBulkInput(rawText) {
             removed_noise_lines: 0,
             deduped_lines: 0,
             question_start_count: 0,
+            raw_question_start_count: 0,
+            filtered_valid_question_start_count: 0,
+            rejected_decimal_like_start_count: 0,
             option_marker_count: 0,
         }
     };
@@ -574,8 +628,17 @@ function normalizeLatexBulkInput(rawText) {
         .replace(/\r\n?/g, '\n')
         .replace(/[\f\v]+/g, '\n');
 
-    // 1.Orta... -> 1. Orta...
-    text = text.replace(/(^|\n)(\s*\d+)\.(\S)/g, '$1$2. $3');
+    // Sadece güvenli soru başlangıcı için 1.Orta... -> 1. Orta... düzeltmesi
+    text = text
+        .split('\n')
+        .map((line) => {
+            const m = String(line || '').match(/^(\s*)(\d+)\.(\S.*)$/);
+            if (!m) return line;
+            const analysis = analyzeQuestionStart(`${m[2]}.${m[3]}`);
+            if (!analysis.isValidStart) return line;
+            return `${m[1]}${m[2]}. ${m[3]}`;
+        })
+        .join('\n');
 
     // Marker'ları satır başına yaklaştır (agresif olmayan kontrollü break)
     text = text
@@ -636,7 +699,28 @@ function normalizeLatexBulkInput(rawText) {
     const normalizedText = out.join('\n').replace(/\n{4,}/g, '\n\n\n').trim();
     result.normalized_text = normalizedText;
     result.debug.normalized_line_count = normalizedText ? normalizedText.split('\n').length : 0;
-    result.debug.question_start_count = (normalizedText.match(/^\s*\d+\./gm) || []).length;
+
+    const normalizedLines = normalizedText ? normalizedText.split('\n') : [];
+    let rawStartCount = 0;
+    let validStartCount = 0;
+    let rejectedDecimalLikeCount = 0;
+    normalizedLines.forEach((line) => {
+        const analysis = analyzeQuestionStart(line);
+        if (!analysis.isRawStart) return;
+        rawStartCount += 1;
+        if (analysis.isValidStart) {
+            validStartCount += 1;
+            return;
+        }
+        if (analysis.reason === 'decimal_like') {
+            rejectedDecimalLikeCount += 1;
+        }
+    });
+
+    result.debug.raw_question_start_count = rawStartCount;
+    result.debug.filtered_valid_question_start_count = validStartCount;
+    result.debug.rejected_decimal_like_start_count = rejectedDecimalLikeCount;
+    result.debug.question_start_count = validStartCount;
     result.debug.option_marker_count = (normalizedText.match(/^\s*[ABCDE]\s*\)/gmi) || []).length;
 
     if (!normalizedText) {
@@ -682,10 +766,57 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         .replace(/^[*✓✔]+\s*/, ''));
 
     const isDividerLine = (line) => /^\s*(⸻+|[-–—]{3,})\s*$/.test(line || '');
+    const analyzeQuestionStart = (line) => {
+        const trimmed = String(line || '').trim();
+        const m = trimmed.match(/^(\d+)\.(.*)$/);
+        if (!m) {
+            return { isRawStart: false, isValidStart: false, reason: 'not_start' };
+        }
+
+        const number = parseInt(m[1], 10);
+        const rest = String(m[2] || '').trim();
+
+        if (!Number.isFinite(number) || number <= 0) {
+            return { isRawStart: true, isValidStart: false, reason: 'invalid_number' };
+        }
+        if (!rest) {
+            return { isRawStart: true, isValidStart: false, reason: 'empty_rest' };
+        }
+
+        if (/^[-−–—).:]?\s*[ABCDE]\s*$/i.test(rest)) {
+            return { isRawStart: true, isValidStart: false, reason: 'answer_key_style' };
+        }
+
+        if (/^\d+(?:[.,]\d+)?\s*$/.test(rest)) {
+            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
+        }
+
+        const compactLine = `${number}.${rest}`;
+        if (/^\d+\.\d+(?:\s+[^\s]{1,12})?\s*$/i.test(compactLine)) {
+            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
+        }
+
+        if (/^\d/.test(rest) && !/\b[A-Za-zÇĞİÖŞÜçğıöşü]{4,}\b/.test(rest)) {
+            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
+        }
+
+        if (!/[A-Za-zÇĞİÖŞÜçğıöşü]/.test(rest)) {
+            return { isRawStart: true, isValidStart: false, reason: 'non_text_rest' };
+        }
+
+        return {
+            isRawStart: true,
+            isValidStart: true,
+            number,
+            rest,
+            reason: 'ok'
+        };
+    };
+
     const getQuestionStart = (line) => {
-        const m = String(line || '').trim().match(/^(\d+)\.(.*)$/);
-        if (!m) return null;
-        return { number: parseInt(m[1], 10), rest: (m[2] || '').trim() };
+        const analysis = analyzeQuestionStart(line);
+        if (!analysis.isValidStart) return null;
+        return { number: analysis.number, rest: analysis.rest };
     };
     const getOptionStart = (line) => {
         const m = String(line || '').trim().match(/^([ABCDE])\s*\)\s*(.*)$/i);
@@ -723,10 +854,14 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         error_code: '',
         debug: {
             question_start_count: 0,
+            raw_question_start_count: 0,
+            filtered_valid_question_start_count: 0,
+            rejected_decimal_like_start_count: 0,
             candidate_blocks: 0,
             blocks_with_options: 0,
             blocks_with_explanation: 0,
             blocks_with_answer: 0,
+            parsed_question_count: 0,
         }
     };
 
@@ -748,7 +883,7 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         }
         if (!inAnswerKey) return;
 
-        const m = line.match(/^(\d+)\s*[-.).:]\s*([ABCDE])\s*$/i);
+        const m = line.match(/^(\d+)\s*[-−–—.).:]\s*([ABCDE])\s*$/i);
         if (m) {
             answerMap[parseInt(m[1], 10)] = m[2].toUpperCase();
         }
@@ -756,11 +891,24 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
 
     const lines = allLines;
     const questionStartIndexes = [];
+    let rawQuestionStartCount = 0;
+    let rejectedDecimalLikeStartCount = 0;
     for (let i = 0; i < lines.length; i++) {
-        if (getQuestionStart(lines[i])) {
+        const analysis = analyzeQuestionStart(lines[i]);
+        if (!analysis.isRawStart) continue;
+
+        rawQuestionStartCount += 1;
+        if (analysis.reason === 'decimal_like') {
+            rejectedDecimalLikeStartCount += 1;
+        }
+
+        if (analysis.isValidStart) {
             questionStartIndexes.push(i);
         }
     }
+    result.debug.raw_question_start_count = rawQuestionStartCount;
+    result.debug.filtered_valid_question_start_count = questionStartIndexes.length;
+    result.debug.rejected_decimal_like_start_count = rejectedDecimalLikeStartCount;
     result.debug.question_start_count = questionStartIndexes.length;
 
     if (!questionStartIndexes.length) {
@@ -770,10 +918,19 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
 
     const blocks = [];
     let currentBlock = null;
+    let inAnswerKeySection = false;
 
     for (let i = 0; i < lines.length; i++) {
         const originalLine = String(lines[i] ?? '');
         const trimmed = originalLine.trim();
+
+        if (/^cevap\s+anahtar[ıi]\s*:?\s*$/i.test(trimmed)) {
+            inAnswerKeySection = true;
+            continue;
+        }
+        if (inAnswerKeySection) {
+            continue;
+        }
 
         const qStart = getQuestionStart(trimmed);
         if (qStart) {
@@ -913,12 +1070,18 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
     }
 
     result.parsed_count = result.parsed.length;
+    result.debug.parsed_question_count = result.parsed_count;
 
     if (!result.parsed_count) {
         if (result.debug.blocks_with_options === 0) {
             result.error_code = 'no_option_marker';
         } else if (result.debug.blocks_with_answer === 0 && Object.keys(answerMap).length === 0) {
             result.error_code = 'no_correct_answer';
+        } else if (
+            result.debug.rejected_decimal_like_start_count > 0 ||
+            result.debug.raw_question_start_count > result.debug.filtered_valid_question_start_count
+        ) {
+            result.error_code = 'question_start_misdetected';
         } else {
             result.error_code = 'blocks_invalid';
         }
@@ -946,10 +1109,19 @@ function buildLatexParseErrorMessage(parsedResult) {
     if (errorCode === 'no_correct_answer') {
         return 'Doğru cevap tespit edilemedi. "Doğru Cevap: X)" satırı veya uygun cevap anahtarı ekleyin.';
     }
+    if (errorCode === 'question_start_misdetected') {
+        return 'Soru başlangıçları yanlış tespit edildi. Ondalıklı sayılar soru başlangıcı sanıldığı için ayrıştırma başarısız oldu; soru numaralarını ve satır düzenini kontrol edin.';
+    }
+
+    if (errorCode === 'blocks_invalid') {
+        const blockCount = Number(parsedResult?.total_blocks || 0);
+        const invalidCount = Number(parsedResult?.skipped_count || 0) || blockCount;
+        return `${blockCount} soru bloğu bulundu ancak ${invalidCount} blokta seçenek veya doğru cevap bilgisi eksik görünüyor. A-D seçeneklerini ve doğru cevap satırını kontrol edin.`;
+    }
 
     const blockCount = Number(parsedResult?.total_blocks || 0);
     const optionBlocks = Number(debug?.blocks_with_options || 0);
-    return `Hiç soru ayrıştırılamadı. ${blockCount} aday blok bulundu, ${optionBlocks} blokta seçenek işareti tespit edildi. Formatı (1., A)-E), Açıklama:, Doğru Cevap:) kontrol edin.`;
+    return `Hiç soru ayrıştırılamadı. ${blockCount} soru bloğu tespit edildi ve ${optionBlocks} blokta seçenek bulundu. Soru başlangıcı, şıklar ve doğru cevap satırlarını kontrol edip tekrar deneyin.`;
 }
 
 function buildLatexNormalizeErrorMessage(normalizeResult) {
