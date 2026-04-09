@@ -936,6 +936,120 @@ function canonicalizeLatexBulkInput(normalizedText) {
     };
 }
 
+function normalizeLatexMultilineFieldByHeuristics(value) {
+    const lines = String(value ?? '').replace(/\r\n?/g, '\n').split('\n');
+
+    const rightTrim = (line) => String(line || '').replace(/[ \t]+$/g, '');
+    const normalizeSpaces = (line) => rightTrim(line).replace(/\u00A0/g, ' ').trim();
+    const isHeadingLikeLine = (line) => {
+        const t = normalizeSpaces(line);
+        if (!t) return false;
+        if (!/:\s*$/.test(t)) return false;
+        if (/[=]/.test(t)) return false;
+        return /^[A-Za-zÇĞİÖŞÜçğıöşü0-9_\-–—().,/+\s:]+$/.test(t);
+    };
+
+    const isMathHeavyLine = (line) => {
+        const t = normalizeSpaces(line);
+        if (!t) return false;
+
+        if (/\\(frac|dfrac|cfrac|sum|prod|int|sqrt|begin|left|right|overline|underline|lim|cdot|times|mathbf|mathrm|operatorname|vec|hat|bar)\b/.test(t)) {
+            return true;
+        }
+        if (/\{[^}]*\}/.test(t)) return true;
+        if (/\\\\/.test(t)) return true;
+
+        const operatorCount = (t.match(/[=<>^_+\-/*]/g) || []).length;
+        return operatorCount >= 6;
+    };
+
+    const isShortDataLine = (line) => {
+        const t = normalizeSpaces(line);
+        if (!t || t.length > 110) return false;
+        if (isMathHeavyLine(t)) return false;
+        if (/\\\[|\\\]/.test(t)) return false;
+
+        const eqCount = (t.match(/=/g) || []).length;
+        if (eqCount < 1 || eqCount > 4) return false;
+
+        const hasDataLikeToken =
+            /\b\d+(?:[.,]\d+)?\b/.test(t) ||
+            /[A-Za-zΔδθΘπΠ][A-Za-z0-9_]*\s*=/.test(t) ||
+            /\b(?:mm|cm|m|kg|g|kPa|Pa|bar|K|°C|rpm|N·m|Nm|m\/s|kg\/s|g\/çevrim)\b/i.test(t);
+
+        if (!hasDataLikeToken) return false;
+        if (/\\[A-Za-z]+/.test(t) && !/\\(?:Delta|theta|Theta|eta|pi|Pi|alpha|beta|gamma)\b/.test(t)) {
+            return false;
+        }
+
+        return true;
+    };
+
+    const finalizeMultiline = (items) => {
+        const out = [];
+        let blankCount = 0;
+        for (const raw of items) {
+            const line = rightTrim(raw);
+            if (!line.trim()) {
+                blankCount += 1;
+                if (blankCount <= 1 && out.length) out.push('');
+                continue;
+            }
+            blankCount = 0;
+            out.push(line);
+        }
+        while (out.length && !String(out[0] || '').trim()) out.shift();
+        while (out.length && !String(out[out.length - 1] || '').trim()) out.pop();
+        return out.join('\n');
+    };
+
+    const out = [];
+    let i = 0;
+    while (i < lines.length) {
+        const rawLine = rightTrim(lines[i]);
+        const trimmed = rawLine.trim();
+
+        if (trimmed === '\\[') {
+            const blockLines = [];
+            let j = i + 1;
+            while (j < lines.length && String(lines[j] || '').trim() !== '\\]') {
+                blockLines.push(normalizeSpaces(lines[j]));
+                j += 1;
+            }
+
+            if (j >= lines.length) {
+                // Kapanmayan blok: güvenli tarafta kalıp olduğu gibi bırak.
+                out.push(rawLine);
+                i += 1;
+                continue;
+            }
+
+            const compactBlock = blockLines.filter(Boolean).join(' ').trim();
+            const nonEmptyCount = blockLines.filter(Boolean).length;
+            const shouldUnwrapAsPlain =
+                nonEmptyCount <= 1 &&
+                compactBlock &&
+                (isShortDataLine(compactBlock) || isHeadingLikeLine(compactBlock));
+
+            if (shouldUnwrapAsPlain) {
+                out.push(compactBlock);
+            } else {
+                out.push('\\[');
+                blockLines.forEach((line) => out.push(rightTrim(line)));
+                out.push('\\]');
+            }
+
+            i = j + 1;
+            continue;
+        }
+
+        out.push(rawLine);
+        i += 1;
+    }
+
+    return finalizeMultiline(out);
+}
+
 function sanitizeLatexBulkFieldValue(value, options = {}) {
     const opts = options || {};
     let text = String(value ?? '')
@@ -978,6 +1092,10 @@ function sanitizeLatexBulkFieldValue(value, options = {}) {
 
     text = sanitizeCanonicalLatexString(text);
 
+    if (opts.applyLineHeuristics) {
+        text = normalizeLatexMultilineFieldByHeuristics(text);
+    }
+
     return text;
 }
 
@@ -987,13 +1105,19 @@ function sanitizeLatexBulkParsedQuestion(question) {
         allowBlockMath: true,
         inlineMath: false,
         preserveMultiline: true,
+        applyLineHeuristics: true,
     });
     q.option_a = sanitizeLatexBulkFieldValue(q.option_a, { allowBlockMath: true, inlineMath: true });
     q.option_b = sanitizeLatexBulkFieldValue(q.option_b, { allowBlockMath: true, inlineMath: true });
     q.option_c = sanitizeLatexBulkFieldValue(q.option_c, { allowBlockMath: true, inlineMath: true });
     q.option_d = sanitizeLatexBulkFieldValue(q.option_d, { allowBlockMath: true, inlineMath: true });
     q.option_e = q.option_e ? sanitizeLatexBulkFieldValue(q.option_e, { allowBlockMath: true, inlineMath: true }) : null;
-    q.explanation = sanitizeLatexBulkFieldValue(q.explanation, { allowBlockMath: true, inlineMath: false });
+    q.explanation = sanitizeLatexBulkFieldValue(q.explanation, {
+        allowBlockMath: true,
+        inlineMath: false,
+        preserveMultiline: true,
+        applyLineHeuristics: true,
+    });
     return q;
 }
 
