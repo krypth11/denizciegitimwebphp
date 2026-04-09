@@ -640,11 +640,35 @@ function normalizeLatexBulkInput(rawText) {
         })
         .join('\n');
 
-    // Marker'ları satır başına yaklaştır (agresif olmayan kontrollü break)
-    text = text
-        .replace(/([^\n])\s+(Açıklama\s*:)/gi, '$1\n$2')
-        .replace(/([^\n])\s+(Doğru\s*Cevap\s*:)/gi, '$1\n$2')
-        .replace(/([^\n])\s+([ABCDE]\)\s+)/g, '$1\n$2');
+    // Marker'ları satır başına yaklaştır (yalnızca bracket-math blokları dışında)
+    const markerAdjustedLines = [];
+    let inBracketMathBlock = false;
+    text.split('\n').forEach((rawLine) => {
+        const originalLine = String(rawLine || '');
+        const trimmed = originalLine.trim();
+
+        if (!inBracketMathBlock && trimmed === '[') {
+            inBracketMathBlock = true;
+            markerAdjustedLines.push(originalLine);
+            return;
+        }
+
+        if (inBracketMathBlock) {
+            markerAdjustedLines.push(originalLine);
+            if (trimmed === ']') {
+                inBracketMathBlock = false;
+            }
+            return;
+        }
+
+        markerAdjustedLines.push(
+            originalLine
+                .replace(/([^\n])\s+(Açıklama\s*:)/gi, '$1\n$2')
+                .replace(/([^\n])\s+(Doğru\s*Cevap\s*:)/gi, '$1\n$2')
+                .replace(/([^\n])\s+([ABCDE]\)\s+)/g, '$1\n$2')
+        );
+    });
+    text = markerAdjustedLines.join('\n');
 
     const rawLines = text.split('\n');
     result.debug.raw_line_count = rawLines.length;
@@ -730,6 +754,160 @@ function normalizeLatexBulkInput(rawText) {
 
     result.success = true;
     return result;
+}
+
+function convertBracketLatexToCanonicalLatex(normalizedText) {
+    const lines = String(normalizedText || '').replace(/\r\n?/g, '\n').split('\n');
+    const out = [];
+    let inBracketBlock = false;
+    let bracketStartLine = -1;
+
+    for (let i = 0; i < lines.length; i++) {
+        const originalLine = String(lines[i] || '').replace(/[ \t]+$/g, '');
+        const trimmed = originalLine.trim();
+        const lineNo = i + 1;
+
+        if (!inBracketBlock && trimmed === '[') {
+            inBracketBlock = true;
+            bracketStartLine = lineNo;
+            out.push('\\[');
+            continue;
+        }
+
+        if (inBracketBlock && trimmed === ']') {
+            inBracketBlock = false;
+            bracketStartLine = -1;
+            out.push('\\]');
+            continue;
+        }
+
+        if (!inBracketBlock && trimmed === ']') {
+            return {
+                success: false,
+                error_code: 'unexpected_bracket_latex_block_end',
+                converted_text: '',
+                debug: { line: lineNo }
+            };
+        }
+
+        out.push(originalLine);
+    }
+
+    if (inBracketBlock) {
+        return {
+            success: false,
+            error_code: 'unclosed_bracket_latex_block',
+            converted_text: '',
+            debug: { start_line: bracketStartLine }
+        };
+    }
+
+    return {
+        success: true,
+        error_code: '',
+        converted_text: out.join('\n')
+    };
+}
+
+function convertInlineParentheticalMathToCanonicalLatex(text) {
+    const looksMathLikeParenthetical = (rawInside) => {
+        const inside = String(rawInside || '').trim();
+        if (!inside) return false;
+
+        const hasLatexCommand = /\\[A-Za-z]+/.test(inside);
+        const hasMathSymbols = /[=<>^_]|≈|±|×|÷|∑|∫|√/.test(inside);
+        const hasFormulaLikeToken = /\b[A-Za-z]\s*[_^]\s*[A-Za-z0-9]|\d\s*[+\-*/=]\s*\d/.test(inside);
+        const hasLongTurkishPhrase = /[A-Za-zÇĞİÖŞÜçğıöşü]{3,}\s+[A-Za-zÇĞİÖŞÜçğıöşü]{3,}/.test(inside);
+
+        if (!(hasLatexCommand || hasMathSymbols || hasFormulaLikeToken)) {
+            return false;
+        }
+
+        if (!hasLatexCommand && hasLongTurkishPhrase && !hasMathSymbols) {
+            return false;
+        }
+
+        return true;
+    };
+
+    return String(text || '').replace(/\(([^()\n]+)\)/g, (full, inside) => {
+        const inner = String(inside || '').trim();
+        if (!inner) return full;
+        if (!looksMathLikeParenthetical(inner)) return full;
+        return `\\(${inner}\\)`;
+    });
+}
+
+function canonicalizeLatexBulkInput(normalizedText) {
+    const bracketConverted = convertBracketLatexToCanonicalLatex(normalizedText);
+    if (!bracketConverted.success) {
+        return {
+            success: false,
+            error_code: bracketConverted.error_code,
+            canonical_text: '',
+            debug: bracketConverted.debug || {}
+        };
+    }
+
+    const lines = String(bracketConverted.converted_text || '').split('\n');
+    const convertedLines = lines.map((line) => {
+        const optionMatch = String(line || '').match(/^(\s*[ABCDE]\s*\)\s*)(.*)$/i);
+        if (optionMatch) {
+            const prefix = optionMatch[1] || '';
+            const rest = optionMatch[2] || '';
+            return prefix + convertInlineParentheticalMathToCanonicalLatex(rest);
+        }
+
+        const correctLineMatch = String(line || '').match(/^(\s*Doğru\s*Cevap\s*:\s*[ABCDE]\s*\)\s*)(.*)$/i);
+        if (correctLineMatch) {
+            const prefix = correctLineMatch[1] || '';
+            const rest = correctLineMatch[2] || '';
+            return prefix + convertInlineParentheticalMathToCanonicalLatex(rest);
+        }
+
+        return line;
+    });
+
+    return {
+        success: true,
+        error_code: '',
+        canonical_text: convertedLines.join('\n')
+    };
+}
+
+function sanitizeLatexBulkFieldValue(value, options = {}) {
+    const opts = options || {};
+    let text = String(value ?? '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/\u00A0/g, ' ')
+        .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
+        .replace(/[ \t]+\n/g, '\n')
+        .trim();
+
+    if (opts.allowBlockMath !== false) {
+        const bracketConverted = convertBracketLatexToCanonicalLatex(text);
+        if (bracketConverted.success) {
+            text = bracketConverted.converted_text;
+        }
+    }
+
+    if (opts.inlineMath) {
+        text = convertInlineParentheticalMathToCanonicalLatex(text);
+    }
+
+    return text;
+}
+
+function sanitizeLatexBulkParsedQuestion(question) {
+    const q = { ...(question || {}) };
+    q.question_text = sanitizeLatexBulkFieldValue(q.question_text, { allowBlockMath: true, inlineMath: false });
+    q.option_a = sanitizeLatexBulkFieldValue(q.option_a, { allowBlockMath: true, inlineMath: true });
+    q.option_b = sanitizeLatexBulkFieldValue(q.option_b, { allowBlockMath: true, inlineMath: true });
+    q.option_c = sanitizeLatexBulkFieldValue(q.option_c, { allowBlockMath: true, inlineMath: true });
+    q.option_d = sanitizeLatexBulkFieldValue(q.option_d, { allowBlockMath: true, inlineMath: true });
+    q.option_e = q.option_e ? sanitizeLatexBulkFieldValue(q.option_e, { allowBlockMath: true, inlineMath: true }) : null;
+    q.explanation = sanitizeLatexBulkFieldValue(q.explanation, { allowBlockMath: true, inlineMath: false });
+    return q;
 }
 
 function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId, selectedTopicId = '') {
@@ -1132,6 +1310,14 @@ function buildLatexNormalizeErrorMessage(normalizeResult) {
     }
     if (errorCode === 'normalize_empty') {
         return 'Metin normalize edilemedi. İçerik çok dağınık veya gürültülü olabilir; soru bloklarını kontrol edin.';
+    }
+    if (errorCode === 'unclosed_bracket_latex_block') {
+        const lineNo = Number(normalizeResult?.debug?.start_line || 0);
+        return `Bracket LaTeX bloğu kapatılmamış görünüyor${lineNo ? ` (satır ${lineNo})` : ''}. "[" ile başlayan bloklar "]" ile bitmelidir.`;
+    }
+    if (errorCode === 'unexpected_bracket_latex_block_end') {
+        const lineNo = Number(normalizeResult?.debug?.line || 0);
+        return `Beklenmeyen "]" satırı bulundu${lineNo ? ` (satır ${lineNo})` : ''}. Tek başına "]" yalnızca açık bir "[" bloğunu kapatmalıdır.`;
     }
 
     return 'LaTeX import metni işlenemedi. Lütfen formatı kontrol edip tekrar deneyin.';
@@ -2055,22 +2241,34 @@ $(document).ready(function() {
             return appAlert('Hata', buildLatexNormalizeErrorMessage(normalizedResult), 'error');
         }
 
-        const parsedResult = parseLatexBulkQuestions(normalizedResult.normalized_text, questionType, courseId, topicId);
+        const canonicalResult = canonicalizeLatexBulkInput(normalizedResult.normalized_text);
+        if (!canonicalResult.success) {
+            console.log('LATEX_CANONICAL_DEBUG', {
+                ...canonicalResult,
+                normalize_debug: normalizedResult.debug,
+                normalized_text_preview: (normalizedResult.normalized_text || '').slice(0, 2000)
+            });
+            return appAlert('Hata', buildLatexNormalizeErrorMessage(canonicalResult), 'error');
+        }
+
+        const parsedResult = parseLatexBulkQuestions(canonicalResult.canonical_text, questionType, courseId, topicId);
         if (!parsedResult.parsed_count) {
             console.log('LATEX_PARSE_DEBUG', {
                 ...parsedResult,
                 normalize_debug: normalizedResult.debug,
-                normalized_text_preview: (normalizedResult.normalized_text || '').slice(0, 2000)
+                canonical_text_preview: (canonicalResult.canonical_text || '').slice(0, 2000)
             });
             return appAlert('Hata', buildLatexParseErrorMessage(parsedResult), 'error');
         }
 
-        generatedQuestions = parsedResult.parsed;
+        generatedQuestions = parsedResult.parsed.map((q) => sanitizeLatexBulkParsedQuestion(q));
         generationMeta = {
             source: 'latex_bulk',
             parsed_count: parsedResult.parsed_count,
             skipped_count: parsedResult.skipped_count,
-            total_blocks: parsedResult.total_blocks
+            total_blocks: parsedResult.total_blocks,
+            normalized_text_preview: (normalizedResult.normalized_text || '').slice(0, 800),
+            canonical_text_preview: (canonicalResult.canonical_text || '').slice(0, 800)
         };
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('latexBulkUploadModal')).hide();
@@ -2275,6 +2473,12 @@ $(document).ready(function() {
 
         const normalizedApproved = approved.map(q => {
             const item = { ...q };
+
+            if (generationMeta?.source === 'latex_bulk') {
+                const sanitized = sanitizeLatexBulkParsedQuestion(item);
+                Object.assign(item, sanitized);
+            }
+
             if (item.option_e === '') {
                 item.option_e = null;
             }
