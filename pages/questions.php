@@ -537,19 +537,118 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTop
     return result;
 }
 
-function parseLatexBulkQuestions(rawText, selectedType, selectedCourseId, selectedTopicId = '') {
+function normalizeLatexBulkInput(rawText) {
     const stripInvisibleChars = (txt) => (txt || '')
         .replace(/\uFFFC/g, '')
         .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
         .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-    const normalizeInputText = (txt) => stripInvisibleChars(txt)
+    const isQuestionStart = (line) => /^\s*\d+\./.test(line || '');
+    const isOptionStart = (line) => /^\s*[ABCDE]\s*\)/i.test(line || '');
+    const isExplanationStart = (line) => /^\s*a[çc]ıklama\s*:?/i.test(line || '');
+    const isAnswerStart = (line) => /^\s*doğru\s*cevap\s*:?/i.test(line || '');
+    const isAnswerKeyStart = (line) => /^\s*cevap\s+anahtar[ıi]\s*:?/i.test(line || '');
+
+    const result = {
+        success: false,
+        normalized_text: '',
+        error_code: '',
+        debug: {
+            raw_line_count: 0,
+            normalized_line_count: 0,
+            removed_noise_lines: 0,
+            deduped_lines: 0,
+            question_start_count: 0,
+            option_marker_count: 0,
+        }
+    };
+
+    const input = String(rawText || '');
+    if (!input.trim()) {
+        result.error_code = 'empty_input';
+        return result;
+    }
+
+    let text = stripInvisibleChars(input)
         .replace(/\u00A0/g, ' ')
         .replace(/\r\n?/g, '\n')
-        .replace(/[\f\v]+/g, '\n')
-        .replace(/\n{4,}/g, '\n\n\n')
-        .trim();
+        .replace(/[\f\v]+/g, '\n');
 
+    // 1.Orta... -> 1. Orta...
+    text = text.replace(/(^|\n)(\s*\d+)\.(\S)/g, '$1$2. $3');
+
+    // Marker'ları satır başına yaklaştır (agresif olmayan kontrollü break)
+    text = text
+        .replace(/([^\n])\s+(Açıklama\s*:)/gi, '$1\n$2')
+        .replace(/([^\n])\s+(Doğru\s*Cevap\s*:)/gi, '$1\n$2')
+        .replace(/([^\n])\s+([ABCDE]\)\s+)/g, '$1\n$2');
+
+    const rawLines = text.split('\n');
+    result.debug.raw_line_count = rawLines.length;
+
+    const out = [];
+    let prevNormalized = '';
+    let blankCount = 0;
+
+    for (const rawLine of rawLines) {
+        const line = String(rawLine || '').replace(/[ \t]+$/g, '');
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+            blankCount += 1;
+            if (blankCount <= 1 && out.length) out.push('');
+            continue;
+        }
+        blankCount = 0;
+
+        const markerLine =
+            isQuestionStart(trimmed) ||
+            isOptionStart(trimmed) ||
+            isExplanationStart(trimmed) ||
+            isAnswerStart(trimmed) ||
+            isAnswerKeyStart(trimmed) ||
+            /^\d+\s*[-.).:]\s*[ABCDE]\s*$/i.test(trimmed);
+
+        // Gürültü satırı filtreleri (marker değilse)
+        if (!markerLine) {
+            if (trimmed.length === 1 && /^[,=°~·•\-–—*]$/.test(trimmed)) {
+                result.debug.removed_noise_lines += 1;
+                continue;
+            }
+
+            if (trimmed.length <= 2 && !/[A-Za-zÇĞİÖŞÜçğıöşü0-9]/.test(trimmed)) {
+                result.debug.removed_noise_lines += 1;
+                continue;
+            }
+        }
+
+        if (prevNormalized && prevNormalized === trimmed && !markerLine) {
+            result.debug.deduped_lines += 1;
+            continue;
+        }
+
+        out.push(trimmed);
+        prevNormalized = trimmed;
+    }
+
+    while (out.length && !String(out[out.length - 1]).trim()) out.pop();
+
+    const normalizedText = out.join('\n').replace(/\n{4,}/g, '\n\n\n').trim();
+    result.normalized_text = normalizedText;
+    result.debug.normalized_line_count = normalizedText ? normalizedText.split('\n').length : 0;
+    result.debug.question_start_count = (normalizedText.match(/^\s*\d+\./gm) || []).length;
+    result.debug.option_marker_count = (normalizedText.match(/^\s*[ABCDE]\s*\)/gmi) || []).length;
+
+    if (!normalizedText) {
+        result.error_code = 'normalize_empty';
+        return result;
+    }
+
+    result.success = true;
+    return result;
+}
+
+function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId, selectedTopicId = '') {
     const normalizeField = (txt) => {
         const lines = String(txt || '').replace(/\r\n?/g, '\n').split('\n');
         const out = [];
@@ -567,7 +666,6 @@ function parseLatexBulkQuestions(rawText, selectedType, selectedCourseId, select
 
             blankCount = 0;
             if (prevNormalized && prevNormalized === normalized) {
-                // Render'dan gelen birebir tekrar satırları sadeleştir
                 continue;
             }
 
@@ -616,7 +714,7 @@ function parseLatexBulkQuestions(rawText, selectedType, selectedCourseId, select
         return '';
     };
 
-    const fullText = normalizeInputText(rawText || '');
+    const fullText = String(normalizedText || '').trim();
     const result = {
         parsed: [],
         parsed_count: 0,
@@ -670,29 +768,6 @@ function parseLatexBulkQuestions(rawText, selectedType, selectedCourseId, select
         return result;
     }
 
-    const likelyQuestionStart = (startIndex) => {
-        let optionHits = 0;
-        const seen = new Set();
-
-        for (let i = startIndex + 1; i < lines.length && i <= startIndex + 60; i++) {
-            const row = String(lines[i] || '').trim();
-            if (!row) continue;
-            if (isDividerLine(row)) break;
-            if (getQuestionStart(row)) break;
-
-            const opt = getOptionStart(row);
-            if (opt) {
-                if (!seen.has(opt.letter)) {
-                    seen.add(opt.letter);
-                    optionHits += 1;
-                }
-                if (optionHits >= 2) return true;
-            }
-        }
-
-        return optionHits >= 2;
-    };
-
     const blocks = [];
     let currentBlock = null;
 
@@ -701,9 +776,7 @@ function parseLatexBulkQuestions(rawText, selectedType, selectedCourseId, select
         const trimmed = originalLine.trim();
 
         const qStart = getQuestionStart(trimmed);
-        const canStart = qStart && likelyQuestionStart(i);
-
-        if (canStart) {
+        if (qStart) {
             if (currentBlock && currentBlock.lines.length) {
                 blocks.push(currentBlock);
             }
@@ -877,6 +950,19 @@ function buildLatexParseErrorMessage(parsedResult) {
     const blockCount = Number(parsedResult?.total_blocks || 0);
     const optionBlocks = Number(debug?.blocks_with_options || 0);
     return `Hiç soru ayrıştırılamadı. ${blockCount} aday blok bulundu, ${optionBlocks} blokta seçenek işareti tespit edildi. Formatı (1., A)-E), Açıklama:, Doğru Cevap:) kontrol edin.`;
+}
+
+function buildLatexNormalizeErrorMessage(normalizeResult) {
+    const errorCode = normalizeResult?.error_code || '';
+
+    if (errorCode === 'empty_input') {
+        return 'Metin boş görünüyor. Lütfen soru içeriğini yapıştırın.';
+    }
+    if (errorCode === 'normalize_empty') {
+        return 'Metin normalize edilemedi. İçerik çok dağınık veya gürültülü olabilir; soru bloklarını kontrol edin.';
+    }
+
+    return 'LaTeX import metni işlenemedi. Lütfen formatı kontrol edip tekrar deneyin.';
 }
 
 function statusCounts() {
@@ -1791,9 +1877,19 @@ $(document).ready(function() {
         if (!questionType) return appAlert('Uyarı', 'Lütfen soru türü seçiniz.', 'warning');
         if (!rawText || !rawText.trim()) return appAlert('Uyarı', 'Lütfen soru metnini yapıştırınız.', 'warning');
 
-        const parsedResult = parseLatexBulkQuestions(rawText, questionType, courseId, topicId);
+        const normalizedResult = normalizeLatexBulkInput(rawText);
+        if (!normalizedResult.success) {
+            console.log('LATEX_NORMALIZE_DEBUG', normalizedResult);
+            return appAlert('Hata', buildLatexNormalizeErrorMessage(normalizedResult), 'error');
+        }
+
+        const parsedResult = parseLatexBulkQuestions(normalizedResult.normalized_text, questionType, courseId, topicId);
         if (!parsedResult.parsed_count) {
-            console.log('LATEX_PARSE_DEBUG', parsedResult);
+            console.log('LATEX_PARSE_DEBUG', {
+                ...parsedResult,
+                normalize_debug: normalizedResult.debug,
+                normalized_text_preview: (normalizedResult.normalized_text || '').slice(0, 2000)
+            });
             return appAlert('Hata', buildLatexParseErrorMessage(parsedResult), 'error');
         }
 
