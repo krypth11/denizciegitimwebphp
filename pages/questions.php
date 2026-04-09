@@ -905,7 +905,7 @@ $(document).ready(function() {
             const optE = q.option_e ? `<div class="meq-option ${q.correct_answer === 'E' ? 'meq-option-correct' : ''}">E) ${esc(shortText(q.option_e))}</div>` : '';
             return `
                 <tr class="question-row-card desktop-question-row">
-                    <td class="questions-col-select" onclick="event.stopPropagation()"><input type="checkbox" class="question-checkbox" value="${esc(q.id)}"></td>
+                    <td class="questions-col-select"><input type="checkbox" class="question-checkbox" value="${esc(q.id)}"></td>
                     <td class="questions-col-question">
                         <div class="question-mobile-head">
                             <strong class="question-title-mobile question-title">${esc(shortText(q.question_text, 220))}</strong>
@@ -926,7 +926,7 @@ $(document).ready(function() {
                         <div>${esc(q.qualification_name || '-')}</div>
                         <small class="text-muted">${esc(q.course_name || '-')}</small>
                     </td>
-                    <td class="questions-actions-cell" onclick="event.stopPropagation()">
+                    <td class="questions-actions-cell">
                         <div class="table-actions questions-actions-wrap">
                             <button class="btn btn-sm btn-warning edit-btn" data-id="${esc(q.id)}" title="Düzenle"><i class="bi bi-pencil"></i></button>
                             <button class="btn btn-sm btn-danger delete-btn" data-id="${esc(q.id)}" title="Sil"><i class="bi bi-trash"></i></button>
@@ -953,7 +953,7 @@ $(document).ready(function() {
                 <div class="card mb-3 meq-mobile-card">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start gap-2">
-                            <div class="form-check" onclick="event.stopPropagation()">
+                            <div class="form-check">
                                 <input type="checkbox" class="form-check-input question-checkbox" value="${esc(q.id)}">
                             </div>
                             <div>${typeBadge(q.question_type)}</div>
