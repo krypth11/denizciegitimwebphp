@@ -38,6 +38,7 @@ include '../includes/sidebar.php';
         <div class="page-actions">
             <button class="btn btn-danger" id="bulkDeleteBtn" style="display:none;"><i class="bi bi-trash"></i> Seçilenleri Sil (<span id="selectedCount">0</span>)</button>
             <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#bulkUploadModal"><i class="bi bi-upload"></i> Toplu Soru Yükle</button>
+            <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#latexBulkUploadModal"><i class="bi bi-superscript"></i> LaTeX Soru Yükle</button>
             <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#aiModal"><i class="bi bi-stars"></i> AI ile Üret</button>
             <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addModal"><i class="bi bi-plus-lg"></i> Manuel Ekle</button>
         </div>
@@ -261,6 +262,79 @@ Cevap Anahtarı
     </div>
 </div>
 
+<!-- LaTeX Bulk Upload Modal -->
+<div class="modal fade" id="latexBulkUploadModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header bg-secondary text-white">
+                <h5 class="modal-title"><i class="bi bi-superscript"></i> LaTeX Soru Yükle</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="latexBulkUploadForm">
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label">Yeterlilik *</label>
+                            <select class="form-select" id="latex_bulk_qualification_id" required>
+                                <option value="">Seçiniz...</option>
+                                <?php foreach ($qualifications as $q): ?>
+                                    <option value="<?= htmlspecialchars($q['id']) ?>"><?= htmlspecialchars($q['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Ders *</label>
+                            <select class="form-select" id="latex_bulk_course_id" required disabled>
+                                <option value="">Önce yeterlilik seçin...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label>
+                            <select class="form-select" id="latex_bulk_topic_id" disabled>
+                                <option value="">Önce ders seçin...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Soru Türü *</label>
+                            <select class="form-select" id="latex_bulk_question_type" required>
+                                <option value="">Seçiniz...</option>
+                                <option value="sözel">Sözel</option>
+                                <option value="sayısal">Sayısal</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info mt-3 mb-0">
+                        Bu alan ChatGPT'den gelen matematikli / LaTeX benzeri içerikler içindir.
+                        Klasik metin formatı için <strong>Toplu Soru Yükle</strong> butonunu kullanın.
+                    </div>
+
+                    <div class="mt-3">
+                        <label class="form-label">LaTeX / Matematikli Soruları Yapıştırın *</label>
+                        <textarea class="form-control" id="latex_bulk_questions_text" rows="14" placeholder="Örn:
+1. Soru kökü
+A) ...
+B) ...
+C) ...
+D) ...
+E) ...
+Açıklama: ...
+Doğru Cevap: C)
+
+⸻
+
+2. Soru kökü ..." required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-diagram-3"></i> Ayrıştır / Önizle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- AI Preview -->
 <div class="modal fade" id="aiPreviewModal" tabindex="-1">
     <div class="modal-dialog modal-xl"><div class="modal-content"><div class="modal-header bg-success text-white"><h5 class="modal-title"><i class="bi bi-check-circle"></i> Üretilen Sorular</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
@@ -463,6 +537,184 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTop
     return result;
 }
 
+function parseLatexBulkQuestions(rawText, selectedType, selectedCourseId, selectedTopicId = '') {
+    const stripInvisibleChars = (txt) => (txt || '')
+        .replace(/\uFFFC/g, '')
+        .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+    const normalizeInputText = (txt) => stripInvisibleChars(txt)
+        .replace(/\u00A0/g, ' ')
+        .replace(/\r\n?/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+    const normalizeMultiline = (txt) => String(txt || '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+
+    const cleanOptionText = (txt) => normalizeMultiline((txt || '')
+        .replace(/\(\s*doğru\s*\)/ig, '')
+        .replace(/^[*✓✔]+\s*/, ''));
+
+    const fullText = normalizeInputText(rawText || '');
+    const result = { parsed: [], parsed_count: 0, skipped_count: 0, total_blocks: 0 };
+
+    if (!fullText) {
+        return result;
+    }
+
+    const normalizedBlocksText = fullText
+        .replace(/^\s*⸻+\s*$/gm, '')
+        .replace(/^\s*[-–—]{3,}\s*$/gm, '');
+
+    const lines = normalizedBlocksText.split('\n');
+    const blocks = [];
+    let currentBlockLines = [];
+
+    for (const rawLine of lines) {
+        const line = (rawLine || '').trim();
+        if (!line) {
+            if (currentBlockLines.length) currentBlockLines.push('');
+            continue;
+        }
+
+        const questionStartMatch = line.match(/^\s*(\d+)\s*[\.)]\s*(.*)$/);
+        if (questionStartMatch) {
+            if (currentBlockLines.length) {
+                blocks.push(currentBlockLines.join('\n').trim());
+                currentBlockLines = [];
+            }
+            const firstLineBody = (questionStartMatch[2] || '').trim();
+            if (firstLineBody) {
+                currentBlockLines.push(firstLineBody);
+            }
+            continue;
+        }
+
+        if (currentBlockLines.length) {
+            currentBlockLines.push(line);
+        }
+    }
+
+    if (currentBlockLines.length) {
+        blocks.push(currentBlockLines.join('\n').trim());
+    }
+
+    result.total_blocks = blocks.length;
+    if (!blocks.length) {
+        return result;
+    }
+
+    for (const blockText of blocks) {
+        const blockLines = blockText.split('\n').map((line) => line.trim());
+        const options = { A: [], B: [], C: [], D: [], E: [] };
+
+        const questionLines = [];
+        const explanationLines = [];
+        let currentOption = null;
+        let inExplanation = false;
+        let explicitCorrect = '';
+        let inferredCorrect = '';
+
+        for (const rawLine of blockLines) {
+            const line = (rawLine || '').trim();
+            if (!line) {
+                if (inExplanation) explanationLines.push('');
+                else if (currentOption) options[currentOption].push('');
+                else questionLines.push('');
+                continue;
+            }
+
+            const correctLineMatch = line.match(/^doğru\s*cevap\s*:\s*([ABCDE])\s*[\)\.]?\s*$/i);
+            if (correctLineMatch) {
+                explicitCorrect = (correctLineMatch[1] || '').toUpperCase();
+                continue;
+            }
+
+            const explanationStartMatch = line.match(/^açıklama\s*:\s*(.*)$/i);
+            if (explanationStartMatch) {
+                inExplanation = true;
+                currentOption = null;
+                const firstExplanationLine = (explanationStartMatch[1] || '').trim();
+                if (firstExplanationLine) explanationLines.push(firstExplanationLine);
+                continue;
+            }
+
+            const optionMatch = !inExplanation
+                ? line.match(/^[\s\-–—•\*]*([ABCDE])\s*[\)\.\-:]\s*(.*)$/i)
+                : null;
+
+            if (optionMatch) {
+                currentOption = optionMatch[1].toUpperCase();
+                let optionText = optionMatch[2] || '';
+                if (/^\s*[*✓✔]/.test(optionText) || /\(\s*doğru\s*\)/i.test(optionText)) {
+                    inferredCorrect = currentOption;
+                }
+                options[currentOption].push(cleanOptionText(optionText));
+                continue;
+            }
+
+            if (inExplanation) {
+                explanationLines.push(line);
+            } else if (currentOption) {
+                options[currentOption].push(line);
+            } else {
+                questionLines.push(line);
+            }
+        }
+
+        const questionText = normalizeMultiline(questionLines.join('\n'));
+        const explanation = normalizeMultiline(explanationLines.join('\n'));
+        const correctAnswer = (explicitCorrect || inferredCorrect || '').toUpperCase();
+
+        const normalizedOptions = {
+            A: normalizeMultiline(options.A.join('\n')),
+            B: normalizeMultiline(options.B.join('\n')),
+            C: normalizeMultiline(options.C.join('\n')),
+            D: normalizeMultiline(options.D.join('\n')),
+            E: normalizeMultiline(options.E.join('\n')),
+        };
+
+        normalizedOptions.A = cleanOptionText(normalizedOptions.A);
+        normalizedOptions.B = cleanOptionText(normalizedOptions.B);
+        normalizedOptions.C = cleanOptionText(normalizedOptions.C);
+        normalizedOptions.D = cleanOptionText(normalizedOptions.D);
+        normalizedOptions.E = cleanOptionText(normalizedOptions.E);
+
+        const isValid =
+            questionText.length > 0 &&
+            normalizedOptions.A && normalizedOptions.B && normalizedOptions.C && normalizedOptions.D &&
+            ['A', 'B', 'C', 'D', 'E'].includes(correctAnswer) &&
+            (correctAnswer !== 'E' || (normalizedOptions.E && normalizedOptions.E.length > 0));
+
+        if (!isValid) {
+            result.skipped_count++;
+            continue;
+        }
+
+        result.parsed.push({
+            question_text: questionText,
+            option_a: normalizedOptions.A,
+            option_b: normalizedOptions.B,
+            option_c: normalizedOptions.C,
+            option_d: normalizedOptions.D,
+            option_e: normalizedOptions.E || null,
+            correct_answer: correctAnswer,
+            explanation,
+            question_type: selectedType,
+            course_id: selectedCourseId,
+            topic_id: selectedTopicId || null,
+            status: 'pending'
+        });
+    }
+
+    result.parsed_count = result.parsed.length;
+    return result;
+}
+
 function statusCounts() {
     return {
         approved: generatedQuestions.filter(q => q.status === 'approved').length,
@@ -477,13 +729,14 @@ function renderAiPreview() {
 
     let html = '';
 
-    if (generationMeta && generationMeta.source === 'bulk') {
+    if (generationMeta && (generationMeta.source === 'bulk' || generationMeta.source === 'latex_bulk')) {
         const parsed = generationMeta.parsed_count ?? generatedQuestions.length;
         const skipped = generationMeta.skipped_count ?? 0;
         const total = generationMeta.total_blocks ?? parsed + skipped;
+        const sourceLabel = generationMeta.source === 'latex_bulk' ? 'LaTeX Ayrıştırma' : 'Toplu Ayrıştırma';
         html += `
           <div class="alert alert-info">
-            Toplam blok: <strong>${total}</strong> • Ayrıştırılan: <strong>${parsed}</strong> • Atlanan: <strong>${skipped}</strong>
+            ${sourceLabel} • Toplam blok: <strong>${total}</strong> • Ayrıştırılan: <strong>${parsed}</strong> • Atlanan: <strong>${skipped}</strong>
           </div>`;
     } else if (generationMeta) {
         const requested = generationMeta.requested_count ?? generatedQuestions.length;
@@ -649,6 +902,7 @@ $(document).ready(function() {
     let isSavingAiQuestions = false;
     const QUESTIONS_FILTERS_STORAGE_KEY = 'questions_filters_v1';
     const BULK_UPLOAD_PREFS_STORAGE_KEY = 'questions_bulk_upload_prefs_v1';
+    const LATEX_BULK_UPLOAD_PREFS_STORAGE_KEY = 'questions_latex_bulk_upload_prefs_v1';
 
     const appAlert = (title, message, type = 'info') => {
         if (typeof window.showAppAlert === 'function') {
@@ -871,6 +1125,93 @@ $(document).ready(function() {
             $('#bulk_question_type').val(savedQuestionType);
         } else {
             $('#bulk_question_type').val('');
+        }
+    }
+
+    function getSavedLatexBulkUploadPrefs() {
+        try {
+            const raw = localStorage.getItem(LATEX_BULK_UPLOAD_PREFS_STORAGE_KEY);
+            if (!raw) return {};
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') return {};
+            return parsed;
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function saveLatexBulkUploadPrefs() {
+        try {
+            const payload = {
+                qualification_id: $('#latex_bulk_qualification_id').val() || '',
+                course_id: $('#latex_bulk_course_id').val() || '',
+                topic_id: $('#latex_bulk_topic_id').val() || '',
+                question_type: $('#latex_bulk_question_type').val() || ''
+            };
+            console.log('latex bulk prefs save', payload);
+            localStorage.setItem(LATEX_BULK_UPLOAD_PREFS_STORAGE_KEY, JSON.stringify(payload));
+        } catch (e) {
+            // noop
+        }
+    }
+
+    function loadLatexBulkCourses(qualificationId) {
+        const $course = $('#latex_bulk_course_id');
+        $course.html('<option value="">Ders seçin...</option>');
+
+        if (!qualificationId) {
+            $course.prop('disabled', true);
+            $('#latex_bulk_topic_id').html('<option value="">Önce ders seçin...</option>').prop('disabled', true);
+            return;
+        }
+
+        coursesData
+            .filter(c => c.qualification_id === qualificationId)
+            .forEach(c => $course.append(`<option value="${c.id}">${c.name}</option>`));
+
+        $course.prop('disabled', $course.find('option').length <= 1);
+        $('#latex_bulk_topic_id').html('<option value="">Önce ders seçin...</option>').prop('disabled', true);
+    }
+
+    function applySavedLatexBulkUploadPrefs() {
+        const savedPrefs = getSavedLatexBulkUploadPrefs();
+        console.log('latex bulk prefs restore', savedPrefs);
+
+        const savedQualificationId = String(savedPrefs.qualification_id || '');
+        const savedCourseId = String(savedPrefs.course_id || '');
+        const savedTopicId = String(savedPrefs.topic_id || '');
+        const savedQuestionType = String(savedPrefs.question_type || '');
+
+        if (savedQualificationId && $('#latex_bulk_qualification_id option[value="' + savedQualificationId + '"]').length) {
+            $('#latex_bulk_qualification_id').val(savedQualificationId);
+            loadLatexBulkCourses(savedQualificationId);
+        } else {
+            $('#latex_bulk_qualification_id').val('');
+            loadLatexBulkCourses('');
+        }
+
+        if (savedCourseId && $('#latex_bulk_course_id option[value="' + savedCourseId + '"]').length) {
+            $('#latex_bulk_course_id').val(savedCourseId);
+        } else {
+            $('#latex_bulk_course_id').val('');
+        }
+
+        const selectedCourseId = $('#latex_bulk_course_id').val() || '';
+        loadTopicsByCourse(selectedCourseId, $('#latex_bulk_topic_id'), {
+            emptyLabel: 'Konu seçmeden devam et',
+            noTopicLabel: 'Bu derste kayıtlı konu yok'
+        }).then(() => {
+            if (savedTopicId && $('#latex_bulk_topic_id option[value="' + savedTopicId + '"]').length) {
+                $('#latex_bulk_topic_id').val(savedTopicId);
+            } else {
+                $('#latex_bulk_topic_id').val('');
+            }
+        });
+
+        if (savedQuestionType && $('#latex_bulk_question_type option[value="' + savedQuestionType + '"]').length) {
+            $('#latex_bulk_question_type').val(savedQuestionType);
+        } else {
+            $('#latex_bulk_question_type').val('');
         }
     }
 
@@ -1205,6 +1546,31 @@ $(document).ready(function() {
         saveBulkUploadPrefs();
     });
 
+    $('#latex_bulk_qualification_id').on('change', function() {
+        const qualId = $(this).val();
+        $('#latex_bulk_course_id').val('');
+        $('#latex_bulk_topic_id').val('');
+        loadLatexBulkCourses(qualId);
+        saveLatexBulkUploadPrefs();
+    });
+
+    $('#latex_bulk_course_id').on('change', async function() {
+        const courseId = $(this).val() || '';
+        await loadTopicsByCourse(courseId, $('#latex_bulk_topic_id'), {
+            emptyLabel: 'Konu seçmeden devam et',
+            noTopicLabel: 'Bu derste kayıtlı konu yok'
+        });
+        saveLatexBulkUploadPrefs();
+    });
+
+    $('#latex_bulk_topic_id').on('change', function() {
+        saveLatexBulkUploadPrefs();
+    });
+
+    $('#latex_bulk_question_type').on('change', function() {
+        saveLatexBulkUploadPrefs();
+    });
+
     $('#bulkUploadForm').on('submit', function(e) {
         e.preventDefault();
 
@@ -1245,6 +1611,48 @@ $(document).ready(function() {
 
     $('#bulkUploadModal').on('hidden.bs.modal', function() {
         $('#bulk_questions_text').val('');
+    });
+
+    $('#latexBulkUploadForm').on('submit', function(e) {
+        e.preventDefault();
+
+        const qualificationId = $('#latex_bulk_qualification_id').val();
+        const courseId = $('#latex_bulk_course_id').val();
+        const topicId = $('#latex_bulk_topic_id').val() || '';
+        const questionType = $('#latex_bulk_question_type').val();
+        const rawText = $('#latex_bulk_questions_text').val();
+
+        if (!qualificationId) return appAlert('Uyarı', 'Lütfen yeterlilik seçiniz.', 'warning');
+        if (!courseId) return appAlert('Uyarı', 'Lütfen ders seçiniz.', 'warning');
+        if (!questionType) return appAlert('Uyarı', 'Lütfen soru türü seçiniz.', 'warning');
+        if (!rawText || !rawText.trim()) return appAlert('Uyarı', 'Lütfen soru metnini yapıştırınız.', 'warning');
+
+        const parsedResult = parseLatexBulkQuestions(rawText, questionType, courseId, topicId);
+        if (!parsedResult.parsed_count) {
+            return appAlert('Hata', 'Hiç soru ayrıştırılamadı. LaTeX formatını ve soru bloklarını kontrol edin (1., A)-E), Açıklama:, Doğru Cevap:).', 'error');
+        }
+
+        generatedQuestions = parsedResult.parsed;
+        generationMeta = {
+            source: 'latex_bulk',
+            parsed_count: parsedResult.parsed_count,
+            skipped_count: parsedResult.skipped_count,
+            total_blocks: parsedResult.total_blocks
+        };
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('latexBulkUploadModal')).hide();
+        $('#latex_bulk_questions_text').val('');
+        renderAiPreview();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('aiPreviewModal')).show();
+    });
+
+    $('#latexBulkUploadModal').on('show.bs.modal', function() {
+        $('#latex_bulk_questions_text').val('');
+        applySavedLatexBulkUploadPrefs();
+    });
+
+    $('#latexBulkUploadModal').on('hidden.bs.modal', function() {
+        $('#latex_bulk_questions_text').val('');
     });
 
     $('.ai-count-btn').on('click', function() {
