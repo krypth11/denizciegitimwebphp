@@ -6,7 +6,6 @@ require_once '../includes/functions.php';
 $user = require_auth();
 $current_page = 'questions';
 $page_title = 'Sorular';
-$enable_katex = true;
 
 $qualifications = $pdo->query('SELECT * FROM qualifications ORDER BY order_index, name')->fetchAll();
 $courses = $pdo->query(
@@ -131,18 +130,10 @@ include '../includes/sidebar.php';
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" required><option value="">Seçiniz...</option><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
             </div>
             <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="add_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Konu seçmeden devam edebilirsiniz.</small></div>
-            <div class="mb-3">
-                <label class="form-label">Soru Metni *</label>
-                <textarea class="form-control" name="question_text" rows="3" required></textarea>
-                <small class="text-muted d-block mt-1 latex-help-note">LaTeX: Satır içi <code>\( ... \)</code> • Blok <code>\[ ... \]</code></small>
-            </div>
+            <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" rows="3" required></textarea></div>
             <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e"></div></div>
             <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" required><option value="">Seçiniz...</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
-            <div class="mb-3">
-                <label class="form-label">Açıklama</label>
-                <textarea class="form-control" name="explanation" rows="2"></textarea>
-            </div>
-            <div class="latex-live-preview" id="add_latex_preview"></div>
+            <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" rows="2"></textarea></div>
         </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Kaydet</button></div></form>
     </div></div>
 </div>
@@ -155,18 +146,10 @@ include '../includes/sidebar.php';
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" id="edit_question_type" required><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
             </div>
             <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="edit_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Konu alanı zorunlu değildir.</small></div>
-            <div class="mb-3">
-                <label class="form-label">Soru Metni *</label>
-                <textarea class="form-control" name="question_text" id="edit_question_text" rows="3" required></textarea>
-                <small class="text-muted d-block mt-1 latex-help-note">LaTeX: Satır içi <code>\( ... \)</code> • Blok <code>\[ ... \]</code></small>
-            </div>
+            <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" id="edit_question_text" rows="3" required></textarea></div>
             <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" id="edit_option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" id="edit_option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" id="edit_option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" id="edit_option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e" id="edit_option_e"></div></div>
             <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" id="edit_correct_answer" required><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
-            <div class="mb-3">
-                <label class="form-label">Açıklama</label>
-                <textarea class="form-control" name="explanation" id="edit_explanation" rows="2"></textarea>
-            </div>
-            <div class="latex-live-preview" id="edit_latex_preview"></div>
+            <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" id="edit_explanation" rows="2"></textarea></div>
         </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Güncelle</button></div></form>
     </div></div>
 </div>
@@ -267,7 +250,6 @@ Cevap Anahtarı
 1-A
 2-B
 3-E</pre>
-                        <div class="mt-2 latex-help-note">LaTeX desteği vardır: <code>\( ... \)</code> ve <code>\[ ... \]</code>.</div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -293,329 +275,18 @@ Cevap Anahtarı
 <?php
 $extra_js = <<<'JAVASCRIPT'
 <script>
-window.__QUESTIONS_PAGE_VERSION__ = 'LATEX-QUESTIONS-2-STRUCTURED';
+window.__QUESTIONS_PAGE_VERSION__ = 'E-OPTION-FIX-1';
 console.log('QUESTIONS PAGE VERSION', window.__QUESTIONS_PAGE_VERSION__);
 
 let generatedQuestions = [];
 let coursesData = JSON.parse(document.getElementById('courses-data-json').textContent);
 let generationMeta = null;
 
-function qEsc(value) {
-    return $('<div>').text(value ?? '').html();
+function esc(v) {
+    return $('<div>').text(v ?? '').html();
 }
 
-function renderKatexInNode(node) {
-    if (!node || typeof window.renderMathInElement !== 'function') return;
-    try {
-        window.renderMathInElement(node, {
-            delimiters: [
-                { left: '\\[', right: '\\]', display: true },
-                { left: '\\(', right: '\\)', display: false }
-            ],
-            throwOnError: false,
-            strict: 'ignore',
-            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
-        });
-    } catch (e) {
-        console.warn('KaTeX render error:', e);
-    }
-}
-
-function renderKatexInContainer(rootEl) {
-    if (!rootEl) return;
-    const root = rootEl instanceof jQuery ? rootEl[0] : rootEl;
-    if (!root) return;
-
-    if (typeof window.renderMathInElement !== 'function') {
-        setTimeout(() => renderKatexInContainer(root), 120);
-        return;
-    }
-
-    const nodes = root.matches?.('.js-latex-content')
-        ? [root]
-        : Array.from(root.querySelectorAll('.js-latex-content'));
-
-    nodes.forEach((node) => {
-        renderKatexInNode(node);
-    });
-}
-
-const STRUCTURED_PREVIEW_HEADING_KEYWORDS = [
-    'açıklama',
-    'çözüm',
-    'sonuç',
-    'cevap',
-    'doğru cevap',
-    'yakıtın alt ısıl değeri',
-    'efektif termik verim',
-    'önce strok hacmi',
-    'toplam strok hacmi',
-    'indike güç',
-    'efektif güç'
-];
-
-function normalizeStructuredPreviewText(rawValue, { isExplanation = false } = {}) {
-    const raw = String(rawValue ?? '');
-    if (!raw.trim()) return '';
-
-    const normalized = raw.replace(/\r\n?/g, '\n');
-    const prepared = isExplanation ? formatExplanationTextForPreview(normalized) : normalized;
-    return prepared.trim();
-}
-
-function lineHasLatexDelimiter(text) {
-    return /\\\(|\\\[/.test(String(text || ''));
-}
-
-function isHeadingLikeLine(line) {
-    const t = String(line || '').trim();
-    if (!t) return false;
-
-    const lower = t.toLocaleLowerCase('tr-TR');
-    if (STRUCTURED_PREVIEW_HEADING_KEYWORDS.some((k) => lower === k || lower === `${k}:`)) {
-        return true;
-    }
-
-    if (!/:$/u.test(t)) return false;
-
-    const plain = t.replace(/:$/u, '').trim();
-    if (!plain) return false;
-    if (/^[A-E]\)\s/u.test(plain)) return false;
-
-    const wordCount = (plain.match(/\S+/g) || []).length;
-    return wordCount > 0 && wordCount <= 8 && plain.length <= 70;
-}
-
-function isLikelyMathLine(line) {
-    const t = String(line || '').trim();
-    if (!t) return false;
-    if (/^[A-E]\)\s/u.test(t)) return false;
-
-    if (/\\\[|\\\]/.test(t)) return true;
-    if (/\\(frac|sqrt|sum|int|alpha|beta|gamma|delta|theta|lambda|pi|cdot|times|left|right|mathrm|text|eta|mu|sigma|omega)\b/i.test(t)) {
-        return true;
-    }
-
-    const symbolCount = (t.match(/[=+\-*/^_<>≤≥∑∫√%]/g) || []).length;
-    const wordCount = (t.match(/[A-Za-zÇĞİÖŞÜçğıöşü]+/g) || []).length;
-    const digitCount = (t.match(/[0-9]/g) || []).length;
-
-    if (symbolCount >= 2 && wordCount <= 8 && t.length <= 130) return true;
-    if (symbolCount >= 1 && digitCount >= 1 && wordCount <= 6 && t.length <= 110) return true;
-
-    return false;
-}
-
-function classifyStructuredPreviewLine(line) {
-    const trimmed = String(line || '').trim();
-    if (!trimmed) return { type: 'spacer', text: '' };
-
-    const optionMatch = trimmed.match(/^([A-E])\)\s*(.*)$/u);
-    if (optionMatch) {
-        return {
-            type: 'option_line',
-            label: optionMatch[1],
-            text: (optionMatch[2] || '').trim() || '-'
-        };
-    }
-
-    if (/^(doğru\s*cevap|cevap|sonuç)\s*:?/iu.test(trimmed)) {
-        return { type: 'result_line', text: trimmed };
-    }
-
-    if (isHeadingLikeLine(trimmed)) {
-        return { type: 'heading_like_line', text: trimmed };
-    }
-
-    if (isLikelyMathLine(trimmed)) {
-        return { type: 'math_block', text: trimmed };
-    }
-
-    return { type: 'paragraph', text: trimmed };
-}
-
-function buildStructuredPreviewHtml(rawValue, options = {}) {
-    const {
-        isExplanation = false,
-        docClass = '',
-    } = options;
-
-    const prepared = normalizeStructuredPreviewText(rawValue, { isExplanation });
-    if (!prepared) {
-        return '<div class="latex-preview-empty">İçerik yok</div>';
-    }
-
-    const lines = prepared.split('\n');
-    const blocks = [];
-    let displayMathBuffer = [];
-    let hasSpacer = false;
-
-    const flushDisplayMath = () => {
-        if (!displayMathBuffer.length) return;
-        blocks.push({ type: 'math_block', text: displayMathBuffer.join('\n').trim() });
-        displayMathBuffer = [];
-    };
-
-    lines.forEach((line) => {
-        const trimmed = line.trim();
-
-        if (displayMathBuffer.length > 0) {
-            displayMathBuffer.push(trimmed);
-            if (/\\\]/.test(trimmed)) {
-                flushDisplayMath();
-            }
-            return;
-        }
-
-        if (/\\\[/.test(trimmed) && !/\\\]/.test(trimmed)) {
-            displayMathBuffer.push(trimmed);
-            hasSpacer = false;
-            return;
-        }
-
-        const classified = classifyStructuredPreviewLine(trimmed);
-        if (classified.type === 'spacer') {
-            if (!hasSpacer && blocks.length > 0) {
-                blocks.push(classified);
-                hasSpacer = true;
-            }
-            return;
-        }
-
-        blocks.push(classified);
-        hasSpacer = false;
-    });
-
-    flushDisplayMath();
-
-    const html = blocks.map((block) => {
-        if (block.type === 'spacer') {
-            return '<div class="math-spacer" aria-hidden="true"></div>';
-        }
-
-        if (block.type === 'math_block') {
-            const rawText = String(block.text || '').trim();
-            if (!rawText) return '';
-
-            const shouldWrapForDisplay = !/\\\[|\\\]/.test(rawText)
-                && !lineHasLatexDelimiter(rawText)
-                && /[=^_\\]/.test(rawText);
-
-            const contentText = shouldWrapForDisplay ? `\\[ ${rawText} \\]` : rawText;
-            const safe = qEsc(contentText).replace(/\n/g, '<br>');
-            const latexClass = lineHasLatexDelimiter(contentText) ? 'js-latex-content' : '';
-            return `<div class="math-block"><span class="${latexClass}">${safe}</span></div>`;
-        }
-
-        if (block.type === 'option_line') {
-            const safeText = qEsc(block.text || '-').replace(/\n/g, '<br>');
-            const latexClass = lineHasLatexDelimiter(block.text) ? 'js-latex-content' : '';
-            return `
-                <div class="math-line math-option">
-                    <span class="math-option-label">${qEsc(block.label || '')})</span>
-                    <span class="math-option-text ${latexClass}">${safeText}</span>
-                </div>
-            `;
-        }
-
-        const typeClassMap = {
-            heading_like_line: 'math-heading',
-            result_line: 'math-result',
-            paragraph: 'math-paragraph'
-        };
-        const typeClass = typeClassMap[block.type] || 'math-paragraph';
-        const safeText = qEsc(block.text || '').replace(/\n/g, '<br>');
-        const latexClass = lineHasLatexDelimiter(block.text) ? 'js-latex-content' : '';
-        return `<div class="math-line ${typeClass}"><span class="${latexClass}">${safeText}</span></div>`;
-    }).join('');
-
-    return `<div class="math-doc ${docClass}">${html}</div>`;
-}
-
-function buildOptionPreviewHtml(letter, rawValue) {
-    const content = String(rawValue ?? '').replace(/\r\n?/g, '\n').trim();
-    const prefixed = `${letter}) ${content || '-'}`;
-    return buildStructuredPreviewHtml(prefixed, { docClass: 'math-doc-option' });
-}
-
-function toSafeLatexHtml(rawValue, options = {}) {
-    const {
-        isExplanation = false,
-        applyLineBreaks = true,
-    } = options;
-
-    const raw = String(rawValue ?? '');
-    const normalized = raw.replace(/\r\n?/g, '\n');
-    const content = isExplanation ? formatExplanationTextForPreview(normalized) : normalized;
-    const safe = qEsc(content);
-    const html = applyLineBreaks ? safe.replace(/\n/g, '<br>') : safe;
-    const hasLatex = /\\\(|\\\[/.test(content);
-    return `<span class="${hasLatex ? 'js-latex-content' : ''}">${html}</span>`;
-}
-
-function buildQuestionPreviewCard(question) {
-    const optionEHtml = String(question.option_e || '').trim()
-        ? `<div class="latex-preview-option">${buildOptionPreviewHtml('E', question.option_e)}</div>`
-        : '';
-
-    const explanationHtml = (question.explanation || '').trim()
-        ? `<div class="latex-preview-explanation"><div class="latex-preview-label">Açıklama</div><div class="latex-preview-explanation-body">${buildStructuredPreviewHtml(question.explanation, { isExplanation: true, docClass: 'math-doc-explanation' })}</div></div>`
-        : '<div class="latex-preview-empty">Açıklama yok</div>';
-
-    return `
-        <div class="latex-preview-card">
-            <div class="latex-preview-section">
-                <div class="latex-preview-label">Soru</div>
-                ${buildStructuredPreviewHtml(question.question_text, { docClass: 'math-doc-question' })}
-            </div>
-            <div class="latex-preview-options">
-                <div class="latex-preview-option">${buildOptionPreviewHtml('A', question.option_a)}</div>
-                <div class="latex-preview-option">${buildOptionPreviewHtml('B', question.option_b)}</div>
-                <div class="latex-preview-option">${buildOptionPreviewHtml('C', question.option_c)}</div>
-                <div class="latex-preview-option">${buildOptionPreviewHtml('D', question.option_d)}</div>
-                ${optionEHtml}
-            </div>
-            ${explanationHtml}
-        </div>
-    `;
-}
-
-function getFormQuestionValues($form) {
-    return {
-        question_text: ($form.find('[name="question_text"]').val() || '').toString(),
-        option_a: ($form.find('[name="option_a"]').val() || '').toString(),
-        option_b: ($form.find('[name="option_b"]').val() || '').toString(),
-        option_c: ($form.find('[name="option_c"]').val() || '').toString(),
-        option_d: ($form.find('[name="option_d"]').val() || '').toString(),
-        option_e: ($form.find('[name="option_e"]').val() || '').toString(),
-        explanation: ($form.find('[name="explanation"]').val() || '').toString(),
-    };
-}
-
-function updateLatexLivePreview(formSelector, previewSelector) {
-    const $form = $(formSelector);
-    const $preview = $(previewSelector);
-    if (!$form.length || !$preview.length) return;
-
-    const values = getFormQuestionValues($form);
-    const hasContent = Object.values(values).some((v) => String(v).trim().length > 0);
-    if (!hasContent) {
-        $preview.html('<div class="latex-preview-empty">Canlı önizleme burada görünecek.</div>');
-        return;
-    }
-
-    $preview.html(buildQuestionPreviewCard(values));
-    renderKatexInContainer($preview);
-}
-
-function wireFormLatexPreview(formSelector, previewSelector) {
-    const fields = '[name="question_text"],[name="option_a"],[name="option_b"],[name="option_c"],[name="option_d"],[name="option_e"],[name="explanation"]';
-    $(document).on('input change', `${formSelector} ${fields}`, function () {
-        updateLatexLivePreview(formSelector, previewSelector);
-    });
-}
-
-function formatExplanationTextForPreview(value) {
+function formatExplanationText(value) {
     const raw = String(value ?? '');
     if (!raw.trim()) return '';
 
@@ -628,10 +299,10 @@ function formatExplanationTextForPreview(value) {
     return text;
 }
 
-function formatExplanationHtmlForPreview(raw, formattedRaw) {
-    const source = String(formattedRaw ?? '') || formatExplanationTextForPreview(raw);
+function formatExplanationHtml(raw, formattedRaw) {
+    const source = String(formattedRaw ?? '') || formatExplanationText(raw);
     if (!source.trim()) return '';
-    return qEsc(source).replace(/\n/g, '<br>');
+    return esc(source).replace(/\n/g, '<br>');
 }
 
 function normalizeCount(v) {
@@ -640,41 +311,156 @@ function normalizeCount(v) {
     return n;
 }
 
-async function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTopicId = '') {
-    const res = await window.appAjax({
-        url: '../ajax/questions.php?action=parse_bulk',
-        method: 'POST',
-        data: {
-            raw_text: rawText,
-            question_type: selectedType,
-            course_id: selectedCourseId,
-            topic_id: selectedTopicId || ''
-        }
-    });
+function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTopicId = '') {
+    const stripInvisibleChars = (txt) => (txt || '')
+        .replace(/\uFFFC/g, '')
+        .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-    if (!res.success) {
-        return {
-            success: false,
-            message: res.message || 'Toplu soru ayrıştırma başarısız oldu.',
-            parsed: [],
-            parsed_count: 0,
-            skipped_count: 0,
-            total_blocks: 0,
-            skipped_reasons: {},
-            skipped_samples: []
-        };
+    const normalizeText = (txt) => stripInvisibleChars(txt)
+        .replace(/\u00A0/g, ' ')
+        .replace(/\r\n?/g, '\n')
+        .replace(/[ \t]+/g, ' ')
+        .trim();
+
+    const cleanOptionText = (txt) => normalizeText((txt || '')
+        .replace(/\(\s*doğru\s*\)/ig, '')
+        .replace(/^[*✓✔]+\s*/, ''));
+
+    const fullText = stripInvisibleChars(rawText || '')
+        .replace(/\u00A0/g, ' ')
+        .replace(/\r\n?/g, '\n')
+        .trim();
+    const result = { parsed: [], parsed_count: 0, skipped_count: 0, total_blocks: 0 };
+
+    if (!fullText) {
+        return result;
     }
 
-    return {
-        success: true,
-        parser_version: res.data?.parser_version || 'BULK_PARSER_V2',
-        parsed: Array.isArray(res.data?.parsed) ? res.data.parsed : [],
-        parsed_count: Number(res.data?.parsed_count || 0),
-        skipped_count: Number(res.data?.skipped_count || 0),
-        total_blocks: Number(res.data?.total_blocks || 0),
-        skipped_reasons: res.data?.skipped_reasons || {},
-        skipped_samples: Array.isArray(res.data?.skipped_samples) ? res.data.skipped_samples : []
-    };
+    const answerHeaderRegex = /^\s*cevap\s+anahtarı\s*:?\s*$/im;
+    const answerHeaderMatch = answerHeaderRegex.exec(fullText);
+    const bodyText = answerHeaderMatch ? fullText.slice(0, answerHeaderMatch.index).trim() : fullText;
+    const answerKeyText = answerHeaderMatch ? fullText.slice(answerHeaderMatch.index) : '';
+
+    const answerMap = {};
+    if (answerKeyText) {
+        const answerRegex = /^\s*(\d+)\s*[-.):]\s*([ABCDE])\s*$/gim;
+        let answerMatch;
+        while ((answerMatch = answerRegex.exec(answerKeyText)) !== null) {
+            answerMap[parseInt(answerMatch[1], 10)] = answerMatch[2].toUpperCase();
+        }
+    }
+
+    const blockDivider = '__BULK_QUESTION_DIVIDER__';
+    const blocks = bodyText
+        .replace(/^\s*⸻\s*$/gm, blockDivider)
+        .split(blockDivider)
+        .map((b) => b.trim())
+        .filter((b) => b.length > 0);
+
+    result.total_blocks = blocks.length;
+    if (!blocks.length) {
+        return result;
+    }
+
+    for (const rawBlock of blocks) {
+        const blockText = rawBlock.trim();
+
+        const lines = blockText.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+        if (!lines.length) {
+            result.skipped_count++;
+            continue;
+        }
+
+        const firstLineMatch = lines[0].match(/^\s*(\d+)\s*[\.)]\s*(.*)$/);
+        if (!firstLineMatch) {
+            result.skipped_count++;
+            continue;
+        }
+
+        const number = parseInt(firstLineMatch[1], 10);
+        lines[0] = (firstLineMatch[2] || '').trim();
+
+        const questionLines = [];
+        const options = { A: '', B: '', C: '', D: '', E: '' };
+        let currentOption = null;
+        let explanationMode = false;
+        const explanationLines = [];
+        let inferredCorrect = '';
+
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (!line) continue;
+
+            if (/^⸻$/.test(line)) {
+                continue;
+            }
+
+            if (explanationMode) {
+                explanationLines.push(line);
+                continue;
+            }
+
+            const expMatch = line.match(/^açıklama\s*:\s*(.*)$/i);
+            if (expMatch) {
+                explanationMode = true;
+                if (expMatch[1]) explanationLines.push(expMatch[1].trim());
+                continue;
+            }
+
+            const optMatch = line.match(/^[\s\-–—•\*]*([ABCDE])\s*[\)\.\-:]\s*(.*)$/i);
+            if (optMatch) {
+                currentOption = optMatch[1].toUpperCase();
+                let optValue = optMatch[2] || '';
+                if (/^\s*[*✓✔]/.test(optValue) || /\(\s*doğru\s*\)/i.test(optValue)) {
+                    inferredCorrect = currentOption;
+                }
+                const value = cleanOptionText(optValue || '').trim();
+                options[currentOption] = value.length ? value : null;
+                continue;
+            }
+
+            if (currentOption) {
+                const currentValue = options[currentOption] || '';
+                options[currentOption] = normalizeText(`${currentValue} ${line}`);
+            } else {
+                questionLines.push(line);
+            }
+        }
+
+        const questionText = normalizeText(questionLines.join(' '));
+        const correctAnswer = (answerMap[number] || inferredCorrect || '').toUpperCase();
+        const explanation = normalizeText(explanationLines.join(' '));
+
+        const isValid =
+            questionText.length >= 10 &&
+            options.A && options.B && options.C && options.D &&
+            ['A', 'B', 'C', 'D', 'E'].includes(correctAnswer) &&
+            (correctAnswer !== 'E' || (options.E && options.E.length > 0));
+
+        if (!isValid) {
+            result.skipped_count++;
+            continue;
+        }
+
+        result.parsed.push({
+            question_text: questionText,
+            option_a: options.A,
+            option_b: options.B,
+            option_c: options.C,
+            option_d: options.D,
+            option_e: options.E ?? null,
+            correct_answer: correctAnswer,
+            explanation,
+            question_type: selectedType,
+            course_id: selectedCourseId,
+            topic_id: selectedTopicId || null,
+            status: 'pending'
+        });
+    }
+
+    result.parsed_count = result.parsed.length;
+    return result;
 }
 
 function statusCounts() {
@@ -742,7 +528,7 @@ function renderAiPreview() {
                 </div>
                 <div class="row">
                   <div class="col-md-3"><label class="form-label">Doğru Cevap</label><select class="form-select ai-draft-field" data-index="${index}" data-field="correct_answer"><option ${q._draft.correct_answer==='A'?'selected':''}>A</option><option ${q._draft.correct_answer==='B'?'selected':''}>B</option><option ${q._draft.correct_answer==='C'?'selected':''}>C</option><option ${q._draft.correct_answer==='D'?'selected':''}>D</option><option ${q._draft.correct_answer==='E'?'selected':''}>E</option></select></div>
-                  <div class="col-md-9"><label class="form-label">Açıklama</label><input class="form-control ai-draft-field" data-index="${index}" data-field="explanation" value="${qEsc(q._draft.explanation || '')}"></div>
+                  <div class="col-md-9"><label class="form-label">Açıklama</label><input class="form-control ai-draft-field" data-index="${index}" data-field="explanation" value="${esc(q._draft.explanation || '')}"></div>
                 </div>
                 <div class="mt-3">
                   <button class="btn btn-primary btn-sm ai-edit-save" data-index="${index}">Düzenlemeyi Onayla</button>
@@ -764,22 +550,17 @@ function renderAiPreview() {
                 </div>
               </div>
               <div class="card-body">
-                <div class="mb-2">
-                  <div class="latex-preview-label">Soru</div>
-                  ${buildStructuredPreviewHtml(q.question_text || '', { docClass: 'math-doc-question' })}
-                </div>
+                <div class="mb-2"><strong>Soru:</strong> ${q.question_text || ''}</div>
                 <div class="row g-2">
-                  <div class="col-md-6"><div class="p-2 rounded ${b('A')} latex-option-panel">${buildOptionPreviewHtml('A', q.option_a || '')}</div></div>
-                  <div class="col-md-6"><div class="p-2 rounded ${b('B')} latex-option-panel">${buildOptionPreviewHtml('B', q.option_b || '')}</div></div>
-                  <div class="col-md-6"><div class="p-2 rounded ${b('C')} latex-option-panel">${buildOptionPreviewHtml('C', q.option_c || '')}</div></div>
-                  <div class="col-md-6"><div class="p-2 rounded ${b('D')} latex-option-panel">${buildOptionPreviewHtml('D', q.option_d || '')}</div></div>
-                  ${q.option_e ? `<div class="col-md-6"><div class="p-2 rounded ${b('E')} latex-option-panel">${buildOptionPreviewHtml('E', q.option_e || '')}</div></div>` : ''}
+                  <div class="col-md-6"><div class="p-2 rounded ${b('A')}">A) ${q.option_a || ''}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('B')}">B) ${q.option_b || ''}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('C')}">C) ${q.option_c || ''}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('D')}">D) ${q.option_d || ''}</div></div>
+                  ${q.option_e ? `<div class="col-md-6"><div class="p-2 rounded ${b('E')}">E) ${q.option_e || ''}</div></div>` : ''}
                 </div>
                 ${(() => {
-                    const explanationText = String(q.formatted_explanation ?? '').trim() || String(q.explanation ?? '').trim();
-                    return explanationText
-                        ? `<div class="mt-2 latex-preview-explanation"><div class="latex-preview-label">Açıklama</div>${buildStructuredPreviewHtml(explanationText, { isExplanation: true, docClass: 'math-doc-explanation' })}</div>`
-                        : '';
+                    const explanationHtml = formatExplanationHtml(q.explanation, q.formatted_explanation);
+                    return explanationHtml ? `<div class="mt-2 text-muted"><small class="explanation-preline">${explanationHtml}</small></div>` : '';
                 })()}
               </div>
             </div>`;
@@ -787,7 +568,6 @@ function renderAiPreview() {
     });
 
     $('#aiPreviewBody').html(html || '<div class="alert alert-warning">Soru yok.</div>');
-    renderKatexInContainer($('#aiPreviewBody'));
 }
 
 function formatSkipSummary(resp) {
@@ -907,24 +687,6 @@ $(document).ready(function() {
         return Promise.resolve(false);
     };
 
-    const esc = (v) => $('<div>').text(v ?? '').html();
-    const formatExplanationText = (value) => {
-        const raw = String(value ?? '');
-        if (!raw.trim()) return '';
-
-        let text = raw.replace(/\r\n?/g, '\n');
-        text = text.replace(/([.!?…])\s+([A-E]\)\s)/g, '$1\n\n$2');
-        text = text.replace(/([^\n])\s+([A-E]\)\s)/g, '$1\n$2');
-        text = text.replace(/([^\n])\s+(Doğru\s*Cevap\s*:)/gi, '$1\n\n$2');
-        text = text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-
-        return text;
-    };
-    const formatExplanationHtml = (raw, formattedRaw) => {
-        const source = String(formattedRaw ?? '') || formatExplanationText(raw);
-        if (!source.trim()) return '';
-        return esc(source).replace(/\n/g, '<br>');
-    };
     const qState = {
         qualifications: [],
         courses: [],
@@ -1408,7 +1170,6 @@ $(document).ready(function() {
             emptyLabel: 'Konu seçmeden devam et',
             noTopicLabel: 'Bu derste kayıtlı konu yok'
         });
-        updateLatexLivePreview('#addForm', '#add_latex_preview');
     });
 
     $('#edit_course_id').on('change', async function() {
@@ -1417,7 +1178,6 @@ $(document).ready(function() {
             emptyLabel: 'Konu seçmeden devam et',
             noTopicLabel: 'Bu derste kayıtlı konu yok'
         });
-        updateLatexLivePreview('#editForm', '#edit_latex_preview');
     });
 
     $('#bulk_qualification_id').on('change', function() {
@@ -1445,7 +1205,7 @@ $(document).ready(function() {
         saveBulkUploadPrefs();
     });
 
-    $('#bulkUploadForm').on('submit', async function(e) {
+    $('#bulkUploadForm').on('submit', function(e) {
         e.preventDefault();
 
         const qualificationId = $('#bulk_qualification_id').val();
@@ -1459,33 +1219,18 @@ $(document).ready(function() {
         if (!questionType) return appAlert('Uyarı', 'Lütfen soru türü seçiniz.', 'warning');
         if (!rawText || !rawText.trim()) return appAlert('Uyarı', 'Lütfen soru metnini yapıştırınız.', 'warning');
 
-        const parsedResult = await parseBulkQuestions(rawText, questionType, courseId, topicId);
-        if (!parsedResult.success) {
-            return appAlert('Hata', parsedResult.message || 'Toplu soru ayrıştırılamadı.', 'error');
-        }
+        const parsedResult = parseBulkQuestions(rawText, questionType, courseId, topicId);
         if (!parsedResult.parsed_count) {
-            const skipSummary = formatSkipSummary(parsedResult);
-            const noParseMessage = skipSummary
-                ? `Hiç soru ayrıştırılamadı.\n\n${skipSummary}`
-                : 'Hiç soru ayrıştırılamadı. Format hatalı olabilir.';
-            return appAlert('Hata', noParseMessage, 'error');
+            return appAlert('Hata', 'Hiç soru ayrıştırılamadı. Format hatalı olabilir.', 'error');
         }
 
         generatedQuestions = parsedResult.parsed;
         generationMeta = {
             source: 'bulk',
-            parser_version: parsedResult.parser_version || 'BULK_PARSER_V2',
             parsed_count: parsedResult.parsed_count,
             skipped_count: parsedResult.skipped_count,
             total_blocks: parsedResult.total_blocks
         };
-
-        if (parsedResult.skipped_count > 0) {
-            const skipSummary = formatSkipSummary(parsedResult);
-            if (skipSummary) {
-                appAlert('Ayrıştırma Bilgisi', skipSummary, 'warning');
-            }
-        }
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('bulkUploadModal')).hide();
         $('#bulk_questions_text').val('');
@@ -1571,7 +1316,6 @@ $(document).ready(function() {
             $('#edit_id').val(q.id); $('#edit_course_id').val(q.course_id); $('#edit_question_type').val(q.question_type);
             $('#edit_question_text').val(q.question_text); $('#edit_option_a').val(q.option_a); $('#edit_option_b').val(q.option_b);
             $('#edit_option_c').val(q.option_c); $('#edit_option_d').val(q.option_d); $('#edit_option_e').val(q.option_e || ''); $('#edit_correct_answer').val((q.correct_answer || '').toUpperCase()); $('#edit_explanation').val(q.explanation||'');
-            updateLatexLivePreview('#editForm', '#edit_latex_preview');
             loadTopicsByCourse(q.course_id || '', $('#edit_topic_id'), {
                 emptyLabel: 'Konu seçmeden devam et',
                 noTopicLabel: 'Bu derste kayıtlı konu yok'
@@ -1581,19 +1325,6 @@ $(document).ready(function() {
             });
         });
     });
-
-    $('#addModal').on('shown.bs.modal', function () {
-        updateLatexLivePreview('#addForm', '#add_latex_preview');
-    });
-
-    $('#editModal').on('shown.bs.modal', function () {
-        updateLatexLivePreview('#editForm', '#edit_latex_preview');
-    });
-
-    wireFormLatexPreview('#addForm', '#add_latex_preview');
-    wireFormLatexPreview('#editForm', '#edit_latex_preview');
-    updateLatexLivePreview('#addForm', '#add_latex_preview');
-    updateLatexLivePreview('#editForm', '#edit_latex_preview');
     $('#editForm').on('submit', function(e){
         e.preventDefault();
         const editCorrect = String($('#edit_correct_answer').val() || '').toUpperCase();
