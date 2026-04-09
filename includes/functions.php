@@ -68,3 +68,44 @@ function validate_topic_belongs_to_course(PDO $pdo, $topicId, $courseId)
     $stmt->execute([$normalizedTopicId, $normalizedCourseId]);
     return (int)$stmt->fetchColumn() > 0;
 }
+
+function format_explanation_text($rawExplanation): string
+{
+    if ($rawExplanation === null) {
+        return '';
+    }
+
+    $text = (string)$rawExplanation;
+    if ($text === '') {
+        return '';
+    }
+
+    // CRLF/CR farklarını normalize et
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+
+    // Önce cümle sonlarından sonra gelen şıkları daha okunur bir blok olarak ayır
+    $text = preg_replace('/([.!?…])\s+([A-E]\)\s)/u', "$1\n\n$2", $text) ?? $text;
+
+    // Kalan A) ... E) marker'larını tek satırda akıyorsa yeni satıra al
+    $text = preg_replace('/([^\n])\s+([A-E]\)\s)/u', "$1\n$2", $text) ?? $text;
+
+    // Doğru Cevap: bloğunu ayrı satıra al
+    $text = preg_replace('/([^\n])\s+(Doğru\s*Cevap\s*:)/iu', "$1\n\n$2", $text) ?? $text;
+
+    // Satır sonlarındaki gereksiz boşlukları temizle, aşırı boşluk üretimini engelle
+    $text = preg_replace('/[ \t]+\n/u', "\n", $text) ?? $text;
+    $text = preg_replace('/\n{3,}/u', "\n\n", $text) ?? $text;
+
+    return trim($text);
+}
+
+function format_explanation_html($rawExplanation): string
+{
+    $formatted = format_explanation_text($rawExplanation);
+    if ($formatted === '') {
+        return '';
+    }
+
+    $safe = htmlspecialchars($formatted, ENT_QUOTES, 'UTF-8');
+    return nl2br($safe, false);
+}

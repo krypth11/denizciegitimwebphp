@@ -134,6 +134,7 @@ try {
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     $questions = array_map(static function (array $row): array {
+        $explanation = (string)($row['explanation'] ?? '');
         return [
             'id' => (string)($row['id'] ?? ''),
             'topic_id' => $row['topic_id'] ?? null,
@@ -146,7 +147,8 @@ try {
             'option_d' => (string)($row['option_d'] ?? ''),
             'option_e' => $row['option_e'] ?? null,
             'correct_answer' => (string)($row['correct_answer'] ?? ''),
-            'explanation' => (string)($row['explanation'] ?? ''),
+            'explanation' => $explanation,
+            'formatted_explanation' => format_explanation_text($explanation),
             'image_url' => $row['image_url'] ?? null,
             'difficulty' => $row['difficulty'] ?? null,
             'created_at' => $row['created_at'] ?? null,

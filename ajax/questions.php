@@ -141,6 +141,11 @@ try {
             $stmt->execute($params);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+            foreach ($rows as &$row) {
+                $row['formatted_explanation'] = format_explanation_text($row['explanation'] ?? '');
+            }
+            unset($row);
+
             $statusOptions = [];
             if ($hasStatus) {
                 $statusRows = $pdo->query('SELECT DISTINCT status FROM questions WHERE status IS NOT NULL AND status <> "" ORDER BY status ASC')->fetchAll(PDO::FETCH_COLUMN);

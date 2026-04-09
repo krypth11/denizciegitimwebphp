@@ -718,8 +718,10 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
             'is_answered' => $isAnswered,
         ];
         if ($withResultFields) {
+            $explanation = $aq['explanation'] ? ($r[$aq['explanation']] ?? null) : null;
             $item['correct_answer'] = $correct;
-            $item['explanation'] = $aq['explanation'] ? ($r[$aq['explanation']] ?? null) : null;
+            $item['explanation'] = $explanation;
+            $item['formatted_explanation'] = format_explanation_text((string)($explanation ?? ''));
             $item['image_url'] = null;
             $item['is_correct'] = $isCorrect;
             $item['is_blank'] = !$isAnswered;

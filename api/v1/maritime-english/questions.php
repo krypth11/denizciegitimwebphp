@@ -33,9 +33,12 @@ try {
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     $rows = array_map(static function (array $row): array {
+        $explanation = (string)($row['explanation'] ?? '');
         $row['correct_answer'] = strtoupper(trim((string)($row['correct_answer'] ?? '')));
         $optionE = trim((string)($row['option_e'] ?? ''));
         $row['option_e'] = ($optionE !== '') ? $optionE : null;
+        $row['explanation'] = $explanation;
+        $row['formatted_explanation'] = format_explanation_text($explanation);
         return $row;
     }, $rows);
 

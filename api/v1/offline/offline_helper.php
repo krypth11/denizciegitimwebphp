@@ -387,6 +387,7 @@ function offline_get_qualification_package_data(PDO $pdo, string $qualificationI
             'option_e' => $r['option_e'] ?? null,
             'correct_answer' => (string)($r['correct_answer'] ?? ''),
             'explanation' => (string)($r['explanation'] ?? ''),
+            'formatted_explanation' => format_explanation_text((string)($r['explanation'] ?? '')),
             'image_url' => $r['image_url'] ?? null,
             'updated_at' => $r['updated_at'] ?? null,
         ], $questions),

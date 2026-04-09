@@ -120,7 +120,12 @@ function dq_fetch_daily_questions(PDO $pdo, string $userId, int $limit): array
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$todaySeed]);
-    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    foreach ($rows as &$row) {
+        $row['formatted_explanation'] = format_explanation_text($row['explanation'] ?? '');
+    }
+    unset($row);
+    return $rows;
 }
 
 function dq_fetch_today_progress(PDO $pdo, string $userId): ?array

@@ -505,7 +505,7 @@ function renderAiPreview() {
                 </div>
                 <div class="row">
                   <div class="col-md-3"><label class="form-label">Doğru Cevap</label><select class="form-select ai-draft-field" data-index="${index}" data-field="correct_answer"><option ${q._draft.correct_answer==='A'?'selected':''}>A</option><option ${q._draft.correct_answer==='B'?'selected':''}>B</option><option ${q._draft.correct_answer==='C'?'selected':''}>C</option><option ${q._draft.correct_answer==='D'?'selected':''}>D</option><option ${q._draft.correct_answer==='E'?'selected':''}>E</option></select></div>
-                  <div class="col-md-9"><label class="form-label">Açıklama</label><input class="form-control ai-draft-field" data-index="${index}" data-field="explanation" value="${q._draft.explanation || ''}"></div>
+                  <div class="col-md-9"><label class="form-label">Açıklama</label><input class="form-control ai-draft-field" data-index="${index}" data-field="explanation" value="${esc(q._draft.explanation || '')}"></div>
                 </div>
                 <div class="mt-3">
                   <button class="btn btn-primary btn-sm ai-edit-save" data-index="${index}">Düzenlemeyi Onayla</button>
@@ -535,7 +535,10 @@ function renderAiPreview() {
                   <div class="col-md-6"><div class="p-2 rounded ${b('D')}">D) ${q.option_d || ''}</div></div>
                   ${q.option_e ? `<div class="col-md-6"><div class="p-2 rounded ${b('E')}">E) ${q.option_e || ''}</div></div>` : ''}
                 </div>
-                ${q.explanation ? `<div class="mt-2 text-muted"><small>${q.explanation}</small></div>` : ''}
+                ${(() => {
+                    const explanationHtml = formatExplanationHtml(q.explanation, q.formatted_explanation);
+                    return explanationHtml ? `<div class="mt-2 text-muted"><small class="explanation-preline">${explanationHtml}</small></div>` : '';
+                })()}
               </div>
             </div>`;
         }
@@ -662,6 +665,23 @@ $(document).ready(function() {
     };
 
     const esc = (v) => $('<div>').text(v ?? '').html();
+    const formatExplanationText = (value) => {
+        const raw = String(value ?? '');
+        if (!raw.trim()) return '';
+
+        let text = raw.replace(/\r\n?/g, '\n');
+        text = text.replace(/([.!?…])\s+([A-E]\)\s)/g, '$1\n\n$2');
+        text = text.replace(/([^\n])\s+([A-E]\)\s)/g, '$1\n$2');
+        text = text.replace(/([^\n])\s+(Doğru\s*Cevap\s*:)/gi, '$1\n\n$2');
+        text = text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+
+        return text;
+    };
+    const formatExplanationHtml = (raw, formattedRaw) => {
+        const source = String(formattedRaw ?? '') || formatExplanationText(raw);
+        if (!source.trim()) return '';
+        return esc(source).replace(/\n/g, '<br>');
+    };
     const qState = {
         qualifications: [],
         courses: [],
