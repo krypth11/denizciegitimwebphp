@@ -942,8 +942,30 @@ function sanitizeLatexBulkFieldValue(value, options = {}) {
         .replace(/\r\n?/g, '\n')
         .replace(/\u00A0/g, ' ')
         .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
-        .replace(/[ \t]+\n/g, '\n')
-        .trim();
+        .replace(/[ \t]+\n/g, '\n');
+
+    const preserveMultiline = !!opts.preserveMultiline;
+
+    if (!preserveMultiline) {
+        text = text.trim();
+    } else {
+        const lines = text.split('\n');
+        const out = [];
+        let blankCount = 0;
+        for (const raw of lines) {
+            const line = String(raw || '').replace(/[ \t]+$/g, '');
+            if (!line.trim()) {
+                blankCount += 1;
+                if (blankCount <= 2 && out.length) out.push('');
+                continue;
+            }
+            blankCount = 0;
+            out.push(line);
+        }
+        while (out.length && !String(out[0] || '').trim()) out.shift();
+        while (out.length && !String(out[out.length - 1] || '').trim()) out.pop();
+        text = out.join('\n');
+    }
 
     if (opts.allowBlockMath !== false) {
         const bracketConverted = convertBracketLatexToCanonicalLatex(text);
@@ -961,7 +983,11 @@ function sanitizeLatexBulkFieldValue(value, options = {}) {
 
 function sanitizeLatexBulkParsedQuestion(question) {
     const q = { ...(question || {}) };
-    q.question_text = sanitizeLatexBulkFieldValue(q.question_text, { allowBlockMath: true, inlineMath: false });
+    q.question_text = sanitizeLatexBulkFieldValue(q.question_text, {
+        allowBlockMath: true,
+        inlineMath: false,
+        preserveMultiline: true,
+    });
     q.option_a = sanitizeLatexBulkFieldValue(q.option_a, { allowBlockMath: true, inlineMath: true });
     q.option_b = sanitizeLatexBulkFieldValue(q.option_b, { allowBlockMath: true, inlineMath: true });
     q.option_c = sanitizeLatexBulkFieldValue(q.option_c, { allowBlockMath: true, inlineMath: true });
@@ -998,6 +1024,27 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
 
         while (out.length && !String(out[out.length - 1]).trim()) out.pop();
         return out.join('\n').trim();
+    };
+
+    const normalizeQuestionField = (txt) => {
+        const lines = String(txt || '').replace(/\r\n?/g, '\n').split('\n');
+        const out = [];
+        let blankCount = 0;
+
+        for (const raw of lines) {
+            const line = String(raw || '').replace(/[ \t]+$/g, '');
+            if (!line.trim()) {
+                blankCount += 1;
+                if (blankCount <= 2 && out.length) out.push('');
+                continue;
+            }
+            blankCount = 0;
+            out.push(line);
+        }
+
+        while (out.length && !String(out[0] || '').trim()) out.shift();
+        while (out.length && !String(out[out.length - 1] || '').trim()) out.pop();
+        return out.join('\n');
     };
 
     const cleanOptionText = (txt) => normalizeField((txt || '')
@@ -1084,6 +1131,13 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         return '';
     };
 
+    const getExplicitCorrectAnswerFromLine = (line) => {
+        const t = String(line || '').trim();
+        if (!t) return '';
+        const m = t.match(/^doğru\s*cevap\s*:\s*([ABCDE])\s*[\)\.]?\s*$/i);
+        return m ? m[1].toUpperCase() : '';
+    };
+
     const fullText = String(normalizedText || '').trim();
     const result = {
         parsed: [],
@@ -1101,6 +1155,7 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
             blocks_with_explanation: 0,
             blocks_with_answer: 0,
             parsed_question_count: 0,
+            questions: [],
         }
     };
 
@@ -1209,6 +1264,7 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         let stage = 'question'; // question | option | explanation
         let currentOption = '';
         let explicitCorrect = '';
+        let answerSource = '';
         let inferredCorrect = '';
         let optionFoundCount = 0;
         let explanationFound = false;
@@ -1224,10 +1280,12 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
                 continue;
             }
 
-            const directAnswer = getCorrectFromLine(trimmed);
-            if (directAnswer && /^doğru\s*cevap|^cevap\s*:/i.test(trimmed)) {
-                explicitCorrect = directAnswer;
+            const explicitAnswerFromLine = getExplicitCorrectAnswerFromLine(trimmed);
+            if (explicitAnswerFromLine) {
+                explicitCorrect = explicitAnswerFromLine;
+                answerSource = 'final_correct_line';
                 stage = 'explanation';
+                currentOption = '';
                 continue;
             }
 
@@ -1254,15 +1312,15 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
             }
 
             if (stage === 'explanation') {
-                explanationLines.push(trimmed);
+                explanationLines.push(line.replace(/[ \t]+$/g, ''));
             } else if (stage === 'option' && currentOption) {
-                options[currentOption].push(trimmed);
+                options[currentOption].push(line.replace(/[ \t]+$/g, ''));
             } else {
-                questionLines.push(trimmed);
+                questionLines.push(line.replace(/[ \t]+$/g, ''));
             }
         }
 
-        const questionText = normalizeField(questionLines.join('\n'));
+        const questionText = normalizeQuestionField(questionLines.join('\n'));
         const normalizedOptions = {
             A: cleanOptionText(options.A.join('\n')),
             B: cleanOptionText(options.B.join('\n')),
@@ -1276,10 +1334,23 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         if (explanationFound || explanation) result.debug.blocks_with_explanation += 1;
 
         let correctAnswer = (explicitCorrect || inferredCorrect || answerMap[block.number] || '').toUpperCase();
+        if (!answerSource && correctAnswer && answerMap[block.number] === correctAnswer) {
+            answerSource = 'answer_key';
+        }
         if (!correctAnswer && explanation) {
             correctAnswer = getCorrectFromLine(explanation);
+            if (correctAnswer) answerSource = 'explanation_sentence';
         }
+        if (!answerSource && inferredCorrect) answerSource = 'option_marker';
         if (correctAnswer) result.debug.blocks_with_answer += 1;
+
+        result.debug.questions.push({
+            number: block.number,
+            question_text_line_count: questionText ? questionText.split('\n').length : 0,
+            explanation_line_count: explanation ? explanation.split('\n').length : 0,
+            options_found: Object.keys(normalizedOptions).filter((k) => !!normalizedOptions[k]).map((k) => k),
+            answer_source: answerSource || '',
+        });
 
         const isValid =
             questionText.length > 0 &&
@@ -1466,6 +1537,7 @@ function renderAiPreview() {
             </div>`;
         } else {
             const b = (letter) => q.correct_answer === letter ? 'bg-success text-white' : 'bg-light';
+            const questionHtml = esc(String(q.question_text || '')).replace(/\n/g, '<br>');
             html += `
             <div class="card mb-3 ai-card ${cardClass}">
               <div class="card-header d-flex justify-content-between align-items-center">
@@ -1478,7 +1550,7 @@ function renderAiPreview() {
                 </div>
               </div>
               <div class="card-body">
-                <div class="mb-2"><strong>Soru:</strong> ${q.question_text || ''}</div>
+                <div class="mb-2"><strong>Soru:</strong><div class="mt-1">${questionHtml}</div></div>
                 <div class="row g-2">
                   <div class="col-md-6"><div class="p-2 rounded ${b('A')}">A) ${q.option_a || ''}</div></div>
                   <div class="col-md-6"><div class="p-2 rounded ${b('B')}">B) ${q.option_b || ''}</div></div>
@@ -2327,6 +2399,13 @@ $(document).ready(function() {
             });
             return appAlert('Hata', buildLatexParseErrorMessage(parsedResult), 'error');
         }
+
+        console.log('LATEX_PARSE_DEBUG_SUMMARY', {
+            parsed_count: parsedResult.parsed_count,
+            skipped_count: parsedResult.skipped_count,
+            total_blocks: parsedResult.total_blocks,
+            per_question: parsedResult?.debug?.questions || []
+        });
 
         generatedQuestions = parsedResult.parsed.map((q) => sanitizeLatexBulkParsedQuestion(q));
         generationMeta = {
