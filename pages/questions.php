@@ -830,12 +830,57 @@ function convertInlineParentheticalMathToCanonicalLatex(text) {
         return true;
     };
 
-    return String(text || '').replace(/\(([^()\n]+)\)/g, (full, inside) => {
+    return String(text || '').replace(/(^|[^\\])\(([^()\n]+)\)/g, (full, prefix, inside) => {
         const inner = String(inside || '').trim();
         if (!inner) return full;
         if (!looksMathLikeParenthetical(inner)) return full;
-        return `\\(${inner}\\)`;
+        return `${prefix}\\(${inner}\\)`;
     });
+}
+
+function normalizeLatexEscapesForStorage(value) {
+    let text = String(value ?? '');
+
+    // Önce boşluklu/çift kaçışlı delimiter kalıplarını toparla (örn: "\\ \(" -> "\(")
+    text = text.replace(/\\{2,}\s*\\([\[\]\(\)])/g, '\\$1');
+    // Delimiter önünde istemsiz fazla kaçışları tek canonical hale indir
+    text = text.replace(/\\{2,}([\[\]\(\)])/g, '\\$1');
+
+    const latexCommands = [
+        'text', 'approx', 'qquad', 'eta', 'Delta', 'pi', 'frac', 'times', 'circ'
+    ];
+    const cmdGroup = latexCommands.join('|');
+    const cmdRegexWithInnerSlash = new RegExp('\\\\{2,}\\\\(' + cmdGroup + ')(?=\\b|[^A-Za-z])', 'g');
+    const cmdRegex = new RegExp('\\\\{2,}(' + cmdGroup + ')(?=\\b|[^A-Za-z])', 'g');
+    text = text.replace(cmdRegexWithInnerSlash, '\\$1');
+    text = text.replace(cmdRegex, '\\$1');
+
+    return text;
+}
+
+function sanitizeCanonicalLatexString(value) {
+    let text = String(value ?? '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/\u00A0/g, ' ')
+        .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '');
+
+    text = normalizeLatexEscapesForStorage(text);
+    return text;
+}
+
+function detectEmptyCanonicalMathBlock(text) {
+    const source = String(text ?? '');
+    const blockMatch = source.match(/\\\[\s*\\\]/);
+    if (blockMatch) {
+        return { type: 'block', index: blockMatch.index ?? -1 };
+    }
+
+    const inlineMatch = source.match(/\\\(\s*\\\)/);
+    if (inlineMatch) {
+        return { type: 'inline', index: inlineMatch.index ?? -1 };
+    }
+
+    return null;
 }
 
 function canonicalizeLatexBulkInput(normalizedText) {
@@ -855,23 +900,39 @@ function canonicalizeLatexBulkInput(normalizedText) {
         if (optionMatch) {
             const prefix = optionMatch[1] || '';
             const rest = optionMatch[2] || '';
-            return prefix + convertInlineParentheticalMathToCanonicalLatex(rest);
+            const converted = prefix + convertInlineParentheticalMathToCanonicalLatex(rest);
+            return sanitizeCanonicalLatexString(converted);
         }
 
         const correctLineMatch = String(line || '').match(/^(\s*Doğru\s*Cevap\s*:\s*[ABCDE]\s*\)\s*)(.*)$/i);
         if (correctLineMatch) {
             const prefix = correctLineMatch[1] || '';
             const rest = correctLineMatch[2] || '';
-            return prefix + convertInlineParentheticalMathToCanonicalLatex(rest);
+            const converted = prefix + convertInlineParentheticalMathToCanonicalLatex(rest);
+            return sanitizeCanonicalLatexString(converted);
         }
 
-        return line;
+        return sanitizeCanonicalLatexString(line);
     });
+
+    const canonicalText = sanitizeCanonicalLatexString(convertedLines.join('\n'));
+    const emptyMathIssue = detectEmptyCanonicalMathBlock(canonicalText);
+    if (emptyMathIssue) {
+        return {
+            success: false,
+            error_code: 'empty_math_block',
+            canonical_text: '',
+            debug: {
+                math_type: emptyMathIssue.type,
+                index: emptyMathIssue.index,
+            }
+        };
+    }
 
     return {
         success: true,
         error_code: '',
-        canonical_text: convertedLines.join('\n')
+        canonical_text: canonicalText
     };
 }
 
@@ -891,9 +952,9 @@ function sanitizeLatexBulkFieldValue(value, options = {}) {
         }
     }
 
-    if (opts.inlineMath) {
-        text = convertInlineParentheticalMathToCanonicalLatex(text);
-    }
+    if (opts.inlineMath) text = convertInlineParentheticalMathToCanonicalLatex(text);
+
+    text = sanitizeCanonicalLatexString(text);
 
     return text;
 }
@@ -1318,6 +1379,12 @@ function buildLatexNormalizeErrorMessage(normalizeResult) {
     if (errorCode === 'unexpected_bracket_latex_block_end') {
         const lineNo = Number(normalizeResult?.debug?.line || 0);
         return `Beklenmeyen "]" satırı bulundu${lineNo ? ` (satır ${lineNo})` : ''}. Tek başına "]" yalnızca açık bir "[" bloğunu kapatmalıdır.`;
+    }
+    if (errorCode === 'empty_math_block') {
+        const mathType = String(normalizeResult?.debug?.math_type || 'inline');
+        return mathType === 'block'
+            ? 'Boş bir block math ifadesi tespit edildi ("\\[ \\]"). Lütfen blok içine geçerli LaTeX yazın.'
+            : 'Boş bir inline math ifadesi tespit edildi ("\\( \\)"). Lütfen parantez içine geçerli LaTeX yazın.';
     }
 
     return 'LaTeX import metni işlenemedi. Lütfen formatı kontrol edip tekrar deneyin.';
