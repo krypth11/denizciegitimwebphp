@@ -546,143 +546,271 @@ function parseLatexBulkQuestions(rawText, selectedType, selectedCourseId, select
     const normalizeInputText = (txt) => stripInvisibleChars(txt)
         .replace(/\u00A0/g, ' ')
         .replace(/\r\n?/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[\f\v]+/g, '\n')
+        .replace(/\n{4,}/g, '\n\n\n')
         .trim();
 
-    const normalizeMultiline = (txt) => String(txt || '')
-        .replace(/\r\n?/g, '\n')
-        .replace(/[ \t]+\n/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
+    const normalizeField = (txt) => {
+        const lines = String(txt || '').replace(/\r\n?/g, '\n').split('\n');
+        const out = [];
+        let prevNormalized = null;
+        let blankCount = 0;
 
-    const cleanOptionText = (txt) => normalizeMultiline((txt || '')
+        for (const raw of lines) {
+            const line = String(raw || '').replace(/[ \t]+$/g, '');
+            const normalized = line.trim();
+            if (!normalized) {
+                blankCount += 1;
+                if (blankCount <= 1 && out.length) out.push('');
+                continue;
+            }
+
+            blankCount = 0;
+            if (prevNormalized && prevNormalized === normalized) {
+                // Render'dan gelen birebir tekrar satırları sadeleştir
+                continue;
+            }
+
+            out.push(normalized);
+            prevNormalized = normalized;
+        }
+
+        while (out.length && !String(out[out.length - 1]).trim()) out.pop();
+        return out.join('\n').trim();
+    };
+
+    const cleanOptionText = (txt) => normalizeField((txt || '')
         .replace(/\(\s*doğru\s*\)/ig, '')
         .replace(/^[*✓✔]+\s*/, ''));
 
+    const isDividerLine = (line) => /^\s*(⸻+|[-–—]{3,})\s*$/.test(line || '');
+    const getQuestionStart = (line) => {
+        const m = String(line || '').trim().match(/^(\d+)\.(.*)$/);
+        if (!m) return null;
+        return { number: parseInt(m[1], 10), rest: (m[2] || '').trim() };
+    };
+    const getOptionStart = (line) => {
+        const m = String(line || '').trim().match(/^([ABCDE])\s*\)\s*(.*)$/i);
+        if (!m) return null;
+        return { letter: m[1].toUpperCase(), rest: (m[2] || '').trim() };
+    };
+    const getExplanationStart = (line) => {
+        const m = String(line || '').trim().match(/^a[çc]ıklama\s*:?\s*(.*)$/i);
+        if (!m) return null;
+        return { rest: (m[1] || '').trim() };
+    };
+    const getCorrectFromLine = (line) => {
+        const t = String(line || '').trim();
+        if (!t) return '';
+
+        const direct = t.match(/^doğru\s*cevap\s*:?\s*([ABCDE])\s*[\)\.]?\s*$/i);
+        if (direct) return direct[1].toUpperCase();
+
+        const altDirect = t.match(/^cevap\s*:?\s*([ABCDE])\s*[\)\.]?\s*$/i);
+        if (altDirect) return altDirect[1].toUpperCase();
+
+        const inSentence = t.match(/doğru\s*cevap\s*[:\-]?\s*([ABCDE])\b/i)
+            || t.match(/([ABCDE])\s*seçene(?:ğ|g)i(?:dir|\s*doğrudur)?/i);
+        if (inSentence) return (inSentence[1] || '').toUpperCase();
+
+        return '';
+    };
+
     const fullText = normalizeInputText(rawText || '');
-    const result = { parsed: [], parsed_count: 0, skipped_count: 0, total_blocks: 0 };
+    const result = {
+        parsed: [],
+        parsed_count: 0,
+        skipped_count: 0,
+        total_blocks: 0,
+        error_code: '',
+        debug: {
+            question_start_count: 0,
+            candidate_blocks: 0,
+            blocks_with_options: 0,
+            blocks_with_explanation: 0,
+            blocks_with_answer: 0,
+        }
+    };
 
     if (!fullText) {
+        result.error_code = 'empty_input';
         return result;
     }
 
-    const normalizedBlocksText = fullText
-        .replace(/^\s*⸻+\s*$/gm, '')
-        .replace(/^\s*[-–—]{3,}\s*$/gm, '');
-
-    const lines = normalizedBlocksText.split('\n');
-    const blocks = [];
-    let currentBlockLines = [];
-
-    for (const rawLine of lines) {
-        const line = (rawLine || '').trim();
-        if (!line) {
-            if (currentBlockLines.length) currentBlockLines.push('');
-            continue;
+    // Cevap anahtarı fallback (ör: 1-A, 2-B)
+    const answerMap = {};
+    const allLines = fullText.split('\n');
+    let inAnswerKey = false;
+    allLines.forEach((rawLine) => {
+        const line = String(rawLine || '').trim();
+        if (!line) return;
+        if (/^cevap\s+anahtar[ıi]\s*:?\s*$/i.test(line)) {
+            inAnswerKey = true;
+            return;
         }
+        if (!inAnswerKey) return;
 
-        const questionStartMatch = line.match(/^\s*(\d+)\s*[\.)]\s*(.*)$/);
-        if (questionStartMatch) {
-            if (currentBlockLines.length) {
-                blocks.push(currentBlockLines.join('\n').trim());
-                currentBlockLines = [];
-            }
-            const firstLineBody = (questionStartMatch[2] || '').trim();
-            if (firstLineBody) {
-                currentBlockLines.push(firstLineBody);
-            }
-            continue;
+        const m = line.match(/^(\d+)\s*[-.).:]\s*([ABCDE])\s*$/i);
+        if (m) {
+            answerMap[parseInt(m[1], 10)] = m[2].toUpperCase();
         }
+    });
 
-        if (currentBlockLines.length) {
-            currentBlockLines.push(line);
+    const lines = allLines;
+    const questionStartIndexes = [];
+    for (let i = 0; i < lines.length; i++) {
+        if (getQuestionStart(lines[i])) {
+            questionStartIndexes.push(i);
         }
     }
+    result.debug.question_start_count = questionStartIndexes.length;
 
-    if (currentBlockLines.length) {
-        blocks.push(currentBlockLines.join('\n').trim());
+    if (!questionStartIndexes.length) {
+        result.error_code = 'no_question_start';
+        return result;
+    }
+
+    const likelyQuestionStart = (startIndex) => {
+        let optionHits = 0;
+        const seen = new Set();
+
+        for (let i = startIndex + 1; i < lines.length && i <= startIndex + 60; i++) {
+            const row = String(lines[i] || '').trim();
+            if (!row) continue;
+            if (isDividerLine(row)) break;
+            if (getQuestionStart(row)) break;
+
+            const opt = getOptionStart(row);
+            if (opt) {
+                if (!seen.has(opt.letter)) {
+                    seen.add(opt.letter);
+                    optionHits += 1;
+                }
+                if (optionHits >= 2) return true;
+            }
+        }
+
+        return optionHits >= 2;
+    };
+
+    const blocks = [];
+    let currentBlock = null;
+
+    for (let i = 0; i < lines.length; i++) {
+        const originalLine = String(lines[i] ?? '');
+        const trimmed = originalLine.trim();
+
+        const qStart = getQuestionStart(trimmed);
+        const canStart = qStart && likelyQuestionStart(i);
+
+        if (canStart) {
+            if (currentBlock && currentBlock.lines.length) {
+                blocks.push(currentBlock);
+            }
+            currentBlock = {
+                number: qStart.number,
+                lines: qStart.rest ? [qStart.rest] : []
+            };
+            continue;
+        }
+
+        if (!currentBlock) continue;
+        if (isDividerLine(trimmed)) continue;
+
+        currentBlock.lines.push(originalLine.replace(/[ \t]+$/g, ''));
+    }
+
+    if (currentBlock && currentBlock.lines.length) {
+        blocks.push(currentBlock);
     }
 
     result.total_blocks = blocks.length;
+    result.debug.candidate_blocks = blocks.length;
+
     if (!blocks.length) {
+        result.error_code = 'no_candidate_block';
         return result;
     }
 
-    for (const blockText of blocks) {
-        const blockLines = blockText.split('\n').map((line) => line.trim());
+    for (const block of blocks) {
         const options = { A: [], B: [], C: [], D: [], E: [] };
-
         const questionLines = [];
         const explanationLines = [];
-        let currentOption = null;
-        let inExplanation = false;
+
+        let stage = 'question'; // question | option | explanation
+        let currentOption = '';
         let explicitCorrect = '';
         let inferredCorrect = '';
+        let optionFoundCount = 0;
+        let explanationFound = false;
 
-        for (const rawLine of blockLines) {
-            const line = (rawLine || '').trim();
-            if (!line) {
-                if (inExplanation) explanationLines.push('');
-                else if (currentOption) options[currentOption].push('');
+        for (const rawLine of block.lines) {
+            const line = String(rawLine || '');
+            const trimmed = line.trim();
+
+            if (!trimmed) {
+                if (stage === 'explanation') explanationLines.push('');
+                else if (stage === 'option' && currentOption) options[currentOption].push('');
                 else questionLines.push('');
                 continue;
             }
 
-            const correctLineMatch = line.match(/^doğru\s*cevap\s*:\s*([ABCDE])\s*[\)\.]?\s*$/i);
-            if (correctLineMatch) {
-                explicitCorrect = (correctLineMatch[1] || '').toUpperCase();
+            const directAnswer = getCorrectFromLine(trimmed);
+            if (directAnswer && /^doğru\s*cevap|^cevap\s*:/i.test(trimmed)) {
+                explicitCorrect = directAnswer;
+                stage = 'explanation';
                 continue;
             }
 
-            const explanationStartMatch = line.match(/^açıklama\s*:\s*(.*)$/i);
-            if (explanationStartMatch) {
-                inExplanation = true;
-                currentOption = null;
-                const firstExplanationLine = (explanationStartMatch[1] || '').trim();
-                if (firstExplanationLine) explanationLines.push(firstExplanationLine);
+            const explanationStart = getExplanationStart(trimmed);
+            if (explanationStart) {
+                stage = 'explanation';
+                currentOption = '';
+                explanationFound = true;
+                if (explanationStart.rest) explanationLines.push(explanationStart.rest);
                 continue;
             }
 
-            const optionMatch = !inExplanation
-                ? line.match(/^[\s\-–—•\*]*([ABCDE])\s*[\)\.\-:]\s*(.*)$/i)
-                : null;
-
-            if (optionMatch) {
-                currentOption = optionMatch[1].toUpperCase();
-                let optionText = optionMatch[2] || '';
-                if (/^\s*[*✓✔]/.test(optionText) || /\(\s*doğru\s*\)/i.test(optionText)) {
+            const optionStart = stage !== 'explanation' ? getOptionStart(trimmed) : null;
+            if (optionStart) {
+                stage = 'option';
+                currentOption = optionStart.letter;
+                optionFoundCount += 1;
+                const optText = cleanOptionText(optionStart.rest || '');
+                if (optText) options[currentOption].push(optText);
+                if (/^\s*[*✓✔]/.test(optionStart.rest || '') || /\(\s*doğru\s*\)/i.test(optionStart.rest || '')) {
                     inferredCorrect = currentOption;
                 }
-                options[currentOption].push(cleanOptionText(optionText));
                 continue;
             }
 
-            if (inExplanation) {
-                explanationLines.push(line);
-            } else if (currentOption) {
-                options[currentOption].push(line);
+            if (stage === 'explanation') {
+                explanationLines.push(trimmed);
+            } else if (stage === 'option' && currentOption) {
+                options[currentOption].push(trimmed);
             } else {
-                questionLines.push(line);
+                questionLines.push(trimmed);
             }
         }
 
-        const questionText = normalizeMultiline(questionLines.join('\n'));
-        const explanation = normalizeMultiline(explanationLines.join('\n'));
-        const correctAnswer = (explicitCorrect || inferredCorrect || '').toUpperCase();
-
+        const questionText = normalizeField(questionLines.join('\n'));
         const normalizedOptions = {
-            A: normalizeMultiline(options.A.join('\n')),
-            B: normalizeMultiline(options.B.join('\n')),
-            C: normalizeMultiline(options.C.join('\n')),
-            D: normalizeMultiline(options.D.join('\n')),
-            E: normalizeMultiline(options.E.join('\n')),
+            A: cleanOptionText(options.A.join('\n')),
+            B: cleanOptionText(options.B.join('\n')),
+            C: cleanOptionText(options.C.join('\n')),
+            D: cleanOptionText(options.D.join('\n')),
+            E: cleanOptionText(options.E.join('\n')),
         };
+        const explanation = normalizeField(explanationLines.join('\n'));
 
-        normalizedOptions.A = cleanOptionText(normalizedOptions.A);
-        normalizedOptions.B = cleanOptionText(normalizedOptions.B);
-        normalizedOptions.C = cleanOptionText(normalizedOptions.C);
-        normalizedOptions.D = cleanOptionText(normalizedOptions.D);
-        normalizedOptions.E = cleanOptionText(normalizedOptions.E);
+        if (optionFoundCount > 0) result.debug.blocks_with_options += 1;
+        if (explanationFound || explanation) result.debug.blocks_with_explanation += 1;
+
+        let correctAnswer = (explicitCorrect || inferredCorrect || answerMap[block.number] || '').toUpperCase();
+        if (!correctAnswer && explanation) {
+            correctAnswer = getCorrectFromLine(explanation);
+        }
+        if (correctAnswer) result.debug.blocks_with_answer += 1;
 
         const isValid =
             questionText.length > 0 &&
@@ -712,7 +840,43 @@ function parseLatexBulkQuestions(rawText, selectedType, selectedCourseId, select
     }
 
     result.parsed_count = result.parsed.length;
+
+    if (!result.parsed_count) {
+        if (result.debug.blocks_with_options === 0) {
+            result.error_code = 'no_option_marker';
+        } else if (result.debug.blocks_with_answer === 0 && Object.keys(answerMap).length === 0) {
+            result.error_code = 'no_correct_answer';
+        } else {
+            result.error_code = 'blocks_invalid';
+        }
+    }
+
     return result;
+}
+
+function buildLatexParseErrorMessage(parsedResult) {
+    const errorCode = parsedResult?.error_code || '';
+    const debug = parsedResult?.debug || {};
+
+    if (errorCode === 'empty_input') {
+        return 'Metin boş görünüyor. Lütfen LaTeX soru içeriğini yapıştırın.';
+    }
+    if (errorCode === 'no_question_start') {
+        return 'Soru başlangıcı bulunamadı. Her soru satırı "1." / "2." formatında başlamalıdır.';
+    }
+    if (errorCode === 'no_candidate_block') {
+        return 'Soru blokları tespit edilemedi. Numaralı satırlardan sonra en az A) ve B) seçeneklerini kontrol edin.';
+    }
+    if (errorCode === 'no_option_marker') {
+        return 'Seçenek markerları bulunamadı. Şıkları satır başında A) B) C) D) (opsiyonel E)) formatında yazın.';
+    }
+    if (errorCode === 'no_correct_answer') {
+        return 'Doğru cevap tespit edilemedi. "Doğru Cevap: X)" satırı veya uygun cevap anahtarı ekleyin.';
+    }
+
+    const blockCount = Number(parsedResult?.total_blocks || 0);
+    const optionBlocks = Number(debug?.blocks_with_options || 0);
+    return `Hiç soru ayrıştırılamadı. ${blockCount} aday blok bulundu, ${optionBlocks} blokta seçenek işareti tespit edildi. Formatı (1., A)-E), Açıklama:, Doğru Cevap:) kontrol edin.`;
 }
 
 function statusCounts() {
@@ -1629,7 +1793,8 @@ $(document).ready(function() {
 
         const parsedResult = parseLatexBulkQuestions(rawText, questionType, courseId, topicId);
         if (!parsedResult.parsed_count) {
-            return appAlert('Hata', 'Hiç soru ayrıştırılamadı. LaTeX formatını ve soru bloklarını kontrol edin (1., A)-E), Açıklama:, Doğru Cevap:).', 'error');
+            console.log('LATEX_PARSE_DEBUG', parsedResult);
+            return appAlert('Hata', buildLatexParseErrorMessage(parsedResult), 'error');
         }
 
         generatedQuestions = parsedResult.parsed;
