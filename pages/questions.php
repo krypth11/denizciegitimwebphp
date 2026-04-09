@@ -282,6 +282,29 @@ let generatedQuestions = [];
 let coursesData = JSON.parse(document.getElementById('courses-data-json').textContent);
 let generationMeta = null;
 
+function qEsc(value) {
+    return $('<div>').text(value ?? '').html();
+}
+
+function formatExplanationTextForPreview(value) {
+    const raw = String(value ?? '');
+    if (!raw.trim()) return '';
+
+    let text = raw.replace(/\r\n?/g, '\n');
+    text = text.replace(/([.!?…])\s+([A-E]\)\s)/g, '$1\n\n$2');
+    text = text.replace(/([^\n])\s+([A-E]\)\s)/g, '$1\n$2');
+    text = text.replace(/([^\n])\s+(Doğru\s*Cevap\s*:)/gi, '$1\n\n$2');
+    text = text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+
+    return text;
+}
+
+function formatExplanationHtmlForPreview(raw, formattedRaw) {
+    const source = String(formattedRaw ?? '') || formatExplanationTextForPreview(raw);
+    if (!source.trim()) return '';
+    return qEsc(source).replace(/\n/g, '<br>');
+}
+
 function normalizeCount(v) {
     const n = parseInt(v, 10);
     if (Number.isNaN(n) || n < 1 || n > 100) return null;
@@ -505,7 +528,7 @@ function renderAiPreview() {
                 </div>
                 <div class="row">
                   <div class="col-md-3"><label class="form-label">Doğru Cevap</label><select class="form-select ai-draft-field" data-index="${index}" data-field="correct_answer"><option ${q._draft.correct_answer==='A'?'selected':''}>A</option><option ${q._draft.correct_answer==='B'?'selected':''}>B</option><option ${q._draft.correct_answer==='C'?'selected':''}>C</option><option ${q._draft.correct_answer==='D'?'selected':''}>D</option><option ${q._draft.correct_answer==='E'?'selected':''}>E</option></select></div>
-                  <div class="col-md-9"><label class="form-label">Açıklama</label><input class="form-control ai-draft-field" data-index="${index}" data-field="explanation" value="${esc(q._draft.explanation || '')}"></div>
+                  <div class="col-md-9"><label class="form-label">Açıklama</label><input class="form-control ai-draft-field" data-index="${index}" data-field="explanation" value="${qEsc(q._draft.explanation || '')}"></div>
                 </div>
                 <div class="mt-3">
                   <button class="btn btn-primary btn-sm ai-edit-save" data-index="${index}">Düzenlemeyi Onayla</button>
@@ -536,7 +559,7 @@ function renderAiPreview() {
                   ${q.option_e ? `<div class="col-md-6"><div class="p-2 rounded ${b('E')}">E) ${q.option_e || ''}</div></div>` : ''}
                 </div>
                 ${(() => {
-                    const explanationHtml = formatExplanationHtml(q.explanation, q.formatted_explanation);
+                    const explanationHtml = formatExplanationHtmlForPreview(q.explanation, q.formatted_explanation);
                     return explanationHtml ? `<div class="mt-2 text-muted"><small class="explanation-preline">${explanationHtml}</small></div>` : '';
                 })()}
               </div>
