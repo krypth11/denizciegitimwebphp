@@ -293,7 +293,7 @@ Cevap Anahtarı
 <?php
 $extra_js = <<<'JAVASCRIPT'
 <script>
-window.__QUESTIONS_PAGE_VERSION__ = 'LATEX-QUESTIONS-1';
+window.__QUESTIONS_PAGE_VERSION__ = 'LATEX-QUESTIONS-2-STRUCTURED';
 console.log('QUESTIONS PAGE VERSION', window.__QUESTIONS_PAGE_VERSION__);
 
 let generatedQuestions = [];
@@ -340,6 +340,204 @@ function renderKatexInContainer(rootEl) {
     });
 }
 
+const STRUCTURED_PREVIEW_HEADING_KEYWORDS = [
+    'açıklama',
+    'çözüm',
+    'sonuç',
+    'cevap',
+    'doğru cevap',
+    'yakıtın alt ısıl değeri',
+    'efektif termik verim',
+    'önce strok hacmi',
+    'toplam strok hacmi',
+    'indike güç',
+    'efektif güç'
+];
+
+function normalizeStructuredPreviewText(rawValue, { isExplanation = false } = {}) {
+    const raw = String(rawValue ?? '');
+    if (!raw.trim()) return '';
+
+    const normalized = raw.replace(/\r\n?/g, '\n');
+    const prepared = isExplanation ? formatExplanationTextForPreview(normalized) : normalized;
+    return prepared.trim();
+}
+
+function lineHasLatexDelimiter(text) {
+    return /\\\(|\\\[/.test(String(text || ''));
+}
+
+function isHeadingLikeLine(line) {
+    const t = String(line || '').trim();
+    if (!t) return false;
+
+    const lower = t.toLocaleLowerCase('tr-TR');
+    if (STRUCTURED_PREVIEW_HEADING_KEYWORDS.some((k) => lower === k || lower === `${k}:`)) {
+        return true;
+    }
+
+    if (!/:$/u.test(t)) return false;
+
+    const plain = t.replace(/:$/u, '').trim();
+    if (!plain) return false;
+    if (/^[A-E]\)\s/u.test(plain)) return false;
+
+    const wordCount = (plain.match(/\S+/g) || []).length;
+    return wordCount > 0 && wordCount <= 8 && plain.length <= 70;
+}
+
+function isLikelyMathLine(line) {
+    const t = String(line || '').trim();
+    if (!t) return false;
+    if (/^[A-E]\)\s/u.test(t)) return false;
+
+    if (/\\\[|\\\]/.test(t)) return true;
+    if (/\\(frac|sqrt|sum|int|alpha|beta|gamma|delta|theta|lambda|pi|cdot|times|left|right|mathrm|text|eta|mu|sigma|omega)\b/i.test(t)) {
+        return true;
+    }
+
+    const symbolCount = (t.match(/[=+\-*/^_<>≤≥∑∫√%]/g) || []).length;
+    const wordCount = (t.match(/[A-Za-zÇĞİÖŞÜçğıöşü]+/g) || []).length;
+    const digitCount = (t.match(/[0-9]/g) || []).length;
+
+    if (symbolCount >= 2 && wordCount <= 8 && t.length <= 130) return true;
+    if (symbolCount >= 1 && digitCount >= 1 && wordCount <= 6 && t.length <= 110) return true;
+
+    return false;
+}
+
+function classifyStructuredPreviewLine(line) {
+    const trimmed = String(line || '').trim();
+    if (!trimmed) return { type: 'spacer', text: '' };
+
+    const optionMatch = trimmed.match(/^([A-E])\)\s*(.*)$/u);
+    if (optionMatch) {
+        return {
+            type: 'option_line',
+            label: optionMatch[1],
+            text: (optionMatch[2] || '').trim() || '-'
+        };
+    }
+
+    if (/^(doğru\s*cevap|cevap|sonuç)\s*:?/iu.test(trimmed)) {
+        return { type: 'result_line', text: trimmed };
+    }
+
+    if (isHeadingLikeLine(trimmed)) {
+        return { type: 'heading_like_line', text: trimmed };
+    }
+
+    if (isLikelyMathLine(trimmed)) {
+        return { type: 'math_block', text: trimmed };
+    }
+
+    return { type: 'paragraph', text: trimmed };
+}
+
+function buildStructuredPreviewHtml(rawValue, options = {}) {
+    const {
+        isExplanation = false,
+        docClass = '',
+    } = options;
+
+    const prepared = normalizeStructuredPreviewText(rawValue, { isExplanation });
+    if (!prepared) {
+        return '<div class="latex-preview-empty">İçerik yok</div>';
+    }
+
+    const lines = prepared.split('\n');
+    const blocks = [];
+    let displayMathBuffer = [];
+    let hasSpacer = false;
+
+    const flushDisplayMath = () => {
+        if (!displayMathBuffer.length) return;
+        blocks.push({ type: 'math_block', text: displayMathBuffer.join('\n').trim() });
+        displayMathBuffer = [];
+    };
+
+    lines.forEach((line) => {
+        const trimmed = line.trim();
+
+        if (displayMathBuffer.length > 0) {
+            displayMathBuffer.push(trimmed);
+            if (/\\\]/.test(trimmed)) {
+                flushDisplayMath();
+            }
+            return;
+        }
+
+        if (/\\\[/.test(trimmed) && !/\\\]/.test(trimmed)) {
+            displayMathBuffer.push(trimmed);
+            hasSpacer = false;
+            return;
+        }
+
+        const classified = classifyStructuredPreviewLine(trimmed);
+        if (classified.type === 'spacer') {
+            if (!hasSpacer && blocks.length > 0) {
+                blocks.push(classified);
+                hasSpacer = true;
+            }
+            return;
+        }
+
+        blocks.push(classified);
+        hasSpacer = false;
+    });
+
+    flushDisplayMath();
+
+    const html = blocks.map((block) => {
+        if (block.type === 'spacer') {
+            return '<div class="math-spacer" aria-hidden="true"></div>';
+        }
+
+        if (block.type === 'math_block') {
+            const rawText = String(block.text || '').trim();
+            if (!rawText) return '';
+
+            const shouldWrapForDisplay = !/\\\[|\\\]/.test(rawText)
+                && !lineHasLatexDelimiter(rawText)
+                && /[=^_\\]/.test(rawText);
+
+            const contentText = shouldWrapForDisplay ? `\\[ ${rawText} \\]` : rawText;
+            const safe = qEsc(contentText).replace(/\n/g, '<br>');
+            const latexClass = lineHasLatexDelimiter(contentText) ? 'js-latex-content' : '';
+            return `<div class="math-block"><span class="${latexClass}">${safe}</span></div>`;
+        }
+
+        if (block.type === 'option_line') {
+            const safeText = qEsc(block.text || '-').replace(/\n/g, '<br>');
+            const latexClass = lineHasLatexDelimiter(block.text) ? 'js-latex-content' : '';
+            return `
+                <div class="math-line math-option">
+                    <span class="math-option-label">${qEsc(block.label || '')})</span>
+                    <span class="math-option-text ${latexClass}">${safeText}</span>
+                </div>
+            `;
+        }
+
+        const typeClassMap = {
+            heading_like_line: 'math-heading',
+            result_line: 'math-result',
+            paragraph: 'math-paragraph'
+        };
+        const typeClass = typeClassMap[block.type] || 'math-paragraph';
+        const safeText = qEsc(block.text || '').replace(/\n/g, '<br>');
+        const latexClass = lineHasLatexDelimiter(block.text) ? 'js-latex-content' : '';
+        return `<div class="math-line ${typeClass}"><span class="${latexClass}">${safeText}</span></div>`;
+    }).join('');
+
+    return `<div class="math-doc ${docClass}">${html}</div>`;
+}
+
+function buildOptionPreviewHtml(letter, rawValue) {
+    const content = String(rawValue ?? '').replace(/\r\n?/g, '\n').trim();
+    const prefixed = `${letter}) ${content || '-'}`;
+    return buildStructuredPreviewHtml(prefixed, { docClass: 'math-doc-option' });
+}
+
 function toSafeLatexHtml(rawValue, options = {}) {
     const {
         isExplanation = false,
@@ -356,22 +554,25 @@ function toSafeLatexHtml(rawValue, options = {}) {
 }
 
 function buildQuestionPreviewCard(question) {
-    const optionEHtml = question.option_e
-        ? `<div class="latex-preview-option"><strong>E)</strong> ${toSafeLatexHtml(question.option_e)}</div>`
+    const optionEHtml = String(question.option_e || '').trim()
+        ? `<div class="latex-preview-option">${buildOptionPreviewHtml('E', question.option_e)}</div>`
         : '';
 
     const explanationHtml = (question.explanation || '').trim()
-        ? `<div class="latex-preview-explanation"><strong>Açıklama:</strong><div class="latex-preview-explanation-body">${toSafeLatexHtml(question.explanation, { isExplanation: true })}</div></div>`
+        ? `<div class="latex-preview-explanation"><div class="latex-preview-label">Açıklama</div><div class="latex-preview-explanation-body">${buildStructuredPreviewHtml(question.explanation, { isExplanation: true, docClass: 'math-doc-explanation' })}</div></div>`
         : '<div class="latex-preview-empty">Açıklama yok</div>';
 
     return `
         <div class="latex-preview-card">
-            <div class="latex-preview-section"><strong>Soru:</strong> ${toSafeLatexHtml(question.question_text)}</div>
+            <div class="latex-preview-section">
+                <div class="latex-preview-label">Soru</div>
+                ${buildStructuredPreviewHtml(question.question_text, { docClass: 'math-doc-question' })}
+            </div>
             <div class="latex-preview-options">
-                <div class="latex-preview-option"><strong>A)</strong> ${toSafeLatexHtml(question.option_a)}</div>
-                <div class="latex-preview-option"><strong>B)</strong> ${toSafeLatexHtml(question.option_b)}</div>
-                <div class="latex-preview-option"><strong>C)</strong> ${toSafeLatexHtml(question.option_c)}</div>
-                <div class="latex-preview-option"><strong>D)</strong> ${toSafeLatexHtml(question.option_d)}</div>
+                <div class="latex-preview-option">${buildOptionPreviewHtml('A', question.option_a)}</div>
+                <div class="latex-preview-option">${buildOptionPreviewHtml('B', question.option_b)}</div>
+                <div class="latex-preview-option">${buildOptionPreviewHtml('C', question.option_c)}</div>
+                <div class="latex-preview-option">${buildOptionPreviewHtml('D', question.option_d)}</div>
                 ${optionEHtml}
             </div>
             ${explanationHtml}
@@ -563,18 +764,21 @@ function renderAiPreview() {
                 </div>
               </div>
               <div class="card-body">
-                <div class="mb-2"><strong>Soru:</strong> ${toSafeLatexHtml(q.question_text || '')}</div>
+                <div class="mb-2">
+                  <div class="latex-preview-label">Soru</div>
+                  ${buildStructuredPreviewHtml(q.question_text || '', { docClass: 'math-doc-question' })}
+                </div>
                 <div class="row g-2">
-                  <div class="col-md-6"><div class="p-2 rounded ${b('A')}">A) ${toSafeLatexHtml(q.option_a || '')}</div></div>
-                  <div class="col-md-6"><div class="p-2 rounded ${b('B')}">B) ${toSafeLatexHtml(q.option_b || '')}</div></div>
-                  <div class="col-md-6"><div class="p-2 rounded ${b('C')}">C) ${toSafeLatexHtml(q.option_c || '')}</div></div>
-                  <div class="col-md-6"><div class="p-2 rounded ${b('D')}">D) ${toSafeLatexHtml(q.option_d || '')}</div></div>
-                  ${q.option_e ? `<div class="col-md-6"><div class="p-2 rounded ${b('E')}">E) ${toSafeLatexHtml(q.option_e || '')}</div></div>` : ''}
+                  <div class="col-md-6"><div class="p-2 rounded ${b('A')} latex-option-panel">${buildOptionPreviewHtml('A', q.option_a || '')}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('B')} latex-option-panel">${buildOptionPreviewHtml('B', q.option_b || '')}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('C')} latex-option-panel">${buildOptionPreviewHtml('C', q.option_c || '')}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('D')} latex-option-panel">${buildOptionPreviewHtml('D', q.option_d || '')}</div></div>
+                  ${q.option_e ? `<div class="col-md-6"><div class="p-2 rounded ${b('E')} latex-option-panel">${buildOptionPreviewHtml('E', q.option_e || '')}</div></div>` : ''}
                 </div>
                 ${(() => {
                     const explanationText = String(q.formatted_explanation ?? '').trim() || String(q.explanation ?? '').trim();
                     return explanationText
-                        ? `<div class="mt-2 text-muted"><small class="explanation-preline">${toSafeLatexHtml(explanationText, { isExplanation: true })}</small></div>`
+                        ? `<div class="mt-2 latex-preview-explanation"><div class="latex-preview-label">Açıklama</div>${buildStructuredPreviewHtml(explanationText, { isExplanation: true, docClass: 'math-doc-explanation' })}</div>`
                         : '';
                 })()}
               </div>
