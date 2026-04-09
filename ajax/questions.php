@@ -4,6 +4,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
+require_once '../includes/bulk_question_parser.php';
 
 $user = require_admin();
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
@@ -27,6 +28,56 @@ try {
     $hasIsActive = is_array($questionCols) && in_array('is_active', $questionCols, true);
 
     switch ($action) {
+        case 'parse_bulk':
+            $rawText = (string)($_POST['raw_text'] ?? '');
+            $questionType = trim((string)($_POST['question_type'] ?? ''));
+            $courseId = trim((string)($_POST['course_id'] ?? ''));
+            $topicId = normalize_optional_uuid($_POST['topic_id'] ?? null);
+
+            if ($rawText === '') {
+                questions_json(false, 'Soru metni boş olamaz.', [], 422);
+            }
+            if ($courseId === '') {
+                questions_json(false, 'Ders seçimi zorunludur.', [], 422);
+            }
+            if (!in_array($questionType, ['sayısal', 'sözel', 'karışık'], true)) {
+                questions_json(false, 'Geçersiz soru tipi!', [], 422);
+            }
+            if ($hasTopicId && !validate_topic_belongs_to_course($pdo, $topicId, $courseId)) {
+                questions_json(false, 'Seçilen konu bu derse ait değil!', [], 422);
+            }
+
+            $parsed = bulk_question_parser_parse_text($rawText);
+            $preparedRows = [];
+
+            foreach (($parsed['parsed'] ?? []) as $row) {
+                $preparedRows[] = [
+                    'question_text' => (string)($row['question_text'] ?? ''),
+                    'option_a' => (string)($row['option_a'] ?? ''),
+                    'option_b' => (string)($row['option_b'] ?? ''),
+                    'option_c' => (string)($row['option_c'] ?? ''),
+                    'option_d' => (string)($row['option_d'] ?? ''),
+                    'option_e' => isset($row['option_e']) ? ($row['option_e'] !== null ? (string)$row['option_e'] : null) : null,
+                    'correct_answer' => strtoupper(trim((string)($row['correct_answer'] ?? ''))),
+                    'explanation' => (string)($row['explanation'] ?? ''),
+                    'question_type' => $questionType,
+                    'course_id' => $courseId,
+                    'topic_id' => $hasTopicId ? $topicId : null,
+                    'status' => 'pending',
+                ];
+            }
+
+            questions_json(true, '', [
+                'parser_version' => $parsed['parser_version'] ?? 'BULK_PARSER_V2',
+                'parsed' => $preparedRows,
+                'parsed_count' => count($preparedRows),
+                'skipped_count' => (int)($parsed['skipped_count'] ?? 0),
+                'total_blocks' => (int)($parsed['total_blocks'] ?? 0),
+                'skipped_reasons' => $parsed['skipped_reasons'] ?? [],
+                'skipped_samples' => $parsed['skipped_samples'] ?? [],
+            ]);
+            break;
+
         case 'list_qualifications':
             $rows = $pdo->query('SELECT id, name FROM qualifications ORDER BY order_index ASC, name ASC')->fetchAll(PDO::FETCH_ASSOC);
             questions_json(true, '', ['qualifications' => $rows]);

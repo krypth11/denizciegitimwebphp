@@ -439,156 +439,41 @@ function normalizeCount(v) {
     return n;
 }
 
-function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTopicId = '') {
-    const stripInvisibleChars = (txt) => (txt || '')
-        .replace(/\uFFFC/g, '')
-        .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
-        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-
-    const normalizeText = (txt) => stripInvisibleChars(txt)
-        .replace(/\u00A0/g, ' ')
-        .replace(/\r\n?/g, '\n')
-        .replace(/[ \t]+/g, ' ')
-        .trim();
-
-    const cleanOptionText = (txt) => normalizeText((txt || '')
-        .replace(/\(\s*doğru\s*\)/ig, '')
-        .replace(/^[*✓✔]+\s*/, ''));
-
-    const fullText = stripInvisibleChars(rawText || '')
-        .replace(/\u00A0/g, ' ')
-        .replace(/\r\n?/g, '\n')
-        .trim();
-    const result = { parsed: [], parsed_count: 0, skipped_count: 0, total_blocks: 0 };
-
-    if (!fullText) {
-        return result;
-    }
-
-    const answerHeaderRegex = /^\s*cevap\s+anahtarı\s*:?\s*$/im;
-    const answerHeaderMatch = answerHeaderRegex.exec(fullText);
-    const bodyText = answerHeaderMatch ? fullText.slice(0, answerHeaderMatch.index).trim() : fullText;
-    const answerKeyText = answerHeaderMatch ? fullText.slice(answerHeaderMatch.index) : '';
-
-    const answerMap = {};
-    if (answerKeyText) {
-        const answerRegex = /^\s*(\d+)\s*[-.):]\s*([ABCDE])\s*$/gim;
-        let answerMatch;
-        while ((answerMatch = answerRegex.exec(answerKeyText)) !== null) {
-            answerMap[parseInt(answerMatch[1], 10)] = answerMatch[2].toUpperCase();
-        }
-    }
-
-    const blockDivider = '__BULK_QUESTION_DIVIDER__';
-    const blocks = bodyText
-        .replace(/^\s*⸻\s*$/gm, blockDivider)
-        .split(blockDivider)
-        .map((b) => b.trim())
-        .filter((b) => b.length > 0);
-
-    result.total_blocks = blocks.length;
-    if (!blocks.length) {
-        return result;
-    }
-
-    for (const rawBlock of blocks) {
-        const blockText = rawBlock.trim();
-
-        const lines = blockText.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
-        if (!lines.length) {
-            result.skipped_count++;
-            continue;
-        }
-
-        const firstLineMatch = lines[0].match(/^\s*(\d+)\s*[\.)]\s*(.*)$/);
-        if (!firstLineMatch) {
-            result.skipped_count++;
-            continue;
-        }
-
-        const number = parseInt(firstLineMatch[1], 10);
-        lines[0] = (firstLineMatch[2] || '').trim();
-
-        const questionLines = [];
-        const options = { A: '', B: '', C: '', D: '', E: '' };
-        let currentOption = null;
-        let explanationMode = false;
-        const explanationLines = [];
-        let inferredCorrect = '';
-
-        for (const rawLine of lines) {
-            const line = rawLine.trim();
-            if (!line) continue;
-
-            if (/^⸻$/.test(line)) {
-                continue;
-            }
-
-            if (explanationMode) {
-                explanationLines.push(line);
-                continue;
-            }
-
-            const expMatch = line.match(/^açıklama\s*:\s*(.*)$/i);
-            if (expMatch) {
-                explanationMode = true;
-                if (expMatch[1]) explanationLines.push(expMatch[1].trim());
-                continue;
-            }
-
-            const optMatch = line.match(/^[\s\-–—•\*]*([ABCDE])\s*[\)\.\-:]\s*(.*)$/i);
-            if (optMatch) {
-                currentOption = optMatch[1].toUpperCase();
-                let optValue = optMatch[2] || '';
-                if (/^\s*[*✓✔]/.test(optValue) || /\(\s*doğru\s*\)/i.test(optValue)) {
-                    inferredCorrect = currentOption;
-                }
-                const value = cleanOptionText(optValue || '').trim();
-                options[currentOption] = value.length ? value : null;
-                continue;
-            }
-
-            if (currentOption) {
-                const currentValue = options[currentOption] || '';
-                options[currentOption] = normalizeText(`${currentValue} ${line}`);
-            } else {
-                questionLines.push(line);
-            }
-        }
-
-        const questionText = normalizeText(questionLines.join(' '));
-        const correctAnswer = (answerMap[number] || inferredCorrect || '').toUpperCase();
-        const explanation = normalizeText(explanationLines.join(' '));
-
-        const isValid =
-            questionText.length >= 10 &&
-            options.A && options.B && options.C && options.D &&
-            ['A', 'B', 'C', 'D', 'E'].includes(correctAnswer) &&
-            (correctAnswer !== 'E' || (options.E && options.E.length > 0));
-
-        if (!isValid) {
-            result.skipped_count++;
-            continue;
-        }
-
-        result.parsed.push({
-            question_text: questionText,
-            option_a: options.A,
-            option_b: options.B,
-            option_c: options.C,
-            option_d: options.D,
-            option_e: options.E ?? null,
-            correct_answer: correctAnswer,
-            explanation,
+async function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTopicId = '') {
+    const res = await window.appAjax({
+        url: '../ajax/questions.php?action=parse_bulk',
+        method: 'POST',
+        data: {
+            raw_text: rawText,
             question_type: selectedType,
             course_id: selectedCourseId,
-            topic_id: selectedTopicId || null,
-            status: 'pending'
-        });
+            topic_id: selectedTopicId || ''
+        }
+    });
+
+    if (!res.success) {
+        return {
+            success: false,
+            message: res.message || 'Toplu soru ayrıştırma başarısız oldu.',
+            parsed: [],
+            parsed_count: 0,
+            skipped_count: 0,
+            total_blocks: 0,
+            skipped_reasons: {},
+            skipped_samples: []
+        };
     }
 
-    result.parsed_count = result.parsed.length;
-    return result;
+    return {
+        success: true,
+        parser_version: res.data?.parser_version || 'BULK_PARSER_V2',
+        parsed: Array.isArray(res.data?.parsed) ? res.data.parsed : [],
+        parsed_count: Number(res.data?.parsed_count || 0),
+        skipped_count: Number(res.data?.skipped_count || 0),
+        total_blocks: Number(res.data?.total_blocks || 0),
+        skipped_reasons: res.data?.skipped_reasons || {},
+        skipped_samples: Array.isArray(res.data?.skipped_samples) ? res.data.skipped_samples : []
+    };
 }
 
 function statusCounts() {
@@ -1356,7 +1241,7 @@ $(document).ready(function() {
         saveBulkUploadPrefs();
     });
 
-    $('#bulkUploadForm').on('submit', function(e) {
+    $('#bulkUploadForm').on('submit', async function(e) {
         e.preventDefault();
 
         const qualificationId = $('#bulk_qualification_id').val();
@@ -1370,18 +1255,33 @@ $(document).ready(function() {
         if (!questionType) return appAlert('Uyarı', 'Lütfen soru türü seçiniz.', 'warning');
         if (!rawText || !rawText.trim()) return appAlert('Uyarı', 'Lütfen soru metnini yapıştırınız.', 'warning');
 
-        const parsedResult = parseBulkQuestions(rawText, questionType, courseId, topicId);
+        const parsedResult = await parseBulkQuestions(rawText, questionType, courseId, topicId);
+        if (!parsedResult.success) {
+            return appAlert('Hata', parsedResult.message || 'Toplu soru ayrıştırılamadı.', 'error');
+        }
         if (!parsedResult.parsed_count) {
-            return appAlert('Hata', 'Hiç soru ayrıştırılamadı. Format hatalı olabilir.', 'error');
+            const skipSummary = formatSkipSummary(parsedResult);
+            const noParseMessage = skipSummary
+                ? `Hiç soru ayrıştırılamadı.\n\n${skipSummary}`
+                : 'Hiç soru ayrıştırılamadı. Format hatalı olabilir.';
+            return appAlert('Hata', noParseMessage, 'error');
         }
 
         generatedQuestions = parsedResult.parsed;
         generationMeta = {
             source: 'bulk',
+            parser_version: parsedResult.parser_version || 'BULK_PARSER_V2',
             parsed_count: parsedResult.parsed_count,
             skipped_count: parsedResult.skipped_count,
             total_blocks: parsedResult.total_blocks
         };
+
+        if (parsedResult.skipped_count > 0) {
+            const skipSummary = formatSkipSummary(parsedResult);
+            if (skipSummary) {
+                appAlert('Ayrıştırma Bilgisi', skipSummary, 'warning');
+            }
+        }
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('bulkUploadModal')).hide();
         $('#bulk_questions_text').val('');
