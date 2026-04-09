@@ -15,6 +15,12 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
+    <?php if (!empty($enable_katex)): ?>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
+        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
+    <?php endif; ?>
+
     <!-- Custom JS -->
     <script src="/assets/js/app.js?v=<?= filemtime($_SERVER['DOCUMENT_ROOT'].'/assets/js/app.js') ?>"></script>
 

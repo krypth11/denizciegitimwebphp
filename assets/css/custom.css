@@ -534,6 +534,67 @@ h1, h2, h3, h4, h5, h6 {
     border-left: 3px solid var(--danger);
 }
 
+.latex-help-note code {
+    font-size: 12px;
+}
+
+.latex-live-preview {
+    margin-top: 8px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-soft);
+    padding: 10px;
+}
+
+.latex-preview-empty {
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.latex-preview-card {
+    display: grid;
+    gap: 10px;
+}
+
+.latex-preview-section,
+.latex-preview-option,
+.latex-preview-explanation {
+    color: var(--text-main);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.latex-preview-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.latex-preview-option {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-surface);
+    padding: 8px;
+}
+
+.latex-preview-explanation-body {
+    margin-top: 4px;
+}
+
+.katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 2px;
+}
+
+.js-latex-content .katex {
+    max-width: 100%;
+}
+
+[data-theme="dark"] .latex-live-preview {
+    background: rgba(255, 255, 255, 0.02);
+}
+
 .placeholder-page {
     max-width: 760px;
 }
@@ -665,6 +726,10 @@ h1, h2, h3, h4, h5, h6 {
     }
 
     .questions-option-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .latex-preview-options {
         grid-template-columns: 1fr;
     }
 

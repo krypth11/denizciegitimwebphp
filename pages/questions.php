@@ -6,6 +6,7 @@ require_once '../includes/functions.php';
 $user = require_auth();
 $current_page = 'questions';
 $page_title = 'Sorular';
+$enable_katex = true;
 
 $qualifications = $pdo->query('SELECT * FROM qualifications ORDER BY order_index, name')->fetchAll();
 $courses = $pdo->query(
@@ -130,10 +131,18 @@ include '../includes/sidebar.php';
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" required><option value="">Seçiniz...</option><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
             </div>
             <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="add_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Konu seçmeden devam edebilirsiniz.</small></div>
-            <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" rows="3" required></textarea></div>
+            <div class="mb-3">
+                <label class="form-label">Soru Metni *</label>
+                <textarea class="form-control" name="question_text" rows="3" required></textarea>
+                <small class="text-muted d-block mt-1 latex-help-note">LaTeX: Satır içi <code>\( ... \)</code> • Blok <code>\[ ... \]</code></small>
+            </div>
             <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e"></div></div>
             <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" required><option value="">Seçiniz...</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
-            <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" rows="2"></textarea></div>
+            <div class="mb-3">
+                <label class="form-label">Açıklama</label>
+                <textarea class="form-control" name="explanation" rows="2"></textarea>
+            </div>
+            <div class="latex-live-preview" id="add_latex_preview"></div>
         </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Kaydet</button></div></form>
     </div></div>
 </div>
@@ -146,10 +155,18 @@ include '../includes/sidebar.php';
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" id="edit_question_type" required><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
             </div>
             <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="edit_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Konu alanı zorunlu değildir.</small></div>
-            <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" id="edit_question_text" rows="3" required></textarea></div>
+            <div class="mb-3">
+                <label class="form-label">Soru Metni *</label>
+                <textarea class="form-control" name="question_text" id="edit_question_text" rows="3" required></textarea>
+                <small class="text-muted d-block mt-1 latex-help-note">LaTeX: Satır içi <code>\( ... \)</code> • Blok <code>\[ ... \]</code></small>
+            </div>
             <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" id="edit_option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" id="edit_option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" id="edit_option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" id="edit_option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e" id="edit_option_e"></div></div>
             <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" id="edit_correct_answer" required><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
-            <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" id="edit_explanation" rows="2"></textarea></div>
+            <div class="mb-3">
+                <label class="form-label">Açıklama</label>
+                <textarea class="form-control" name="explanation" id="edit_explanation" rows="2"></textarea>
+            </div>
+            <div class="latex-live-preview" id="edit_latex_preview"></div>
         </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Güncelle</button></div></form>
     </div></div>
 </div>
@@ -250,6 +267,7 @@ Cevap Anahtarı
 1-A
 2-B
 3-E</pre>
+                        <div class="mt-2 latex-help-note">LaTeX desteği vardır: <code>\( ... \)</code> ve <code>\[ ... \]</code>.</div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -275,7 +293,7 @@ Cevap Anahtarı
 <?php
 $extra_js = <<<'JAVASCRIPT'
 <script>
-window.__QUESTIONS_PAGE_VERSION__ = 'E-OPTION-FIX-1';
+window.__QUESTIONS_PAGE_VERSION__ = 'LATEX-QUESTIONS-1';
 console.log('QUESTIONS PAGE VERSION', window.__QUESTIONS_PAGE_VERSION__);
 
 let generatedQuestions = [];
@@ -284,6 +302,116 @@ let generationMeta = null;
 
 function qEsc(value) {
     return $('<div>').text(value ?? '').html();
+}
+
+function renderKatexInNode(node) {
+    if (!node || typeof window.renderMathInElement !== 'function') return;
+    try {
+        window.renderMathInElement(node, {
+            delimiters: [
+                { left: '\\[', right: '\\]', display: true },
+                { left: '\\(', right: '\\)', display: false }
+            ],
+            throwOnError: false,
+            strict: 'ignore',
+            ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+        });
+    } catch (e) {
+        console.warn('KaTeX render error:', e);
+    }
+}
+
+function renderKatexInContainer(rootEl) {
+    if (!rootEl) return;
+    const root = rootEl instanceof jQuery ? rootEl[0] : rootEl;
+    if (!root) return;
+
+    if (typeof window.renderMathInElement !== 'function') {
+        setTimeout(() => renderKatexInContainer(root), 120);
+        return;
+    }
+
+    const nodes = root.matches?.('.js-latex-content')
+        ? [root]
+        : Array.from(root.querySelectorAll('.js-latex-content'));
+
+    nodes.forEach((node) => {
+        renderKatexInNode(node);
+    });
+}
+
+function toSafeLatexHtml(rawValue, options = {}) {
+    const {
+        isExplanation = false,
+        applyLineBreaks = true,
+    } = options;
+
+    const raw = String(rawValue ?? '');
+    const normalized = raw.replace(/\r\n?/g, '\n');
+    const content = isExplanation ? formatExplanationTextForPreview(normalized) : normalized;
+    const safe = qEsc(content);
+    const html = applyLineBreaks ? safe.replace(/\n/g, '<br>') : safe;
+    const hasLatex = /\\\(|\\\[/.test(content);
+    return `<span class="${hasLatex ? 'js-latex-content' : ''}">${html}</span>`;
+}
+
+function buildQuestionPreviewCard(question) {
+    const optionEHtml = question.option_e
+        ? `<div class="latex-preview-option"><strong>E)</strong> ${toSafeLatexHtml(question.option_e)}</div>`
+        : '';
+
+    const explanationHtml = (question.explanation || '').trim()
+        ? `<div class="latex-preview-explanation"><strong>Açıklama:</strong><div class="latex-preview-explanation-body">${toSafeLatexHtml(question.explanation, { isExplanation: true })}</div></div>`
+        : '<div class="latex-preview-empty">Açıklama yok</div>';
+
+    return `
+        <div class="latex-preview-card">
+            <div class="latex-preview-section"><strong>Soru:</strong> ${toSafeLatexHtml(question.question_text)}</div>
+            <div class="latex-preview-options">
+                <div class="latex-preview-option"><strong>A)</strong> ${toSafeLatexHtml(question.option_a)}</div>
+                <div class="latex-preview-option"><strong>B)</strong> ${toSafeLatexHtml(question.option_b)}</div>
+                <div class="latex-preview-option"><strong>C)</strong> ${toSafeLatexHtml(question.option_c)}</div>
+                <div class="latex-preview-option"><strong>D)</strong> ${toSafeLatexHtml(question.option_d)}</div>
+                ${optionEHtml}
+            </div>
+            ${explanationHtml}
+        </div>
+    `;
+}
+
+function getFormQuestionValues($form) {
+    return {
+        question_text: ($form.find('[name="question_text"]').val() || '').toString(),
+        option_a: ($form.find('[name="option_a"]').val() || '').toString(),
+        option_b: ($form.find('[name="option_b"]').val() || '').toString(),
+        option_c: ($form.find('[name="option_c"]').val() || '').toString(),
+        option_d: ($form.find('[name="option_d"]').val() || '').toString(),
+        option_e: ($form.find('[name="option_e"]').val() || '').toString(),
+        explanation: ($form.find('[name="explanation"]').val() || '').toString(),
+    };
+}
+
+function updateLatexLivePreview(formSelector, previewSelector) {
+    const $form = $(formSelector);
+    const $preview = $(previewSelector);
+    if (!$form.length || !$preview.length) return;
+
+    const values = getFormQuestionValues($form);
+    const hasContent = Object.values(values).some((v) => String(v).trim().length > 0);
+    if (!hasContent) {
+        $preview.html('<div class="latex-preview-empty">Canlı önizleme burada görünecek.</div>');
+        return;
+    }
+
+    $preview.html(buildQuestionPreviewCard(values));
+    renderKatexInContainer($preview);
+}
+
+function wireFormLatexPreview(formSelector, previewSelector) {
+    const fields = '[name="question_text"],[name="option_a"],[name="option_b"],[name="option_c"],[name="option_d"],[name="option_e"],[name="explanation"]';
+    $(document).on('input change', `${formSelector} ${fields}`, function () {
+        updateLatexLivePreview(formSelector, previewSelector);
+    });
 }
 
 function formatExplanationTextForPreview(value) {
@@ -550,17 +678,19 @@ function renderAiPreview() {
                 </div>
               </div>
               <div class="card-body">
-                <div class="mb-2"><strong>Soru:</strong> ${q.question_text || ''}</div>
+                <div class="mb-2"><strong>Soru:</strong> ${toSafeLatexHtml(q.question_text || '')}</div>
                 <div class="row g-2">
-                  <div class="col-md-6"><div class="p-2 rounded ${b('A')}">A) ${q.option_a || ''}</div></div>
-                  <div class="col-md-6"><div class="p-2 rounded ${b('B')}">B) ${q.option_b || ''}</div></div>
-                  <div class="col-md-6"><div class="p-2 rounded ${b('C')}">C) ${q.option_c || ''}</div></div>
-                  <div class="col-md-6"><div class="p-2 rounded ${b('D')}">D) ${q.option_d || ''}</div></div>
-                  ${q.option_e ? `<div class="col-md-6"><div class="p-2 rounded ${b('E')}">E) ${q.option_e || ''}</div></div>` : ''}
+                  <div class="col-md-6"><div class="p-2 rounded ${b('A')}">A) ${toSafeLatexHtml(q.option_a || '')}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('B')}">B) ${toSafeLatexHtml(q.option_b || '')}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('C')}">C) ${toSafeLatexHtml(q.option_c || '')}</div></div>
+                  <div class="col-md-6"><div class="p-2 rounded ${b('D')}">D) ${toSafeLatexHtml(q.option_d || '')}</div></div>
+                  ${q.option_e ? `<div class="col-md-6"><div class="p-2 rounded ${b('E')}">E) ${toSafeLatexHtml(q.option_e || '')}</div></div>` : ''}
                 </div>
                 ${(() => {
-                    const explanationHtml = formatExplanationHtmlForPreview(q.explanation, q.formatted_explanation);
-                    return explanationHtml ? `<div class="mt-2 text-muted"><small class="explanation-preline">${explanationHtml}</small></div>` : '';
+                    const explanationText = String(q.formatted_explanation ?? '').trim() || String(q.explanation ?? '').trim();
+                    return explanationText
+                        ? `<div class="mt-2 text-muted"><small class="explanation-preline">${toSafeLatexHtml(explanationText, { isExplanation: true })}</small></div>`
+                        : '';
                 })()}
               </div>
             </div>`;
@@ -568,6 +698,7 @@ function renderAiPreview() {
     });
 
     $('#aiPreviewBody').html(html || '<div class="alert alert-warning">Soru yok.</div>');
+    renderKatexInContainer($('#aiPreviewBody'));
 }
 
 function formatSkipSummary(resp) {
@@ -1188,6 +1319,7 @@ $(document).ready(function() {
             emptyLabel: 'Konu seçmeden devam et',
             noTopicLabel: 'Bu derste kayıtlı konu yok'
         });
+        updateLatexLivePreview('#addForm', '#add_latex_preview');
     });
 
     $('#edit_course_id').on('change', async function() {
@@ -1196,6 +1328,7 @@ $(document).ready(function() {
             emptyLabel: 'Konu seçmeden devam et',
             noTopicLabel: 'Bu derste kayıtlı konu yok'
         });
+        updateLatexLivePreview('#editForm', '#edit_latex_preview');
     });
 
     $('#bulk_qualification_id').on('change', function() {
@@ -1334,6 +1467,7 @@ $(document).ready(function() {
             $('#edit_id').val(q.id); $('#edit_course_id').val(q.course_id); $('#edit_question_type').val(q.question_type);
             $('#edit_question_text').val(q.question_text); $('#edit_option_a').val(q.option_a); $('#edit_option_b').val(q.option_b);
             $('#edit_option_c').val(q.option_c); $('#edit_option_d').val(q.option_d); $('#edit_option_e').val(q.option_e || ''); $('#edit_correct_answer').val((q.correct_answer || '').toUpperCase()); $('#edit_explanation').val(q.explanation||'');
+            updateLatexLivePreview('#editForm', '#edit_latex_preview');
             loadTopicsByCourse(q.course_id || '', $('#edit_topic_id'), {
                 emptyLabel: 'Konu seçmeden devam et',
                 noTopicLabel: 'Bu derste kayıtlı konu yok'
@@ -1343,6 +1477,19 @@ $(document).ready(function() {
             });
         });
     });
+
+    $('#addModal').on('shown.bs.modal', function () {
+        updateLatexLivePreview('#addForm', '#add_latex_preview');
+    });
+
+    $('#editModal').on('shown.bs.modal', function () {
+        updateLatexLivePreview('#editForm', '#edit_latex_preview');
+    });
+
+    wireFormLatexPreview('#addForm', '#add_latex_preview');
+    wireFormLatexPreview('#editForm', '#edit_latex_preview');
+    updateLatexLivePreview('#addForm', '#add_latex_preview');
+    updateLatexLivePreview('#editForm', '#edit_latex_preview');
     $('#editForm').on('submit', function(e){
         e.preventDefault();
         const editCorrect = String($('#edit_correct_answer').val() || '').toUpperCase();
