@@ -539,13 +539,14 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTop
 
 function analyzeLatexQuestionStartStrict(line) {
     const trimmed = String(line || '').trim();
-    const m = trimmed.match(/^(\d+)\.(\s+)(.*)$/);
+    const m = trimmed.match(/^(\d+)\.(.*)$/);
     if (!m) {
         return { isRawStart: false, isValidStart: false, reason: 'not_start' };
     }
 
     const number = parseInt(m[1], 10);
-    const rest = String(m[3] || '').trim();
+    const restRaw = String(m[2] || '');
+    const rest = restRaw.trim();
 
     if (!Number.isFinite(number) || number <= 0) {
         return { isRawStart: true, isValidStart: false, reason: 'invalid_number' };
@@ -553,6 +554,29 @@ function analyzeLatexQuestionStartStrict(line) {
     if (!rest) {
         return { isRawStart: true, isValidStart: false, reason: 'empty_rest' };
     }
+
+    // 1.Bir ... -> 1. Bir ... (boşluksuz başlık formatını da kabul et)
+    const noSpaceLetterStart = restRaw.match(/^([A-Za-zÇĞİÖŞÜçğıöşü].*)$/);
+    if (noSpaceLetterStart) {
+        return {
+            isRawStart: true,
+            isValidStart: true,
+            number,
+            rest: String(noSpaceLetterStart[1] || '').trim(),
+            reason: 'ok_compact_letter_header'
+        };
+    }
+
+    if (/^[A-Za-zÇĞİÖŞÜçğıöşü]/.test(rest)) {
+        return {
+            isRawStart: true,
+            isValidStart: true,
+            number,
+            rest,
+            reason: 'ok'
+        };
+    }
+
     if (/^[-−–—).:]?\s*[ABCDE]\s*$/i.test(rest)) {
         return { isRawStart: true, isValidStart: false, reason: 'answer_key_style' };
     }
@@ -576,17 +600,7 @@ function analyzeLatexQuestionStartStrict(line) {
     if (/^\d/.test(rest)) {
         return { isRawStart: true, isValidStart: false, reason: 'numeric_rhs' };
     }
-    if (!/^[A-Za-zÇĞİÖŞÜçğıöşü]/.test(rest)) {
-        return { isRawStart: true, isValidStart: false, reason: 'non_letter_rhs' };
-    }
-
-    return {
-        isRawStart: true,
-        isValidStart: true,
-        number,
-        rest,
-        reason: 'ok'
-    };
+    return { isRawStart: true, isValidStart: false, reason: 'non_letter_rhs' };
 }
 
 function normalizeLeadingQuestionNumberPrefix(line, context = {}) {
@@ -598,13 +612,23 @@ function normalizeLeadingQuestionNumberPrefix(line, context = {}) {
         return raw;
     }
 
-    // 1.8 silindirli ... -> 1. 8 silindirli ...
-    const m = raw.match(/^(\s*)(\d+)\.([1-9]\d?)\s+([A-Za-zÇĞİÖŞÜçğıöşü]{4,}\b.*)$/);
-    if (!m) return raw;
+    // 1.Bir ... -> 1. Bir ...
+    const compactLetterHeader = raw.match(/^(\s*)(\d+)\.([A-Za-zÇĞİÖŞÜçğıöşü].*)$/);
+    if (compactLetterHeader) {
+        const normalized = `${compactLetterHeader[1]}${compactLetterHeader[2]}. ${String(compactLetterHeader[3] || '').trim()}`;
+        const analysis = analyzeLatexQuestionStartStrict(normalized);
+        return analysis.isValidStart ? normalized : raw;
+    }
 
-    const normalized = `${m[1]}${m[2]}. ${m[3]} ${m[4]}`;
-    const analysis = analyzeLatexQuestionStartStrict(normalized);
-    return analysis.isValidStart ? normalized : raw;
+    // 1.8 silindirli ... -> 1. 8 silindirli ...
+    const compactNumericQuestionHeader = raw.match(/^(\s*)(\d+)\.([1-9]\d?)\s+([A-Za-zÇĞİÖŞÜçğıöşü]{4,}\b.*)$/);
+    if (compactNumericQuestionHeader) {
+        const normalized = `${compactNumericQuestionHeader[1]}${compactNumericQuestionHeader[2]}. ${compactNumericQuestionHeader[3]} ${compactNumericQuestionHeader[4]}`;
+        const analysis = analyzeLatexQuestionStartStrict(normalized);
+        return analysis.isValidStart ? normalized : raw;
+    }
+
+    return raw;
 }
 
 function normalizeLatexBulkInput(rawText) {
