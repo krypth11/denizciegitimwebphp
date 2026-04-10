@@ -3023,59 +3023,19 @@ $(document).ready(function() {
         if (!questionType) return appAlert('Uyarı', 'Lütfen soru türü seçiniz.', 'warning');
         if (!rawText || !rawText.trim()) return appAlert('Uyarı', 'Lütfen soru metnini yapıştırınız.', 'warning');
 
-        const normalizedResult = normalizeLatexBulkInput(rawText);
-        if (!normalizedResult.success) {
-            console.log('LATEX_NORMALIZE_DEBUG', normalizedResult);
-            return appAlert('Hata', buildLatexNormalizeErrorMessage(normalizedResult), 'error');
-        }
-
-        const canonicalResult = canonicalizeLatexBulkInput(normalizedResult.normalized_text);
-        if (!canonicalResult.success) {
-            console.log('LATEX_CANONICAL_DEBUG', {
-                ...canonicalResult,
-                normalize_debug: normalizedResult.debug,
-                normalized_text_preview: (normalizedResult.normalized_text || '').slice(0, 2000)
-            });
-            return appAlert('Hata', buildLatexNormalizeErrorMessage(canonicalResult), 'error');
-        }
-
-        const validationResult = validateLatexBulkInput(canonicalResult.canonical_text);
-        if (!validationResult.success) {
-            console.log('LATEX_VALIDATION_DEBUG', {
-                validation: validationResult,
-                canonical_text_preview: (canonicalResult.canonical_text || '').slice(0, 3000)
-            });
-        }
-
-        const parsedResult = parseLatexBulkQuestions(canonicalResult.canonical_text, questionType, courseId, topicId);
+        // İSTEK GEREĞİ: LaTeX yükleme akışı, Toplu Soru Yükle parser davranışıyla birebir çalışır.
+        // Not: Ayrı modal/ayrı state korundu; bulk handler'a dokunulmadı.
+        const parsedResult = parseBulkQuestions(rawText, questionType, courseId, topicId);
         if (!parsedResult.parsed_count) {
-            console.log('LATEX_PARSE_DEBUG', {
-                ...parsedResult,
-                normalize_debug: normalizedResult.debug,
-                canonical_text_preview: (canonicalResult.canonical_text || '').slice(0, 2000)
-            });
-            if (!validationResult.success) {
-                return appAlert('Hata', `${buildLatexParseErrorMessage(parsedResult)}\n\n${buildLatexValidationErrorMessage(validationResult)}`, 'error');
-            }
-            return appAlert('Hata', buildLatexParseErrorMessage(parsedResult), 'error');
+            return appAlert('Hata', 'Hiç soru ayrıştırılamadı. Format hatalı olabilir.', 'error');
         }
 
-        console.log('LATEX_PARSE_DEBUG_SUMMARY', {
-            parsed_count: parsedResult.parsed_count,
-            skipped_count: parsedResult.skipped_count,
-            total_blocks: parsedResult.total_blocks,
-            per_question: parsedResult?.debug?.questions || []
-        });
-
-        generatedQuestions = parsedResult.parsed.map((q) => sanitizeLatexBulkParsedQuestion(q));
+        generatedQuestions = parsedResult.parsed;
         generationMeta = {
             source: 'latex_bulk',
             parsed_count: parsedResult.parsed_count,
             skipped_count: parsedResult.skipped_count,
-            total_blocks: parsedResult.total_blocks,
-            latex_validation: validationResult,
-            normalized_text_preview: (normalizedResult.normalized_text || '').slice(0, 800),
-            canonical_text_preview: (canonicalResult.canonical_text || '').slice(0, 800)
+            total_blocks: parsedResult.total_blocks
         };
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('latexBulkUploadModal')).hide();
