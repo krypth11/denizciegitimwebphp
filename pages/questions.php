@@ -537,64 +537,51 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTop
     return result;
 }
 
+function analyzeLatexQuestionStartStrict(line) {
+    const trimmed = String(line || '').trim();
+    const m = trimmed.match(/^(\d+)\.(\s+)(.*)$/);
+    if (!m) {
+        return { isRawStart: false, isValidStart: false, reason: 'not_start' };
+    }
+
+    const number = parseInt(m[1], 10);
+    const rest = String(m[3] || '').trim();
+
+    if (!Number.isFinite(number) || number <= 0) {
+        return { isRawStart: true, isValidStart: false, reason: 'invalid_number' };
+    }
+    if (!rest) {
+        return { isRawStart: true, isValidStart: false, reason: 'empty_rest' };
+    }
+    if (/^[-−–—).:]?\s*[ABCDE]\s*$/i.test(rest)) {
+        return { isRawStart: true, isValidStart: false, reason: 'answer_key_style' };
+    }
+    if (/^\d+(?:[.,]\d+)?\s*$/.test(rest)) {
+        return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
+    }
+    if (/^\d/.test(rest)) {
+        return { isRawStart: true, isValidStart: false, reason: 'numeric_rhs' };
+    }
+    if (!/^[A-Za-zÇĞİÖŞÜçğıöşü]/.test(rest)) {
+        return { isRawStart: true, isValidStart: false, reason: 'non_letter_rhs' };
+    }
+
+    return {
+        isRawStart: true,
+        isValidStart: true,
+        number,
+        rest,
+        reason: 'ok'
+    };
+}
+
 function normalizeLatexBulkInput(rawText) {
     const stripInvisibleChars = (txt) => (txt || '')
         .replace(/\uFFFC/g, '')
         .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, '')
         .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-    const analyzeQuestionStart = (line) => {
-        const trimmed = String(line || '').trim();
-        const m = trimmed.match(/^(\d+)\.(.*)$/);
-        if (!m) {
-            return { isRawStart: false, isValidStart: false, reason: 'not_start' };
-        }
-
-        const number = parseInt(m[1], 10);
-        const rest = String(m[2] || '').trim();
-
-        if (!Number.isFinite(number) || number <= 0) {
-            return { isRawStart: true, isValidStart: false, reason: 'invalid_number' };
-        }
-        if (!rest) {
-            return { isRawStart: true, isValidStart: false, reason: 'empty_rest' };
-        }
-
-        // Cevap anahtarı benzeri satırlar soru başlangıcı sayılmamalı (örn: 1.A)
-        if (/^[-−–—).:]?\s*[ABCDE]\s*$/i.test(rest)) {
-            return { isRawStart: true, isValidStart: false, reason: 'answer_key_style' };
-        }
-
-        // Salt numerik/ondalıklı kalıntılar soru başlangıcı değildir (örn: 17.34)
-        if (/^\d+(?:[.,]\d+)?\s*$/.test(rest)) {
-            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
-        }
-
-        // Tek bir ölçü satırı formu (örn: 0.1068 kg/s, 2.85 g/çevrim)
-        const compactLine = `${number}.${rest}`;
-        if (/^\d+\.\d+(?:\s+[^\s]{1,12})?\s*$/i.test(compactLine)) {
-            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
-        }
-
-        // Rest kısmı sayı ile başlıyorsa metinsel içerik zayıfsa ele
-        if (/^\d/.test(rest) && !/\b[A-Za-zÇĞİÖŞÜçğıöşü]{4,}\b/.test(rest)) {
-            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
-        }
-
-        if (!/[A-Za-zÇĞİÖŞÜçğıöşü]/.test(rest)) {
-            return { isRawStart: true, isValidStart: false, reason: 'non_text_rest' };
-        }
-
-        return {
-            isRawStart: true,
-            isValidStart: true,
-            number,
-            rest,
-            reason: 'ok'
-        };
-    };
-
-    const isQuestionStart = (line) => analyzeQuestionStart(line).isValidStart;
+    const isQuestionStart = (line) => analyzeLatexQuestionStartStrict(line).isValidStart;
     const isOptionStart = (line) => /^\s*[ABCDE]\s*\)/i.test(line || '');
     const isExplanationStart = (line) => /^\s*a[çc]ıklama\s*:?/i.test(line || '');
     const isAnswerStart = (line) => /^\s*doğru\s*cevap\s*:?/i.test(line || '');
@@ -634,7 +621,7 @@ function normalizeLatexBulkInput(rawText) {
         .map((line) => {
             const m = String(line || '').match(/^(\s*)(\d+)\.(\S.*)$/);
             if (!m) return line;
-            const analysis = analyzeQuestionStart(`${m[2]}.${m[3]}`);
+            const analysis = analyzeLatexQuestionStartStrict(`${m[2]}. ${m[3]}`);
             if (!analysis.isValidStart) return line;
             return `${m[1]}${m[2]}. ${m[3]}`;
         })
@@ -729,7 +716,7 @@ function normalizeLatexBulkInput(rawText) {
     let validStartCount = 0;
     let rejectedDecimalLikeCount = 0;
     normalizedLines.forEach((line) => {
-        const analysis = analyzeQuestionStart(line);
+        const analysis = analyzeLatexQuestionStartStrict(line);
         if (!analysis.isRawStart) return;
         rawStartCount += 1;
         if (analysis.isValidStart) {
@@ -895,8 +882,23 @@ function canonicalizeLatexBulkInput(normalizedText) {
     }
 
     const lines = String(bracketConverted.converted_text || '').split('\n');
-    const convertedLines = lines.map((line) => {
-        const optionMatch = String(line || '').match(/^(\s*[ABCDE]\s*\)\s*)(.*)$/i);
+    const convertedLines = lines.flatMap((line) => {
+        const normalizedLine = String(line || '')
+            .replace(/\\left\b/g, '')
+            .replace(/\\right\b/g, '')
+            .replace(/\\mathrm\s*\{\s*([^{}]+)\s*\}/g, '$1')
+            .replace(/\\text\s*\{\s*([^{}]+)\s*\}/g, '$1')
+            .replace(/\s{2,}/g, ' ')
+            .replace(/[ \t]+$/g, '');
+
+        if (/\\qquad/.test(normalizedLine)) {
+            return normalizedLine
+                .split(/\\qquad+/)
+                .map((part) => sanitizeCanonicalLatexString(part))
+                .filter((part) => String(part || '').trim().length > 0);
+        }
+
+        const optionMatch = String(normalizedLine || '').match(/^(\s*[ABCDE]\s*\)\s*)(.*)$/i);
         if (optionMatch) {
             const prefix = optionMatch[1] || '';
             const rest = String(optionMatch[2] || '');
@@ -904,10 +906,10 @@ function canonicalizeLatexBulkInput(normalizedText) {
             const converted = inlineOnlyMath
                 ? `${prefix}\\(${inlineOnlyMath[1].trim()}\\)`
                 : `${prefix}${rest}`;
-            return sanitizeCanonicalLatexString(converted);
+            return [sanitizeCanonicalLatexString(converted)];
         }
 
-        const correctLineMatch = String(line || '').match(/^(\s*Doğru\s*Cevap\s*:\s*[ABCDE]\s*\)\s*)(.*)$/i);
+        const correctLineMatch = String(normalizedLine || '').match(/^(\s*Doğru\s*Cevap\s*:\s*[ABCDE]\s*\)\s*)(.*)$/i);
         if (correctLineMatch) {
             const prefix = correctLineMatch[1] || '';
             const rest = String(correctLineMatch[2] || '');
@@ -915,10 +917,10 @@ function canonicalizeLatexBulkInput(normalizedText) {
             const converted = inlineOnlyMath
                 ? `${prefix}\\(${inlineOnlyMath[1].trim()}\\)`
                 : `${prefix}${rest}`;
-            return sanitizeCanonicalLatexString(converted);
+            return [sanitizeCanonicalLatexString(converted)];
         }
 
-        return sanitizeCanonicalLatexString(line);
+        return [sanitizeCanonicalLatexString(normalizedLine)];
     });
 
     const canonicalText = sanitizeCanonicalLatexString(convertedLines.join('\n'));
@@ -953,9 +955,19 @@ function detectLatexBrokenLineIssue(line) {
         return 'geçersiz latex satırı bulundu (# ile başlayan satır)';
     }
     if (/\^\{\s*,[^}]*\}/.test(t)) {
-        return 'geçersiz latex satırı bulundu (üs ifadesinde hatalı virgül)';
+        return 'bozuk alt/üst indis ifadesi bulundu (üs içinde hatalı virgül)';
     }
-    if (/\d\s*,\s*[A-Za-z_\\]/.test(t) && /[=_^{}\\]/.test(t)) {
+    if (/\\dot\{[^}]+\}\s*\*\s*(?:\{[^}]+\}|[A-Za-z0-9_]+)/.test(t)) {
+        return 'geçersiz pseudo-latex çarpan kullanımı bulundu (ör. `\\dot{V}*{act}`)';
+    }
+
+    // Geçerli kalıpları maskele: ondalık virgül, alt indis virgülü, teknik değişken adları.
+    const masked = t
+        .replace(/\b\d+,\d+\b/g, '__DECIMAL_COMMA__')
+        .replace(/_\{[^}]*,[^}]*\}/g, '__SUBSCRIPT_COMMA__')
+        .replace(/\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9]+(?:,[A-Za-z0-9]+)+\b/g, '__TECH_VAR_COMMA__');
+
+    if (/\b\d+\.\d+\s*,\s*[A-Za-z_\\]/.test(masked)) {
         return 'latex dışı kritik noktalama hatası bulundu (ör. `0.60,L_1`)';
     }
 
@@ -981,7 +993,9 @@ function validateCanonicalLatexQuestions(canonicalText) {
 
     const lines = source.split('\n');
     let inAnswerKey = false;
+    let inBlockMath = false;
     let current = null;
+    let context = 'outside_block'; // outside_block | inside_question_body | inside_explanation
 
     const pushQuestion = () => {
         if (current) questions.push(current);
@@ -1013,41 +1027,55 @@ function validateCanonicalLatexQuestions(canonicalText) {
         const t = line.trim();
         const lineNo = index + 1;
 
+        if (t === '\\[') {
+            inBlockMath = true;
+        } else if (t === '\\]') {
+            inBlockMath = false;
+        }
+
         if (/^Cevap\s+Anahtarı\s*:?$/i.test(t)) {
             inAnswerKey = true;
             return;
         }
 
         if (!inAnswerKey) {
-            const qStart = t.match(/^(\d+)\.(.*)$/);
+            const qStartAnalysis = analyzeLatexQuestionStartStrict(t);
+            const qStart = qStartAnalysis.isValidStart && !inBlockMath && context !== 'inside_explanation';
             if (qStart) {
                 pushQuestion();
                 current = {
-                    number: parseInt(qStart[1], 10),
-                    has_question_text: !!String(qStart[2] || '').trim(),
+                    number: parseInt(qStartAnalysis.number, 10),
+                    has_question_text: !!String(qStartAnalysis.rest || '').trim(),
                     options: { A: false, B: false, C: false, D: false, E: false },
                     has_explanation: false,
                     has_correct_answer: false,
                     raw_lines: [line],
                 };
+                context = 'inside_question_body';
                 return;
+            }
+
+            if (qStartAnalysis.isRawStart && !qStartAnalysis.isValidStart && /decimal_like|numeric_rhs|non_letter_rhs/.test(String(qStartAnalysis.reason || ''))) {
+                registerLineError(current?.number || null, lineNo, 'denklem satırı yanlışlıkla soru başlığı gibi görünüyor', t);
             }
 
             if (!current) return;
 
             current.raw_lines.push(line);
 
-            const opt = t.match(/^([ABCDE])\)\s*(.*)$/i);
+            const opt = !inBlockMath && context !== 'inside_explanation' ? t.match(/^([ABCDE])\)\s*(.*)$/i) : null;
             if (opt) {
                 current.options[opt[1].toUpperCase()] = true;
                 return;
             }
-            if (/^A[çc]ıklama\s*:/i.test(t)) {
+            if (!inBlockMath && /^A[çc]ıklama\s*:/i.test(t)) {
                 current.has_explanation = true;
+                context = 'inside_explanation';
                 return;
             }
-            if (/^Doğru\s*Cevap\s*:\s*([ABCDE])\)\s*(.*)$/i.test(t)) {
+            if (!inBlockMath && /^Doğru\s*Cevap\s*:\s*([ABCDE])\)\s*(.*)$/i.test(t)) {
                 current.has_correct_answer = true;
+                context = 'inside_question_body';
                 return;
             }
 
@@ -1074,7 +1102,7 @@ function validateCanonicalLatexQuestions(canonicalText) {
             }
         });
         if (!q.has_correct_answer) {
-            errors.push(`${q.number}. soruda Doğru Cevap satırı bulunamadı.`);
+            errors.push(`${q.number}. soruda doğru cevap satırı eksik.`);
         }
     });
 
@@ -1095,9 +1123,9 @@ function buildLatexValidationErrorMessage(validationResult) {
         return 'LaTeX içerik doğrulaması başarısız.';
     }
 
-    const top = errors.slice(0, 6).map((e) => `• ${e}`).join('\n');
-    const extra = errors.length > 6 ? `\n• ... ve ${errors.length - 6} hata daha` : '';
-    return `LaTeX preview doğrulaması başarısız:\n${top}${extra}`;
+    const top = errors.slice(0, 8).map((e) => `• ${e}`).join('\n');
+    const extra = errors.length > 8 ? `\n• ... ve ${errors.length - 8} hata daha` : '';
+    return `LaTeX doğrulama bulguları:\n${top}${extra}`;
 }
 
 function buildCanonicalLatexTextFromQuestions(questions) {
@@ -1434,55 +1462,9 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         .replace(/^[*✓✔]+\s*/, ''));
 
     const isDividerLine = (line) => /^\s*(⸻+|[-–—]{3,})\s*$/.test(line || '');
-    const analyzeQuestionStart = (line) => {
-        const trimmed = String(line || '').trim();
-        const m = trimmed.match(/^(\d+)\.(.*)$/);
-        if (!m) {
-            return { isRawStart: false, isValidStart: false, reason: 'not_start' };
-        }
-
-        const number = parseInt(m[1], 10);
-        const rest = String(m[2] || '').trim();
-
-        if (!Number.isFinite(number) || number <= 0) {
-            return { isRawStart: true, isValidStart: false, reason: 'invalid_number' };
-        }
-        if (!rest) {
-            return { isRawStart: true, isValidStart: false, reason: 'empty_rest' };
-        }
-
-        if (/^[-−–—).:]?\s*[ABCDE]\s*$/i.test(rest)) {
-            return { isRawStart: true, isValidStart: false, reason: 'answer_key_style' };
-        }
-
-        if (/^\d+(?:[.,]\d+)?\s*$/.test(rest)) {
-            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
-        }
-
-        const compactLine = `${number}.${rest}`;
-        if (/^\d+\.\d+(?:\s+[^\s]{1,12})?\s*$/i.test(compactLine)) {
-            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
-        }
-
-        if (/^\d/.test(rest) && !/\b[A-Za-zÇĞİÖŞÜçğıöşü]{4,}\b/.test(rest)) {
-            return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
-        }
-
-        if (!/[A-Za-zÇĞİÖŞÜçğıöşü]/.test(rest)) {
-            return { isRawStart: true, isValidStart: false, reason: 'non_text_rest' };
-        }
-
-        return {
-            isRawStart: true,
-            isValidStart: true,
-            number,
-            rest,
-            reason: 'ok'
-        };
-    };
 
     const getQuestionStart = (line) => {
-        const analysis = analyzeQuestionStart(line);
+        const analysis = analyzeLatexQuestionStartStrict(line);
         if (!analysis.isValidStart) return null;
         return { number: analysis.number, rest: analysis.rest };
     };
@@ -1553,11 +1535,11 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
     let rawQuestionStartCount = 0;
     let rejectedDecimalLikeStartCount = 0;
     for (let i = 0; i < lines.length; i++) {
-        const analysis = analyzeQuestionStart(lines[i]);
+        const analysis = analyzeLatexQuestionStartStrict(lines[i]);
         if (!analysis.isRawStart) continue;
 
         rawQuestionStartCount += 1;
-        if (analysis.reason === 'decimal_like') {
+        if (analysis.reason === 'decimal_like' || analysis.reason === 'numeric_rhs') {
             rejectedDecimalLikeStartCount += 1;
         }
 
@@ -1578,10 +1560,15 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
     const blocks = [];
     let currentBlock = null;
     let inAnswerKeySection = false;
+    let inBlockMath = false;
+    let insideExplanation = false;
 
     for (let i = 0; i < lines.length; i++) {
         const originalLine = String(lines[i] ?? '');
         const trimmed = originalLine.trim();
+
+        if (trimmed === '\\[') inBlockMath = true;
+        if (trimmed === '\\]') inBlockMath = false;
 
         if (/^cevap\s+anahtar[ıi]\s*:?\s*$/i.test(trimmed)) {
             inAnswerKeySection = true;
@@ -1591,7 +1578,7 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
             continue;
         }
 
-        const qStart = getQuestionStart(trimmed);
+        const qStart = !inBlockMath && !insideExplanation ? getQuestionStart(trimmed) : null;
         if (qStart) {
             if (currentBlock && currentBlock.lines.length) {
                 blocks.push(currentBlock);
@@ -1600,11 +1587,21 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
                 number: qStart.number,
                 lines: qStart.rest ? [qStart.rest] : []
             };
+            insideExplanation = false;
             continue;
         }
 
         if (!currentBlock) continue;
-        if (isDividerLine(trimmed)) continue;
+        if (isDividerLine(trimmed)) {
+            insideExplanation = false;
+            continue;
+        }
+        if (!inBlockMath && /^doğru\s*cevap\s*:/i.test(trimmed)) {
+            insideExplanation = false;
+        }
+        if (!inBlockMath && /^a[çc]ıklama\s*:/i.test(trimmed)) {
+            insideExplanation = true;
+        }
 
         currentBlock.lines.push(originalLine.replace(/[ \t]+$/g, ''));
     }
@@ -1633,9 +1630,13 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
         let optionFoundCount = 0;
         let explanationFound = false;
 
+        let inInnerBlockMath = false;
         for (const rawLine of block.lines) {
             const line = String(rawLine || '');
             const trimmed = line.trim();
+
+            if (trimmed === '\\[') inInnerBlockMath = true;
+            if (trimmed === '\\]') inInnerBlockMath = false;
 
             if (!trimmed) {
                 if (stage === 'explanation') explanationLines.push('');
@@ -1644,7 +1645,7 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
                 continue;
             }
 
-            const explicitAnswerFromLine = getExplicitCorrectAnswerFromLine(trimmed);
+            const explicitAnswerFromLine = !inInnerBlockMath ? getExplicitCorrectAnswerFromLine(trimmed) : '';
             if (explicitAnswerFromLine) {
                 explicitCorrect = explicitAnswerFromLine;
                 answerSource = 'final_correct_line';
@@ -1653,7 +1654,7 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
                 continue;
             }
 
-            const explanationStart = getExplanationStart(trimmed);
+            const explanationStart = !inInnerBlockMath ? getExplanationStart(trimmed) : null;
             if (explanationStart) {
                 stage = 'explanation';
                 currentOption = '';
@@ -1662,7 +1663,7 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
                 continue;
             }
 
-            const optionStart = stage !== 'explanation' ? getOptionStart(trimmed) : null;
+            const optionStart = (!inInnerBlockMath && stage !== 'explanation') ? getOptionStart(trimmed) : null;
             if (optionStart) {
                 stage = 'option';
                 currentOption = optionStart.letter;
@@ -2767,7 +2768,6 @@ $(document).ready(function() {
                 validation: validationResult,
                 canonical_text_preview: (canonicalResult.canonical_text || '').slice(0, 3000)
             });
-            return appAlert('Hata', buildLatexValidationErrorMessage(validationResult), 'error');
         }
 
         const parsedResult = parseLatexBulkQuestions(canonicalResult.canonical_text, questionType, courseId, topicId);
@@ -2777,6 +2777,9 @@ $(document).ready(function() {
                 normalize_debug: normalizedResult.debug,
                 canonical_text_preview: (canonicalResult.canonical_text || '').slice(0, 2000)
             });
+            if (!validationResult.success) {
+                return appAlert('Hata', `${buildLatexParseErrorMessage(parsedResult)}\n\n${buildLatexValidationErrorMessage(validationResult)}`, 'error');
+            }
             return appAlert('Hata', buildLatexParseErrorMessage(parsedResult), 'error');
         }
 
