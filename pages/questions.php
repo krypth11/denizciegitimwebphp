@@ -537,28 +537,60 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTop
     return result;
 }
 
-function analyzeLatexQuestionStartStrict(line) {
+function detectLatexQuestionStartCandidate(line) {
     const trimmed = String(line || '').trim();
     const m = trimmed.match(/^(\d+)\.(.*)$/);
     if (!m) {
-        return { isRawStart: false, isValidStart: false, reason: 'not_start' };
+        return { isCandidate: false, trimmed, reason: 'not_start' };
     }
 
-    const number = parseInt(m[1], 10);
-    const restRaw = String(m[2] || '');
-    const rest = restRaw.trim();
-
-    const looksEquationDominant = (txt) => {
-        const t = String(txt || '').trim();
-        if (!t) return false;
-
-        if (/^\d+(?:[.,]\d+)?\s*=/.test(t)) return true;
-        if (/^\d+(?:[.,]\d+)?\s*(?:\\times|×|\+|\-)/i.test(t)) return true;
-        if (/^\d+(?:[.,]\d+)?\s*(?:°\s*[A-Za-zÇĞİÖŞÜçğıöşü]+|[A-Za-z]{1,4}\/?[A-Za-z]{0,4})\s*$/.test(t)) return true;
-
-        const opCount = (t.match(/=|\+|\-|×|\*|\\times|\\frac|\//g) || []).length;
-        return opCount >= 2;
+    return {
+        isCandidate: true,
+        trimmed,
+        numberRaw: m[1],
+        restRaw: String(m[2] || ''),
+        rest: String(m[2] || '').trim(),
     };
+}
+
+function isLatexEquationDominantText(text) {
+    const t = String(text || '').trim();
+    if (!t) return false;
+
+    if (/^\d+(?:[.,]\d+)?\s*(?:=|≈|≃|≤|≥)\s*/.test(t)) return true;
+    if (/^\d+(?:[.,]\d+)?\s*(?:\\times|\\cdot|×|\*|\+|\-|\/)/i.test(t)) return true;
+    if (/^\d+(?:[.,]\d+)?\s*(?:\.\.\.|…)?\s*$/.test(t)) return true;
+    if (/^\d+(?:[.,]\d+)?\s*°\s*[A-Za-zÇĞİÖŞÜçğıöşü]{1,6}\b/.test(t)) return true;
+    if (/^\d+(?:[.,]\d+)?\s*[A-Za-z]{1,4}(?:\/[A-Za-z]{1,4})?\s*$/.test(t)) return true;
+
+    const operatorCount = (t.match(/=|\+|\-|×|\*|\\times|\\cdot|\\frac|\//g) || []).length;
+    return operatorCount >= 2;
+}
+
+function isLikelyLatexQuestionStemText(text) {
+    const t = String(text || '').trim();
+    if (!t) return false;
+    if (/^[A-Za-zÇĞİÖŞÜçğıöşü]/.test(t)) return true;
+
+    const m = t.match(/^([1-9]\d?)\s+([A-Za-zÇĞİÖŞÜçğıöşü]{2,}\b.*)$/);
+    if (!m) return false;
+
+    const tail = String(m[2] || '').trim();
+    if (isLatexEquationDominantText(`${m[1]} ${tail}`)) return false;
+
+    return /\b(silindirli|zamanlı|yardımcı|dizel|makinede|motor|çevrimi|soruda|aşağıdaki|hangi|verilen|olduğuna|olur|bulunuz|hesapla|hesaplayınız)\b/i.test(tail)
+        || /^[A-Za-zÇĞİÖŞÜçğıöşü]{2,}/.test(tail);
+}
+
+function analyzeLatexQuestionStartStrict(line, context = {}) {
+    const candidate = detectLatexQuestionStartCandidate(line);
+    if (!candidate.isCandidate) {
+        return { isRawStart: false, isValidStart: false, reason: candidate.reason || 'not_start' };
+    }
+
+    const number = parseInt(candidate.numberRaw, 10);
+    const restRaw = candidate.restRaw;
+    const rest = candidate.rest;
 
     if (!Number.isFinite(number) || number <= 0) {
         return { isRawStart: true, isValidStart: false, reason: 'invalid_number' };
@@ -567,60 +599,111 @@ function analyzeLatexQuestionStartStrict(line) {
         return { isRawStart: true, isValidStart: false, reason: 'empty_rest' };
     }
 
-    // 1.Bir ... -> 1. Bir ... (boşluksuz başlık formatını da kabul et)
-    const noSpaceLetterStart = restRaw.match(/^([A-Za-zÇĞİÖŞÜçğıöşü].*)$/);
-    if (noSpaceLetterStart) {
-        return {
-            isRawStart: true,
-            isValidStart: true,
-            number,
-            rest: String(noSpaceLetterStart[1] || '').trim(),
-            reason: 'ok_compact_letter_header'
-        };
-    }
-
-    if (/^[A-Za-zÇĞİÖŞÜçğıöşü]/.test(rest)) {
-        return {
-            isRawStart: true,
-            isValidStart: true,
-            number,
-            rest,
-            reason: 'ok'
-        };
+    if (context?.inBracketMathBlock || context?.insideExplanation || context?.isOptionLine || context?.contextState === 'inside_block' || context?.contextState === 'inside_explanation') {
+        return { isRawStart: true, isValidStart: false, reason: 'blocked_by_context' };
     }
 
     if (/^[-−–—).:]?\s*[ABCDE]\s*$/i.test(rest)) {
         return { isRawStart: true, isValidStart: false, reason: 'answer_key_style' };
     }
-    if (/^\d+(?:[.,]\d+)?\s*$/.test(rest)) {
+    if (/^\d+(?:[.,]\d+)?\s*(?:\.\.\.|…)?\s*$/.test(rest)) {
         return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
     }
 
-    // 1.8 silindirli ... gibi satırlarda soru metninin sayıyla başlamasına izin ver.
-    // Bu kural sadece "kısa sayı + harfli kelime" kalıbında ve denklem-dominant değilse çalışır.
-    const numericLeadingQuestionText = rest.match(/^([1-9]\d?)\s+([A-Za-zÇĞİÖŞÜçğıöşü]{2,}\b.*)$/);
-    if (numericLeadingQuestionText) {
-        const candidateText = `${numericLeadingQuestionText[1]} ${numericLeadingQuestionText[2].trim()}`;
-        if (looksEquationDominant(candidateText)) {
-            return { isRawStart: true, isValidStart: false, reason: 'numeric_equation_rhs' };
-        }
+    if (isLatexEquationDominantText(rest)) {
+        return { isRawStart: true, isValidStart: false, reason: 'numeric_equation_rhs' };
+    }
+
+    if (isLikelyLatexQuestionStemText(restRaw)) {
         return {
             isRawStart: true,
             isValidStart: true,
             number,
-            rest: candidateText,
-            reason: 'ok_numeric_leading_question_text'
+            rest: rest,
+            reason: /^[A-Za-zÇĞİÖŞÜçğıöşü]/.test(rest) ? 'ok' : 'ok_numeric_leading_question_text'
         };
-    }
-
-    if (looksEquationDominant(rest)) {
-        return { isRawStart: true, isValidStart: false, reason: 'numeric_equation_rhs' };
     }
 
     if (/^\d/.test(rest)) {
         return { isRawStart: true, isValidStart: false, reason: 'numeric_rhs' };
     }
     return { isRawStart: true, isValidStart: false, reason: 'non_letter_rhs' };
+}
+
+function findTopLevelLatexQuestionStarts(lines) {
+    const items = Array.isArray(lines) ? lines : [];
+    const indexes = [];
+    let rawStartCount = 0;
+    let rejectedDecimalLikeCount = 0;
+
+    let inBlockMath = false;
+    let inAnswerKey = false;
+    let contextState = 'outside_block'; // outside_block | inside_block | inside_question_body | inside_explanation
+
+    for (let i = 0; i < items.length; i++) {
+        const line = String(items[i] || '');
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        if (/^cevap\s+anahtar[ıi]\s*:?\s*$/i.test(trimmed)) {
+            inAnswerKey = true;
+            continue;
+        }
+        if (inAnswerKey) continue;
+
+        if (trimmed === '\\[') {
+            inBlockMath = true;
+            contextState = 'inside_block';
+            continue;
+        }
+        if (trimmed === '\\]') {
+            inBlockMath = false;
+            contextState = indexes.length ? 'inside_question_body' : 'outside_block';
+            continue;
+        }
+
+        const isOptionLine = /^\s*[ABCDE]\s*\)/i.test(trimmed);
+        const analysis = analyzeLatexQuestionStartStrict(trimmed, {
+            inBracketMathBlock: inBlockMath,
+            contextState,
+            insideExplanation: contextState === 'inside_explanation',
+            isOptionLine,
+        });
+
+        if (analysis.isRawStart) {
+            rawStartCount += 1;
+            if (/decimal_like|numeric_rhs|numeric_equation_rhs/.test(String(analysis.reason || ''))) {
+                rejectedDecimalLikeCount += 1;
+            }
+        }
+
+        if (analysis.isValidStart) {
+            indexes.push(i);
+            contextState = 'inside_question_body';
+            continue;
+        }
+
+        if (contextState !== 'inside_block') {
+            if (/^a[çc]ıklama\s*:/i.test(trimmed)) {
+                contextState = 'inside_explanation';
+            } else if (/^doğru\s*cevap\s*:/i.test(trimmed) || /^\s*(⸻+|[-–—]{3,})\s*$/.test(trimmed)) {
+                contextState = indexes.length ? 'inside_question_body' : 'outside_block';
+            } else if (indexes.length) {
+                contextState = 'inside_question_body';
+            }
+        }
+    }
+
+    const firstIndex = indexes.length ? indexes[0] : -1;
+    const leadingIntroLines = firstIndex > 0 ? items.slice(0, firstIndex) : [];
+
+    return {
+        indexes,
+        rawStartCount,
+        rejectedDecimalLikeCount,
+        firstIndex,
+        leadingIntroLines,
+    };
 }
 
 function normalizeLeadingQuestionHeaderLine(line, context = {}) {
@@ -700,7 +783,7 @@ function normalizeLatexBulkInput(rawText) {
     {
         const fixedLines = [];
         let inBracketMathBlock = false;
-        let insideExplanation = false;
+        let contextState = 'outside_block'; // outside_block | inside_block | inside_question_body | inside_explanation
 
         text.split('\n').forEach((rawLine) => {
             const original = String(rawLine || '');
@@ -708,7 +791,8 @@ function normalizeLatexBulkInput(rawText) {
 
             const normalizedLine = normalizeLeadingQuestionHeaderLine(original, {
                 inBracketMathBlock,
-                insideExplanation,
+                insideExplanation: contextState === 'inside_explanation',
+                contextState,
                 isOptionLine,
             });
             fixedLines.push(normalizedLine);
@@ -716,21 +800,27 @@ function normalizeLatexBulkInput(rawText) {
             const t = normalizedLine.trim();
             if (t === '[' || t === '\\[') {
                 inBracketMathBlock = true;
+                contextState = 'inside_block';
             } else if (t === ']' || t === '\\]') {
                 inBracketMathBlock = false;
-                insideExplanation = false;
+                contextState = 'outside_block';
             }
 
             if (!inBracketMathBlock) {
                 if (/^a[çc]ıklama\s*:/i.test(t)) {
-                    insideExplanation = true;
+                    contextState = 'inside_explanation';
                 } else if (/^doğru\s*cevap\s*:/i.test(t) || /^\s*(⸻+|[-–—]{3,})\s*$/.test(t)) {
-                    insideExplanation = false;
+                    contextState = 'inside_question_body';
                 }
 
-                const qStart = analyzeLatexQuestionStartStrict(t);
+                const qStart = analyzeLatexQuestionStartStrict(t, {
+                    inBracketMathBlock,
+                    contextState,
+                    insideExplanation: contextState === 'inside_explanation',
+                    isOptionLine,
+                });
                 if (qStart.isValidStart) {
-                    insideExplanation = false;
+                    contextState = 'inside_question_body';
                 }
             }
         });
@@ -818,31 +908,23 @@ function normalizeLatexBulkInput(rawText) {
 
     while (out.length && !String(out[out.length - 1]).trim()) out.pop();
 
-    const normalizedText = out.join('\n').replace(/\n{4,}/g, '\n\n\n').trim();
+    const topLevelStartInfo = findTopLevelLatexQuestionStarts(out);
+    result.debug.raw_question_start_count = topLevelStartInfo.rawStartCount;
+    result.debug.filtered_valid_question_start_count = topLevelStartInfo.indexes.length;
+    result.debug.rejected_decimal_like_start_count = topLevelStartInfo.rejectedDecimalLikeCount;
+    result.debug.question_start_count = topLevelStartInfo.indexes.length;
+    result.debug.leading_intro_skipped_line_count = Math.max(0, topLevelStartInfo.firstIndex);
+    result.debug.ignored_leading_text_preview = topLevelStartInfo.leadingIntroLines
+        .map((line) => String(line || '').trim())
+        .filter(Boolean)
+        .slice(0, 4)
+        .join(' | ');
+
+    const effectiveOut = topLevelStartInfo.firstIndex > 0 ? out.slice(topLevelStartInfo.firstIndex) : out;
+    const normalizedText = effectiveOut.join('\n').replace(/\n{4,}/g, '\n\n\n').trim();
     result.normalized_text = normalizedText;
     result.debug.normalized_line_count = normalizedText ? normalizedText.split('\n').length : 0;
 
-    const normalizedLines = normalizedText ? normalizedText.split('\n') : [];
-    let rawStartCount = 0;
-    let validStartCount = 0;
-    let rejectedDecimalLikeCount = 0;
-    normalizedLines.forEach((line) => {
-        const analysis = analyzeLatexQuestionStartStrict(line);
-        if (!analysis.isRawStart) return;
-        rawStartCount += 1;
-        if (analysis.isValidStart) {
-            validStartCount += 1;
-            return;
-        }
-        if (analysis.reason === 'decimal_like') {
-            rejectedDecimalLikeCount += 1;
-        }
-    });
-
-    result.debug.raw_question_start_count = rawStartCount;
-    result.debug.filtered_valid_question_start_count = validStartCount;
-    result.debug.rejected_decimal_like_start_count = rejectedDecimalLikeCount;
-    result.debug.question_start_count = validStartCount;
     result.debug.option_marker_count = (normalizedText.match(/^\s*[ABCDE]\s*\)/gmi) || []).length;
 
     if (!normalizedText) {
@@ -1157,7 +1239,12 @@ function validateCanonicalLatexQuestions(canonicalText) {
         }
 
         if (!inAnswerKey) {
-            const qStartAnalysis = analyzeLatexQuestionStartStrict(t);
+            const qStartAnalysis = analyzeLatexQuestionStartStrict(t, {
+                inBracketMathBlock: inBlockMath,
+                contextState: inBlockMath ? 'inside_block' : context,
+                insideExplanation: context === 'inside_explanation',
+                isOptionLine: /^\s*[ABCDE]\s*\)/i.test(t),
+            });
             const qStart = qStartAnalysis.isValidStart && !inBlockMath && context !== 'inside_explanation';
             if (qStart) {
                 pushQuestion();
@@ -1594,8 +1681,8 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
 
     const isDividerLine = (line) => /^\s*(⸻+|[-–—]{3,})\s*$/.test(line || '');
 
-    const getQuestionStart = (line) => {
-        const analysis = analyzeLatexQuestionStartStrict(line);
+    const getQuestionStart = (line, context = {}) => {
+        const analysis = analyzeLatexQuestionStartStrict(line, context);
         if (!analysis.isValidStart) return null;
         return { number: analysis.number, rest: analysis.rest };
     };
@@ -1662,26 +1749,18 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
     });
 
     const lines = allLines;
-    const questionStartIndexes = [];
-    let rawQuestionStartCount = 0;
-    let rejectedDecimalLikeStartCount = 0;
-    for (let i = 0; i < lines.length; i++) {
-        const analysis = analyzeLatexQuestionStartStrict(lines[i]);
-        if (!analysis.isRawStart) continue;
-
-        rawQuestionStartCount += 1;
-        if (analysis.reason === 'decimal_like' || analysis.reason === 'numeric_rhs') {
-            rejectedDecimalLikeStartCount += 1;
-        }
-
-        if (analysis.isValidStart) {
-            questionStartIndexes.push(i);
-        }
-    }
-    result.debug.raw_question_start_count = rawQuestionStartCount;
+    const startInfo = findTopLevelLatexQuestionStarts(lines);
+    const questionStartIndexes = startInfo.indexes;
+    result.debug.raw_question_start_count = startInfo.rawStartCount;
     result.debug.filtered_valid_question_start_count = questionStartIndexes.length;
-    result.debug.rejected_decimal_like_start_count = rejectedDecimalLikeStartCount;
+    result.debug.rejected_decimal_like_start_count = startInfo.rejectedDecimalLikeCount;
     result.debug.question_start_count = questionStartIndexes.length;
+    result.debug.leading_intro_skipped_line_count = Math.max(0, startInfo.firstIndex);
+    result.debug.ignored_leading_text_preview = startInfo.leadingIntroLines
+        .map((line) => String(line || '').trim())
+        .filter(Boolean)
+        .slice(0, 4)
+        .join(' | ');
 
     if (!questionStartIndexes.length) {
         result.error_code = 'no_question_start';
@@ -1694,7 +1773,8 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
     let inBlockMath = false;
     let insideExplanation = false;
 
-    for (let i = 0; i < lines.length; i++) {
+    const parseStartIndex = questionStartIndexes[0];
+    for (let i = parseStartIndex; i < lines.length; i++) {
         const originalLine = String(lines[i] ?? '');
         const trimmed = originalLine.trim();
 
@@ -1709,7 +1789,14 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
             continue;
         }
 
-        const qStart = !inBlockMath && !insideExplanation ? getQuestionStart(trimmed) : null;
+        const qStart = !inBlockMath && !insideExplanation
+            ? getQuestionStart(trimmed, {
+                inBracketMathBlock: inBlockMath,
+                contextState: insideExplanation ? 'inside_explanation' : 'inside_question_body',
+                insideExplanation,
+                isOptionLine: /^\s*[ABCDE]\s*\)/i.test(trimmed),
+            })
+            : null;
         if (qStart) {
             if (currentBlock && currentBlock.lines.length) {
                 blocks.push(currentBlock);
@@ -1897,7 +1984,7 @@ function buildLatexParseErrorMessage(parsedResult) {
         return 'Metin boş görünüyor. Lütfen LaTeX soru içeriğini yapıştırın.';
     }
     if (errorCode === 'no_question_start') {
-        return 'Soru başlangıcı bulunamadı. Her soru satırı "1." / "2." formatında başlamalıdır.';
+        return 'Geçerli soru başlangıcı bulunamadı. Soru satırları "1.Bir...", "1. Bir..." veya "1.6 silindirli..." gibi formatta başlamalıdır.';
     }
     if (errorCode === 'no_candidate_block') {
         return 'Soru blokları tespit edilemedi. Numaralı satırlardan sonra en az A) ve B) seçeneklerini kontrol edin.';
