@@ -548,6 +548,18 @@ function analyzeLatexQuestionStartStrict(line) {
     const restRaw = String(m[2] || '');
     const rest = restRaw.trim();
 
+    const looksEquationDominant = (txt) => {
+        const t = String(txt || '').trim();
+        if (!t) return false;
+
+        if (/^\d+(?:[.,]\d+)?\s*=/.test(t)) return true;
+        if (/^\d+(?:[.,]\d+)?\s*(?:\\times|×|\+|\-)/i.test(t)) return true;
+        if (/^\d+(?:[.,]\d+)?\s*(?:°\s*[A-Za-zÇĞİÖŞÜçğıöşü]+|[A-Za-z]{1,4}\/?[A-Za-z]{0,4})\s*$/.test(t)) return true;
+
+        const opCount = (t.match(/=|\+|\-|×|\*|\\times|\\frac|\//g) || []).length;
+        return opCount >= 2;
+    };
+
     if (!Number.isFinite(number) || number <= 0) {
         return { isRawStart: true, isValidStart: false, reason: 'invalid_number' };
     }
@@ -585,22 +597,34 @@ function analyzeLatexQuestionStartStrict(line) {
     }
 
     // 1.8 silindirli ... gibi satırlarda soru metninin sayıyla başlamasına izin ver.
-    // Bu kural sadece "kısa sayı + en az 4 harfli kelime" kalıbında çalışır.
-    const numericLeadingQuestionText = rest.match(/^([1-9]\d?)\s+([A-Za-zÇĞİÖŞÜçğıöşü]{4,}\b.*)$/);
+    // Bu kural sadece "kısa sayı + harfli kelime" kalıbında ve denklem-dominant değilse çalışır.
+    const numericLeadingQuestionText = rest.match(/^([1-9]\d?)\s+([A-Za-zÇĞİÖŞÜçğıöşü]{2,}\b.*)$/);
     if (numericLeadingQuestionText) {
+        const candidateText = `${numericLeadingQuestionText[1]} ${numericLeadingQuestionText[2].trim()}`;
+        if (looksEquationDominant(candidateText)) {
+            return { isRawStart: true, isValidStart: false, reason: 'numeric_equation_rhs' };
+        }
         return {
             isRawStart: true,
             isValidStart: true,
             number,
-            rest: `${numericLeadingQuestionText[1]} ${numericLeadingQuestionText[2].trim()}`,
+            rest: candidateText,
             reason: 'ok_numeric_leading_question_text'
         };
+    }
+
+    if (looksEquationDominant(rest)) {
+        return { isRawStart: true, isValidStart: false, reason: 'numeric_equation_rhs' };
     }
 
     if (/^\d/.test(rest)) {
         return { isRawStart: true, isValidStart: false, reason: 'numeric_rhs' };
     }
     return { isRawStart: true, isValidStart: false, reason: 'non_letter_rhs' };
+}
+
+function normalizeLeadingQuestionHeaderLine(line, context = {}) {
+    return normalizeLeadingQuestionNumberPrefix(line, context);
 }
 
 function normalizeLeadingQuestionNumberPrefix(line, context = {}) {
@@ -621,7 +645,7 @@ function normalizeLeadingQuestionNumberPrefix(line, context = {}) {
     }
 
     // 1.8 silindirli ... -> 1. 8 silindirli ...
-    const compactNumericQuestionHeader = raw.match(/^(\s*)(\d+)\.([1-9]\d?)\s+([A-Za-zÇĞİÖŞÜçğıöşü]{4,}\b.*)$/);
+    const compactNumericQuestionHeader = raw.match(/^(\s*)(\d+)\.([1-9]\d?)\s+([A-Za-zÇĞİÖŞÜçğıöşü]{2,}\b.*)$/);
     if (compactNumericQuestionHeader) {
         const normalized = `${compactNumericQuestionHeader[1]}${compactNumericQuestionHeader[2]}. ${compactNumericQuestionHeader[3]} ${compactNumericQuestionHeader[4]}`;
         const analysis = analyzeLatexQuestionStartStrict(normalized);
@@ -682,7 +706,7 @@ function normalizeLatexBulkInput(rawText) {
             const original = String(rawLine || '');
             const isOptionLine = /^\s*[ABCDE]\s*\)/i.test(original.trim());
 
-            const normalizedLine = normalizeLeadingQuestionNumberPrefix(original, {
+            const normalizedLine = normalizeLeadingQuestionHeaderLine(original, {
                 inBracketMathBlock,
                 insideExplanation,
                 isOptionLine,
@@ -1096,6 +1120,13 @@ function validateCanonicalLatexQuestions(canonicalText) {
         lineErrors.push({ question_number: questionNo || null, line: lineNo, message: msg, line_text: lineText || '' });
     };
 
+    const registerLineWarning = (questionNo, lineNo, message, lineText = '') => {
+        const prefix = Number.isFinite(questionNo)
+            ? `${questionNo}. soruda`
+            : 'Metinde';
+        warnings.push(`${prefix} ${message}${lineText ? `: \`${lineText}\`` : ''}`);
+    };
+
     const countMatches = (txt, regex) => (String(txt || '').match(regex) || []).length;
     const inlineOpen = countMatches(source, /\\\(/g);
     const inlineClose = countMatches(source, /\\\)/g);
@@ -1142,8 +1173,21 @@ function validateCanonicalLatexQuestions(canonicalText) {
                 return;
             }
 
-            if (qStartAnalysis.isRawStart && !qStartAnalysis.isValidStart && /decimal_like|numeric_rhs|non_letter_rhs/.test(String(qStartAnalysis.reason || ''))) {
-                registerLineError(current?.number || null, lineNo, 'denklem satırı yanlışlıkla soru başlığı gibi görünüyor', t);
+            // Bu kontrolü sadece top-level split riski olan durumlarda uyarı seviyesinde çalıştır.
+            // Explanation veya block-math içindeki denklem satırları burada hata üretmemeli.
+            if (
+                qStartAnalysis.isRawStart &&
+                !qStartAnalysis.isValidStart &&
+                !inBlockMath &&
+                context !== 'inside_explanation'
+            ) {
+                const reason = String(qStartAnalysis.reason || '');
+                const splitRiskReason = /decimal_like|numeric_rhs|non_letter_rhs|numeric_equation_rhs/.test(reason);
+                const looksTopLevelHeaderCandidate = /^\d+\.(?:\s*[A-Za-zÇĞİÖŞÜçğıöşü]|\d+\s+[A-Za-zÇĞİÖŞÜçğıöşü])/.test(t);
+
+                if (splitRiskReason && looksTopLevelHeaderCandidate && current) {
+                    registerLineWarning(current.number, lineNo, 'satır soru başlığına benziyor ancak denklemsel/nümerik göründüğü için yeni soru olarak alınmadı', t);
+                }
             }
 
             if (!current) return;
