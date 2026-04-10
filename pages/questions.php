@@ -3023,19 +3023,41 @@ $(document).ready(function() {
         if (!questionType) return appAlert('Uyarı', 'Lütfen soru türü seçiniz.', 'warning');
         if (!rawText || !rawText.trim()) return appAlert('Uyarı', 'Lütfen soru metnini yapıştırınız.', 'warning');
 
-        // İSTEK GEREĞİ: LaTeX yükleme akışı, Toplu Soru Yükle parser davranışıyla birebir çalışır.
-        // Not: Ayrı modal/ayrı state korundu; bulk handler'a dokunulmadı.
-        const parsedResult = parseBulkQuestions(rawText, questionType, courseId, topicId);
-        if (!parsedResult.parsed_count) {
-            return appAlert('Hata', 'Hiç soru ayrıştırılamadı. Format hatalı olabilir.', 'error');
+        const normalizeResult = normalizeLatexBulkInput(rawText);
+        if (!normalizeResult.success) {
+            return appAlert('Hata', buildLatexNormalizeErrorMessage(normalizeResult), 'error');
         }
 
-        generatedQuestions = parsedResult.parsed;
+        const canonicalizeResult = canonicalizeLatexBulkInput(normalizeResult.normalized_text || '');
+        if (!canonicalizeResult.success) {
+            return appAlert('Hata', buildLatexNormalizeErrorMessage(canonicalizeResult), 'error');
+        }
+
+        const validationResult = validateLatexBulkInput(canonicalizeResult.canonical_text || '');
+        if (!validationResult.success) {
+            return appAlert('Hata', buildLatexValidationErrorMessage(validationResult), 'error');
+        }
+
+        const parsedResult = parseLatexBulkQuestions(
+            canonicalizeResult.canonical_text || '',
+            questionType,
+            courseId,
+            topicId
+        );
+        if (!parsedResult.parsed_count) {
+            return appAlert('Hata', buildLatexParseErrorMessage(parsedResult), 'error');
+        }
+
+        generatedQuestions = parsedResult.parsed.map((q) => sanitizeLatexBulkParsedQuestion(q));
         generationMeta = {
             source: 'latex_bulk',
             parsed_count: parsedResult.parsed_count,
             skipped_count: parsedResult.skipped_count,
-            total_blocks: parsedResult.total_blocks
+            total_blocks: parsedResult.total_blocks,
+            latex_normalize: normalizeResult,
+            latex_canonicalize: canonicalizeResult,
+            latex_validation: validationResult,
+            latex_parse_debug: parsedResult.debug || {}
         };
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('latexBulkUploadModal')).hide();
