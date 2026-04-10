@@ -559,6 +559,20 @@ function analyzeLatexQuestionStartStrict(line) {
     if (/^\d+(?:[.,]\d+)?\s*$/.test(rest)) {
         return { isRawStart: true, isValidStart: false, reason: 'decimal_like' };
     }
+
+    // 1.8 silindirli ... gibi satırlarda soru metninin sayıyla başlamasına izin ver.
+    // Bu kural sadece "kısa sayı + en az 4 harfli kelime" kalıbında çalışır.
+    const numericLeadingQuestionText = rest.match(/^([1-9]\d?)\s+([A-Za-zÇĞİÖŞÜçğıöşü]{4,}\b.*)$/);
+    if (numericLeadingQuestionText) {
+        return {
+            isRawStart: true,
+            isValidStart: true,
+            number,
+            rest: `${numericLeadingQuestionText[1]} ${numericLeadingQuestionText[2].trim()}`,
+            reason: 'ok_numeric_leading_question_text'
+        };
+    }
+
     if (/^\d/.test(rest)) {
         return { isRawStart: true, isValidStart: false, reason: 'numeric_rhs' };
     }
@@ -573,6 +587,24 @@ function analyzeLatexQuestionStartStrict(line) {
         rest,
         reason: 'ok'
     };
+}
+
+function normalizeLeadingQuestionNumberPrefix(line, context = {}) {
+    const raw = String(line || '');
+    const trimmed = raw.trim();
+    if (!trimmed) return raw;
+
+    if (context?.inBracketMathBlock || context?.insideExplanation || context?.isOptionLine) {
+        return raw;
+    }
+
+    // 1.8 silindirli ... -> 1. 8 silindirli ...
+    const m = raw.match(/^(\s*)(\d+)\.([1-9]\d?)\s+([A-Za-zÇĞİÖŞÜçğıöşü]{4,}\b.*)$/);
+    if (!m) return raw;
+
+    const normalized = `${m[1]}${m[2]}. ${m[3]} ${m[4]}`;
+    const analysis = analyzeLatexQuestionStartStrict(normalized);
+    return analysis.isValidStart ? normalized : raw;
 }
 
 function normalizeLatexBulkInput(rawText) {
@@ -615,17 +647,48 @@ function normalizeLatexBulkInput(rawText) {
         .replace(/\r\n?/g, '\n')
         .replace(/[\f\v]+/g, '\n');
 
-    // Sadece güvenli soru başlangıcı için 1.Orta... -> 1. Orta... düzeltmesi
-    text = text
-        .split('\n')
-        .map((line) => {
-            const m = String(line || '').match(/^(\s*)(\d+)\.(\S.*)$/);
-            if (!m) return line;
-            const analysis = analyzeLatexQuestionStartStrict(`${m[2]}. ${m[3]}`);
-            if (!analysis.isValidStart) return line;
-            return `${m[1]}${m[2]}. ${m[3]}`;
-        })
-        .join('\n');
+    // Top-level soru başlangıcı normalizasyonu:
+    // 1.8 silindirli ... -> 1. 8 silindirli ...
+    {
+        const fixedLines = [];
+        let inBracketMathBlock = false;
+        let insideExplanation = false;
+
+        text.split('\n').forEach((rawLine) => {
+            const original = String(rawLine || '');
+            const isOptionLine = /^\s*[ABCDE]\s*\)/i.test(original.trim());
+
+            const normalizedLine = normalizeLeadingQuestionNumberPrefix(original, {
+                inBracketMathBlock,
+                insideExplanation,
+                isOptionLine,
+            });
+            fixedLines.push(normalizedLine);
+
+            const t = normalizedLine.trim();
+            if (t === '[' || t === '\\[') {
+                inBracketMathBlock = true;
+            } else if (t === ']' || t === '\\]') {
+                inBracketMathBlock = false;
+                insideExplanation = false;
+            }
+
+            if (!inBracketMathBlock) {
+                if (/^a[çc]ıklama\s*:/i.test(t)) {
+                    insideExplanation = true;
+                } else if (/^doğru\s*cevap\s*:/i.test(t) || /^\s*(⸻+|[-–—]{3,})\s*$/.test(t)) {
+                    insideExplanation = false;
+                }
+
+                const qStart = analyzeLatexQuestionStartStrict(t);
+                if (qStart.isValidStart) {
+                    insideExplanation = false;
+                }
+            }
+        });
+
+        text = fixedLines.join('\n');
+    }
 
     // Marker'ları satır başına yaklaştır (yalnızca bracket-math blokları dışında)
     const markerAdjustedLines = [];
