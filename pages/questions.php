@@ -710,6 +710,28 @@ function normalizeLeadingQuestionHeaderLine(line, context = {}) {
     return normalizeLeadingQuestionNumberPrefix(line, context);
 }
 
+function normalizeLeadingIntroAndQuestionHeaders(lines) {
+    const inputLines = Array.isArray(lines) ? lines : [];
+    const startInfo = findTopLevelLatexQuestionStarts(inputLines);
+    const effectiveLines = startInfo.firstIndex > 0 ? inputLines.slice(startInfo.firstIndex) : inputLines.slice();
+
+    return {
+        lines: effectiveLines,
+        debug: {
+            raw_question_start_count: startInfo.rawStartCount,
+            filtered_valid_question_start_count: startInfo.indexes.length,
+            rejected_decimal_like_start_count: startInfo.rejectedDecimalLikeCount,
+            question_start_count: startInfo.indexes.length,
+            leading_intro_skipped_line_count: Math.max(0, startInfo.firstIndex),
+            ignored_leading_text_preview: startInfo.leadingIntroLines
+                .map((line) => String(line || '').trim())
+                .filter(Boolean)
+                .slice(0, 4)
+                .join(' | '),
+        }
+    };
+}
+
 function normalizeLeadingQuestionNumberPrefix(line, context = {}) {
     const raw = String(line || '');
     const trimmed = raw.trim();
@@ -908,19 +930,10 @@ function normalizeLatexBulkInput(rawText) {
 
     while (out.length && !String(out[out.length - 1]).trim()) out.pop();
 
-    const topLevelStartInfo = findTopLevelLatexQuestionStarts(out);
-    result.debug.raw_question_start_count = topLevelStartInfo.rawStartCount;
-    result.debug.filtered_valid_question_start_count = topLevelStartInfo.indexes.length;
-    result.debug.rejected_decimal_like_start_count = topLevelStartInfo.rejectedDecimalLikeCount;
-    result.debug.question_start_count = topLevelStartInfo.indexes.length;
-    result.debug.leading_intro_skipped_line_count = Math.max(0, topLevelStartInfo.firstIndex);
-    result.debug.ignored_leading_text_preview = topLevelStartInfo.leadingIntroLines
-        .map((line) => String(line || '').trim())
-        .filter(Boolean)
-        .slice(0, 4)
-        .join(' | ');
+    const introNormalized = normalizeLeadingIntroAndQuestionHeaders(out);
+    Object.assign(result.debug, introNormalized.debug || {});
 
-    const effectiveOut = topLevelStartInfo.firstIndex > 0 ? out.slice(topLevelStartInfo.firstIndex) : out;
+    const effectiveOut = introNormalized.lines || [];
     const normalizedText = effectiveOut.join('\n').replace(/\n{4,}/g, '\n\n\n').trim();
     result.normalized_text = normalizedText;
     result.debug.normalized_line_count = normalizedText ? normalizedText.split('\n').length : 0;
@@ -937,10 +950,26 @@ function normalizeLatexBulkInput(rawText) {
 }
 
 function convertBracketLatexToCanonicalLatex(normalizedText) {
+    const analyzeBracketBlockContent = (blockLines) => {
+        const lines = (blockLines || []).map((l) => String(l || '').trim()).filter(Boolean);
+        if (!lines.length) {
+            return { isMixed: false };
+        }
+
+        const mathLike = (txt) => /\\[A-Za-z]+|[_^=]|\b\d+(?:[.,]\d+)?\b|[+\-*/×÷]|\{|\}/.test(txt);
+        const proseLike = (txt) => /[A-Za-zÇĞİÖŞÜçğıöşü]{3,}\s+[A-Za-zÇĞİÖŞÜçğıöşü]{3,}/.test(txt) && !/\\[A-Za-z]+/.test(txt);
+
+        const hasMathLike = lines.some((line) => mathLike(line));
+        const hasProseLike = lines.some((line) => proseLike(line));
+
+        return { isMixed: hasMathLike && hasProseLike };
+    };
+
     const lines = String(normalizedText || '').replace(/\r\n?/g, '\n').split('\n');
     const out = [];
     let inBracketBlock = false;
     let bracketStartLine = -1;
+    let bracketLines = [];
 
     for (let i = 0; i < lines.length; i++) {
         const originalLine = String(lines[i] || '').replace(/[ \t]+$/g, '');
@@ -950,13 +979,26 @@ function convertBracketLatexToCanonicalLatex(normalizedText) {
         if (!inBracketBlock && trimmed === '[') {
             inBracketBlock = true;
             bracketStartLine = lineNo;
+            bracketLines = [];
             out.push('\\[');
             continue;
         }
 
         if (inBracketBlock && trimmed === ']') {
+            const blockAnalysis = analyzeBracketBlockContent(bracketLines);
+            if (blockAnalysis.isMixed) {
+                return {
+                    success: false,
+                    error_code: 'mixed_bracket_latex_block_content',
+                    converted_text: '',
+                    debug: { start_line: bracketStartLine, end_line: lineNo }
+                };
+            }
+
+            bracketLines.forEach((line) => out.push(line));
             inBracketBlock = false;
             bracketStartLine = -1;
+            bracketLines = [];
             out.push('\\]');
             continue;
         }
@@ -968,6 +1010,11 @@ function convertBracketLatexToCanonicalLatex(normalizedText) {
                 converted_text: '',
                 debug: { line: lineNo }
             };
+        }
+
+        if (inBracketBlock) {
+            bracketLines.push(originalLine);
+            continue;
         }
 
         out.push(originalLine);
@@ -1140,6 +1187,13 @@ function canonicalizeLatexBulkInput(normalizedText) {
 function detectLatexBrokenLineIssue(line) {
     const t = String(line || '').trim();
     if (!t) return null;
+
+    if (/^[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9]+,[A-Za-z0-9_]+$/i.test(t)) {
+        return null;
+    }
+    if (/\b\d+,\d+\s*(?:°\s*[A-Za-zÇĞİÖŞÜçğıöşü]+|[A-Za-zÇĞİÖŞÜçğıöşü%/]+)\b/.test(t)) {
+        return null;
+    }
 
     if (/^={4,}$/.test(t)) {
         return 'geçersiz ayraç satırı bulundu: `========` satırı kaldırılmalı veya formüle dönüştürülmeli';
@@ -1333,6 +1387,10 @@ function validateCanonicalLatexQuestions(canonicalText) {
         line_errors: lineErrors,
         question_summaries: questions,
     };
+}
+
+function validateLatexBulkInput(canonicalText) {
+    return validateCanonicalLatexQuestions(canonicalText);
 }
 
 function buildLatexValidationErrorMessage(validationResult) {
@@ -1963,11 +2021,6 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
             result.error_code = 'no_option_marker';
         } else if (result.debug.blocks_with_answer === 0 && Object.keys(answerMap).length === 0) {
             result.error_code = 'no_correct_answer';
-        } else if (
-            result.debug.rejected_decimal_like_start_count > 0 ||
-            result.debug.raw_question_start_count > result.debug.filtered_valid_question_start_count
-        ) {
-            result.error_code = 'question_start_misdetected';
         } else {
             result.error_code = 'blocks_invalid';
         }
@@ -2032,6 +2085,12 @@ function buildLatexNormalizeErrorMessage(normalizeResult) {
         return mathType === 'block'
             ? 'Boş bir block math ifadesi tespit edildi ("\\[ \\]"). Lütfen blok içine geçerli LaTeX yazın.'
             : 'Boş bir inline math ifadesi tespit edildi ("\\( \\)"). Lütfen parantez içine geçerli LaTeX yazın.';
+    }
+    if (errorCode === 'mixed_bracket_latex_block_content') {
+        const start = Number(normalizeResult?.debug?.start_line || 0);
+        const end = Number(normalizeResult?.debug?.end_line || 0);
+        const where = (start && end) ? ` (satır ${start}-${end})` : '';
+        return `Bracket LaTeX bloğunda metin ve formül karışık görünüyor${where}. Blok içinde yalnızca formül satırları bırakın.`;
     }
 
     return 'LaTeX import metni işlenemedi. Lütfen formatı kontrol edip tekrar deneyin.';
@@ -2980,7 +3039,7 @@ $(document).ready(function() {
             return appAlert('Hata', buildLatexNormalizeErrorMessage(canonicalResult), 'error');
         }
 
-        const validationResult = validateCanonicalLatexQuestions(canonicalResult.canonical_text);
+        const validationResult = validateLatexBulkInput(canonicalResult.canonical_text);
         if (!validationResult.success) {
             console.log('LATEX_VALIDATION_DEBUG', {
                 validation: validationResult,
