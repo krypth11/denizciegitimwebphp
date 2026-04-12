@@ -16,6 +16,10 @@ try {
     $attemptId = trim((string)($payload['attempt_id'] ?? ''));
     $questionId = trim((string)($payload['question_id'] ?? ''));
     $selectedAnswer = isset($payload['selected_answer']) ? (string)$payload['selected_answer'] : null;
+    $elapsedSeconds = null;
+    if (array_key_exists('elapsed_seconds', $payload)) {
+        $elapsedSeconds = max(0, (int)$payload['elapsed_seconds']);
+    }
 
     if ($attemptId === '' || $questionId === '') {
         api_error('attempt_id ve question_id zorunludur.', 422);
@@ -32,7 +36,7 @@ try {
         'mock-exams.answer.attempt'
     );
 
-    $result = mock_exam_save_answer($pdo, $userId, $attemptId, $questionId, $selectedAnswer);
+    $result = mock_exam_save_answer($pdo, $userId, $attemptId, $questionId, $selectedAnswer, $elapsedSeconds);
     api_success('Cevap kaydedildi.', $result);
 } catch (Throwable $e) {
     api_error($e->getMessage(), 422);

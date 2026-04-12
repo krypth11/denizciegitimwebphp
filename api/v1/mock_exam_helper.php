@@ -232,8 +232,105 @@ function mock_exam_save_user_exam_preferences(PDO $pdo, string $userId, string $
     $stmt->execute($params);
 }
 
+function mock_exam_iso_utc_now(): string
+{
+    return (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format(DATE_ATOM);
+}
+
+function mock_exam_parse_datetime_to_timestamp(?string $value): ?int
+{
+    $raw = trim((string)($value ?? ''));
+    if ($raw === '') {
+        return null;
+    }
+
+    try {
+        $dt = new DateTimeImmutable($raw);
+        return (int)$dt->getTimestamp();
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function mock_exam_maybe_persist_attempt_elapsed(PDO $pdo, string $userId, string $attemptId, array $attempt, ?int $clientElapsedSeconds): void
+{
+    if ($clientElapsedSeconds === null) {
+        return;
+    }
+
+    $a = mock_exam_get_attempt_schema($pdo);
+    if (!$a['elapsed_seconds']) {
+        return;
+    }
+
+    $safeClientElapsed = max(0, $clientElapsedSeconds);
+    $durationLimit = max(0, (int)($attempt['total_duration_seconds'] ?? $attempt['duration_seconds_limit'] ?? 2400));
+    $safeClientElapsed = min($safeClientElapsed, $durationLimit);
+    $currentPersisted = max(0, (int)($attempt['persisted_elapsed_seconds'] ?? $attempt['elapsed_seconds'] ?? 0));
+    $nextPersisted = max($currentPersisted, $safeClientElapsed);
+
+    if ($nextPersisted === $currentPersisted) {
+        return;
+    }
+
+    $setAttempt = [mock_exam_q($a['elapsed_seconds']) . ' = ?'];
+    $attemptParams = [$nextPersisted];
+    if ($a['updated_at']) {
+        $setAttempt[] = mock_exam_q($a['updated_at']) . ' = NOW()';
+    }
+    $attemptParams[] = $attemptId;
+    $attemptParams[] = $userId;
+
+    $sqlAttempt = 'UPDATE ' . mock_exam_q($a['table'])
+        . ' SET ' . implode(', ', $setAttempt)
+        . ' WHERE ' . mock_exam_q($a['id']) . ' = ? AND ' . mock_exam_q($a['user_id']) . ' = ?';
+    $stmtAttempt = $pdo->prepare($sqlAttempt);
+    $stmtAttempt->execute($attemptParams);
+}
+
+function mock_exam_build_attempt_time_state(array $row): array
+{
+    $status = (string)($row['status'] ?? 'in_progress');
+    $totalDuration = max(0, (int)($row['duration_seconds_limit'] ?? 2400));
+    $persistedElapsed = max(0, (int)($row['elapsed_seconds'] ?? 0));
+    $persistedElapsed = min($persistedElapsed, $totalDuration);
+
+    $nowTs = time();
+    $startedAtTs = mock_exam_parse_datetime_to_timestamp(isset($row['started_at']) ? (string)$row['started_at'] : null);
+
+    $effectiveElapsed = $persistedElapsed;
+    if ($status === 'in_progress' && $startedAtTs !== null) {
+        $derivedElapsed = max(0, $nowTs - $startedAtTs);
+        $effectiveElapsed = max($persistedElapsed, $derivedElapsed);
+    }
+
+    $effectiveElapsed = max(0, min($effectiveElapsed, $totalDuration));
+    $remainingSeconds = max(0, $totalDuration - $effectiveElapsed);
+
+    $expiresAt = null;
+    if ($startedAtTs !== null) {
+        $expiresAt = gmdate(DATE_ATOM, $startedAtTs + $totalDuration);
+    }
+
+    $resumeState = 'completed';
+    if ($status === 'in_progress') {
+        $resumeState = ($remainingSeconds <= 0) ? 'expired' : 'active';
+    }
+
+    return [
+        'total_duration_seconds' => $totalDuration,
+        'persisted_elapsed_seconds' => $persistedElapsed,
+        'effective_elapsed_seconds' => $effectiveElapsed,
+        'remaining_seconds' => $remainingSeconds,
+        'expires_at' => $expiresAt,
+        'server_now' => gmdate(DATE_ATOM, $nowTs),
+        'resume_state' => $resumeState,
+    ];
+}
+
 function mock_exam_format_attempt(array $row): array
 {
+    $timeState = mock_exam_build_attempt_time_state($row);
     $correct = (int)($row['correct_count'] ?? 0);
     $wrong = (int)($row['wrong_count'] ?? 0);
     $blank = (int)($row['blank_count'] ?? 0);
@@ -253,8 +350,15 @@ function mock_exam_format_attempt(array $row): array
         'pool_type' => (string)($row['pool_type'] ?? 'random'),
         'requested_question_count' => (int)($row['requested_question_count'] ?? 0),
         'actual_question_count' => (int)($row['actual_question_count'] ?? 0),
-        'duration_seconds_limit' => (int)($row['duration_seconds_limit'] ?? 2400),
-        'elapsed_seconds' => (int)($row['elapsed_seconds'] ?? 0),
+        'duration_seconds_limit' => (int)$timeState['total_duration_seconds'],
+        'total_duration_seconds' => (int)$timeState['total_duration_seconds'],
+        'elapsed_seconds' => (int)$timeState['persisted_elapsed_seconds'],
+        'persisted_elapsed_seconds' => (int)$timeState['persisted_elapsed_seconds'],
+        'effective_elapsed_seconds' => (int)$timeState['effective_elapsed_seconds'],
+        'remaining_seconds' => (int)$timeState['remaining_seconds'],
+        'expires_at' => $timeState['expires_at'],
+        'server_now' => $timeState['server_now'],
+        'resume_state' => (string)$timeState['resume_state'],
         'status' => (string)($row['status'] ?? 'in_progress'),
         'warning_message' => $row['warning_message'] ?? null,
         'started_at' => $row['started_at'] ?? null,
@@ -266,7 +370,7 @@ function mock_exam_format_attempt(array $row): array
         'blank_count' => $blank,
         'success_rate' => $successRate,
         'answered_count' => $answered,
-        'duration_seconds' => (int)($row['elapsed_seconds'] ?? 0),
+        'duration_seconds' => (int)$timeState['effective_elapsed_seconds'],
     ];
 }
 
@@ -764,6 +868,9 @@ function mock_exam_compute_summary_from_questions(array $questions): array
 function mock_exam_build_summary_from_questions(array $questions, array $attempt): array
 {
     $status = (string)($attempt['status'] ?? 'in_progress');
+    $summaryStatus = ($status === 'in_progress' && (string)($attempt['resume_state'] ?? '') === 'expired')
+        ? 'expired'
+        : $status;
 
     $correct = 0;
     $wrong = 0;
@@ -800,9 +907,13 @@ function mock_exam_build_summary_from_questions(array $questions, array $attempt
         'blank_count' => $blank,
         'flagged_count' => $flaggedCount,
         'success_rate' => $successRate,
-        'elapsed_seconds' => (int)($attempt['elapsed_seconds'] ?? 0),
-        'duration_seconds_limit' => (int)($attempt['duration_seconds_limit'] ?? 2400),
-        'status' => $status,
+        'elapsed_seconds' => (int)($attempt['effective_elapsed_seconds'] ?? $attempt['elapsed_seconds'] ?? 0),
+        'duration_seconds_limit' => (int)($attempt['total_duration_seconds'] ?? $attempt['duration_seconds_limit'] ?? 2400),
+        'status' => $summaryStatus,
+        'resume_state' => (string)($attempt['resume_state'] ?? 'completed'),
+        'remaining_seconds' => (int)($attempt['remaining_seconds'] ?? 0),
+        'expires_at' => $attempt['expires_at'] ?? null,
+        'server_now' => $attempt['server_now'] ?? mock_exam_iso_utc_now(),
     ];
 }
 
@@ -1140,7 +1251,7 @@ function mock_exam_assert_attempt_in_progress(PDO $pdo, string $userId, string $
     return $detail;
 }
 
-function mock_exam_save_answer(PDO $pdo, string $userId, string $attemptId, string $questionId, ?string $selectedAnswer): array
+function mock_exam_save_answer(PDO $pdo, string $userId, string $attemptId, string $questionId, ?string $selectedAnswer, ?int $clientElapsedSeconds = null): array
 {
     $selected = strtoupper(trim((string)$selectedAnswer));
     if ($selected === '') {
@@ -1172,6 +1283,7 @@ function mock_exam_save_answer(PDO $pdo, string $userId, string $attemptId, stri
     }
 
     if ($existingSelected === $selected) {
+        mock_exam_maybe_persist_attempt_elapsed($pdo, $userId, $attemptId, $detail['attempt'] ?? [], $clientElapsedSeconds);
         $questions = mock_exam_fetch_attempt_questions($pdo, $attemptId, false);
         $answeredCount = 0;
         foreach ($questions as $q) {
@@ -1212,6 +1324,7 @@ function mock_exam_save_answer(PDO $pdo, string $userId, string $attemptId, stri
         . ' WHERE ' . mock_exam_q($aq['attempt_id']) . ' = ? AND ' . mock_exam_q($aq['question_id']) . ' = ?';
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
+    mock_exam_maybe_persist_attempt_elapsed($pdo, $userId, $attemptId, $detail['attempt'] ?? [], $clientElapsedSeconds);
 
     if ($stmt->rowCount() < 1) {
         $verifyStmt = $pdo->prepare($existingSql);
