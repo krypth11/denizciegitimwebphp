@@ -2,12 +2,22 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once dirname(__DIR__) . '/usage_limits_helper.php';
 require_once __DIR__ . '/offline_helper.php';
 
 api_require_method('GET');
 
 try {
     $auth = api_require_auth($pdo);
+    $userId = (string)$auth['user']['id'];
+    if (!usage_limits_is_user_pro($pdo, $userId)) {
+        usage_limits_business_error(
+            'PREMIUM_REQUIRED',
+            'Offline içerik Pro üyelik gerektirir.',
+            403
+        );
+    }
+
     $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'offline.qualifications');
 
     $items = offline_get_downloadable_qualifications($pdo, $currentQualificationId);

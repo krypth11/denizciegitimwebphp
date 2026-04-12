@@ -4,6 +4,7 @@ require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/response_helper.php';
 require_once dirname(__DIR__) . '/mock_exam_helper.php';
+require_once dirname(__DIR__) . '/usage_limits_helper.php';
 
 api_require_method('POST');
 
@@ -63,6 +64,23 @@ try {
             'warning_message' => $activeAttempt['warning_message'] ?? null,
             'mode' => (string)($activeAttempt['mode'] ?? $mode),
         ]);
+    }
+
+    $consume = usage_limits_consume(
+        $pdo,
+        $userId,
+        $currentQualificationId,
+        USAGE_LIMIT_FEATURE_MOCK_EXAM_START,
+        1
+    );
+
+    if (empty($consume['consumed']) && empty($consume['is_pro'])) {
+        usage_limits_business_error(
+            'MOCK_EXAM_DAILY_LIMIT_REACHED',
+            'Günlük yeni deneme başlatma limitine ulaştınız.',
+            429,
+            $consume['summary'] ?? null
+        );
     }
 
     $created = mock_exam_create_attempt($pdo, $userId, [
