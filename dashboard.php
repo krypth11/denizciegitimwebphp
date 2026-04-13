@@ -157,6 +157,7 @@ include 'includes/sidebar.php';
                 <button type="button" class="chip active" data-type="registrations">Kaydolan Kullanıcılar</button>
                 <button type="button" class="chip active" data-type="solved_questions">Çözülen Sorular</button>
                 <button type="button" class="chip active" data-type="daily_quiz_completed">Daily Quiz Tamamlananlar</button>
+                <button type="button" class="chip active" data-type="added_questions">Eklenen Sorular</button>
             </div>
             <div class="row g-2 mb-3" id="chartTotals"></div>
             <div class="chart-wrap">
@@ -188,7 +189,7 @@ include 'includes/sidebar.php';
         solved: { range: '7d', start_date: '', end_date: '' },
         users: { user_type: 'all' },
         activity: { types: ['registrations', 'daily_quiz', 'solved_questions'], limit: 25 },
-        chart: { range: '7d', start_date: '', end_date: '', types: ['registrations', 'solved_questions', 'daily_quiz_completed'] },
+        chart: { range: '7d', start_date: '', end_date: '', types: ['registrations', 'solved_questions', 'daily_quiz_completed', 'added_questions'] },
         refs: { qualifications: [], courses: [] },
         polling: { timer: null, interval: 1000 }
     };
@@ -786,7 +787,8 @@ include 'includes/sidebar.php';
         const items = [
             ['Toplam Kayıt', totals.registrations || 0],
             ['Toplam Çözülen Soru', totals.solved_questions || 0],
-            ['Toplam Daily Quiz', totals.daily_quiz_completed || 0]
+            ['Toplam Daily Quiz', totals.daily_quiz_completed || 0],
+            ['Toplam Eklenen Soru', totals.added_questions || 0]
         ];
         box.innerHTML = items.map(([k, v]) => `<div class="col-6 col-lg-4"><div class="chart-total-box"><small>${k}</small><strong>${formatNumber(v)}</strong></div></div>`).join('');
     }
@@ -821,6 +823,7 @@ include 'includes/sidebar.php';
                 { key: 'registrations', label: 'Kayıt', color: '#5B9BD5', dash: [] },
                 { key: 'solved_questions', label: 'Çözülen Sorular', color: '#6AA786', dash: [] },
                 { key: 'daily_quiz_completed', label: 'Daily Quiz', color: '#C89B54', dash: [6, 4] },
+                { key: 'added_questions', label: 'Eklenen Sorular', color: '#8A63D2', dash: [] },
             ];
 
             const datasets = datasetsMeta

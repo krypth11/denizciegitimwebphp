@@ -69,7 +69,7 @@ if (($_GET['scope'] ?? '') === 'admin') {
             $window = stats_resolve_date_window(['range' => '30d'], 'range', 'start_date', 'end_date', '30d');
         }
 
-        $types = stats_parse_types_from_query(['registrations', 'solved_questions', 'daily_quiz_completed']);
+        $types = stats_parse_types_from_query(['registrations', 'solved_questions', 'daily_quiz_completed', 'added_questions']);
         [$dateKeys, $labels] = trends_labels_from_dates((string)$window['start_date'], (string)$window['end_date']);
         $dateIndex = array_flip($dateKeys);
 
@@ -77,12 +77,14 @@ if (($_GET['scope'] ?? '') === 'admin') {
             'registrations' => trends_series_empty($labels),
             'solved_questions' => trends_series_empty($labels),
             'daily_quiz_completed' => trends_series_empty($labels),
+            'added_questions' => trends_series_empty($labels),
         ];
 
         $totals = [
             'registrations' => 0,
             'solved_questions' => 0,
             'daily_quiz_completed' => 0,
+            'added_questions' => 0,
         ];
 
         $uCols = get_table_columns($pdo, 'user_profiles');
@@ -143,6 +145,21 @@ if (($_GET['scope'] ?? '') === 'admin') {
                 $v = (int)($row['c'] ?? 0);
                 $series['daily_quiz_completed'][$dateIndex[$d]] = $v;
                 $totals['daily_quiz_completed'] += $v;
+            }
+        }
+
+        $qCols = get_table_columns($pdo, 'questions');
+        $qCreated = trends_first_col($qCols, ['created_at']);
+        if (in_array('added_questions', $types, true) && $qCreated) {
+            $sql = 'SELECT DATE(`' . $qCreated . '`) AS d, COUNT(*) AS c FROM `questions` WHERE DATE(`' . $qCreated . '`) BETWEEN ? AND ? GROUP BY DATE(`' . $qCreated . '`)';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$window['start_date'], $window['end_date']]);
+            foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
+                $d = (string)($row['d'] ?? '');
+                if (!isset($dateIndex[$d])) continue;
+                $v = (int)($row['c'] ?? 0);
+                $series['added_questions'][$dateIndex[$d]] = $v;
+                $totals['added_questions'] += $v;
             }
         }
 
