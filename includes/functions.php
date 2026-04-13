@@ -6,6 +6,13 @@ function sanitize_input($data)
     return htmlspecialchars(strip_tags(trim((string)$data)), ENT_QUOTES, 'UTF-8');
 }
 
+if (!function_exists('e')) {
+    function e($value): string
+    {
+        return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
+    }
+}
+
 function generate_uuid()
 {
     return sprintf(
