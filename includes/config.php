@@ -19,6 +19,11 @@ define('SITE_URL', 'https://denizciegitim.com');
 define('SITE_NAME', 'Denizci Eğitim Admin Panel');
 define('STORY_PUBLIC_BASE_URL', getenv('STORY_PUBLIC_BASE_URL') ?: '');
 
+// Firebase (FCM HTTP v1)
+define('FIREBASE_SERVICE_ACCOUNT_PATH', getenv('FIREBASE_SERVICE_ACCOUNT_PATH') ?: '/home/u2621168/firebase/denizci-egitim-firebase-adminsdk-fbsvc-e2454f0564.json');
+define('FIREBASE_FCM_SCOPE', 'https://www.googleapis.com/auth/firebase.messaging');
+define('FIREBASE_FCM_TIMEOUT', 15);
+
 // JWT ayarları
 define('JWT_SECRET', 'dEnIzCi_EgItIm_2026_sEcReT_kEy_ChAnGe_Me');
 define('JWT_EXPIRY', 86400); // 24 saat

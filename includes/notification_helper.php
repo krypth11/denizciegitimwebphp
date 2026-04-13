@@ -470,6 +470,351 @@ if (!function_exists('log_notification_result')) {
     }
 }
 
+if (!function_exists('notification_base64url_encode')) {
+    function notification_base64url_encode(string $input): string
+    {
+        return rtrim(strtr(base64_encode($input), '+/', '-_'), '=');
+    }
+}
+
+if (!function_exists('notification_load_firebase_service_account')) {
+    function notification_load_firebase_service_account(): array
+    {
+        static $serviceAccount = null;
+        if (is_array($serviceAccount)) {
+            return $serviceAccount;
+        }
+
+        $path = defined('FIREBASE_SERVICE_ACCOUNT_PATH') ? (string)FIREBASE_SERVICE_ACCOUNT_PATH : '';
+        if ($path === '' || !is_file($path) || !is_readable($path)) {
+            throw new RuntimeException('Firebase service account dosyası okunamadı.');
+        }
+
+        $raw = file_get_contents($path);
+        if ($raw === false || trim($raw) === '') {
+            throw new RuntimeException('Firebase service account içeriği okunamadı.');
+        }
+
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Firebase service account JSON formatı geçersiz.');
+        }
+
+        foreach (['project_id', 'client_email', 'private_key', 'token_uri'] as $requiredKey) {
+            if (empty($decoded[$requiredKey]) || !is_string($decoded[$requiredKey])) {
+                throw new RuntimeException('Firebase service account alanı eksik: ' . $requiredKey);
+            }
+        }
+
+        $serviceAccount = $decoded;
+        return $serviceAccount;
+    }
+}
+
+if (!function_exists('notification_get_firebase_project_id')) {
+    function notification_get_firebase_project_id(): string
+    {
+        $serviceAccount = notification_load_firebase_service_account();
+        return trim((string)$serviceAccount['project_id']);
+    }
+}
+
+if (!function_exists('notification_create_firebase_jwt')) {
+    function notification_create_firebase_jwt(array $serviceAccount): string
+    {
+        $now = time();
+        $scope = defined('FIREBASE_FCM_SCOPE') ? (string)FIREBASE_FCM_SCOPE : 'https://www.googleapis.com/auth/firebase.messaging';
+
+        $header = [
+            'alg' => 'RS256',
+            'typ' => 'JWT',
+        ];
+
+        $claims = [
+            'iss' => (string)$serviceAccount['client_email'],
+            'scope' => $scope,
+            'aud' => (string)$serviceAccount['token_uri'],
+            'iat' => $now,
+            'exp' => $now + 3600,
+        ];
+
+        $segments = [
+            notification_base64url_encode(json_encode($header, JSON_UNESCAPED_SLASHES)),
+            notification_base64url_encode(json_encode($claims, JSON_UNESCAPED_SLASHES)),
+        ];
+        $signingInput = implode('.', $segments);
+
+        $privateKey = openssl_pkey_get_private((string)$serviceAccount['private_key']);
+        if ($privateKey === false) {
+            throw new RuntimeException('Firebase private key yüklenemedi.');
+        }
+
+        $signature = '';
+        $signed = openssl_sign($signingInput, $signature, $privateKey, OPENSSL_ALGO_SHA256);
+        if (PHP_VERSION_ID < 80000 && is_resource($privateKey)) {
+            openssl_free_key($privateKey);
+        }
+
+        if (!$signed) {
+            throw new RuntimeException('Firebase JWT imzalanamadı.');
+        }
+
+        $segments[] = notification_base64url_encode($signature);
+        return implode('.', $segments);
+    }
+}
+
+if (!function_exists('notification_get_firebase_access_token')) {
+    function notification_get_firebase_access_token(): array
+    {
+        static $cache = null;
+        $now = time();
+        if (is_array($cache) && !empty($cache['access_token']) && (int)($cache['expires_at'] ?? 0) > ($now + 30)) {
+            return $cache;
+        }
+
+        $serviceAccount = notification_load_firebase_service_account();
+        $jwt = notification_create_firebase_jwt($serviceAccount);
+
+        $ch = curl_init((string)$serviceAccount['token_uri']);
+        if ($ch === false) {
+            throw new RuntimeException('OAuth2 isteği başlatılamadı.');
+        }
+
+        $timeout = defined('FIREBASE_FCM_TIMEOUT') ? (int)FIREBASE_FCM_TIMEOUT : 15;
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => $timeout,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+            CURLOPT_POSTFIELDS => http_build_query([
+                'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                'assertion' => $jwt,
+            ], '', '&', PHP_QUERY_RFC3986),
+        ]);
+
+        $responseBody = curl_exec($ch);
+        $curlErrNo = curl_errno($ch);
+        $curlErr = curl_error($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($curlErrNo !== 0) {
+            throw new RuntimeException('OAuth2 bağlantı hatası: ' . $curlErr);
+        }
+
+        if (!is_string($responseBody) || $responseBody === '') {
+            throw new RuntimeException('OAuth2 access token yanıtı boş geldi.');
+        }
+
+        $decoded = json_decode($responseBody, true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('OAuth2 access token yanıtı çözümlenemedi.');
+        }
+
+        if ($httpCode < 200 || $httpCode >= 300 || empty($decoded['access_token'])) {
+            $errMsg = trim((string)($decoded['error_description'] ?? $decoded['error'] ?? 'OAuth2 access token alınamadı.'));
+            throw new RuntimeException($errMsg !== '' ? $errMsg : 'OAuth2 access token alınamadı.');
+        }
+
+        $expiresIn = (int)($decoded['expires_in'] ?? 3600);
+        $cache = [
+            'access_token' => (string)$decoded['access_token'],
+            'expires_at' => $now + max(60, $expiresIn),
+        ];
+
+        return $cache;
+    }
+}
+
+if (!function_exists('notification_extract_fcm_error_codes')) {
+    function notification_extract_fcm_error_codes(array $decodedBody): array
+    {
+        $codes = [];
+        $error = $decodedBody['error'] ?? null;
+        if (is_array($error)) {
+            $status = trim((string)($error['status'] ?? ''));
+            if ($status !== '') {
+                $codes[] = $status;
+            }
+
+            $details = $error['details'] ?? null;
+            if (is_array($details)) {
+                foreach ($details as $detail) {
+                    if (!is_array($detail)) {
+                        continue;
+                    }
+                    $detailCode = trim((string)($detail['errorCode'] ?? ''));
+                    if ($detailCode !== '') {
+                        $codes[] = $detailCode;
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter($codes, static fn($c) => $c !== '')));
+    }
+}
+
+if (!function_exists('notification_disable_push_token')) {
+    function notification_disable_push_token(PDO $pdo, array $token): void
+    {
+        $schema = notification_schema($pdo);
+        $t = $schema['tokens'];
+        if (!$t['is_active']) {
+            return;
+        }
+
+        $tokenId = trim((string)($token['token_id'] ?? ''));
+        if ($tokenId === '') {
+            return;
+        }
+
+        $payload = [
+            $t['is_active'] => 0,
+        ];
+
+        if ($t['updated_at']) {
+            $payload[$t['updated_at']] = date('Y-m-d H:i:s');
+        }
+
+        notification_update_row($pdo, $t['table'], $payload, notification_q($t['id']) . ' = ?', [$tokenId]);
+    }
+}
+
+if (!function_exists('notification_build_fcm_data')) {
+    function notification_build_fcm_data(array $notification, array $notificationSchema): array
+    {
+        $payload = [];
+        $payloadColumn = $notificationSchema['payload_json'] ?? null;
+        if ($payloadColumn && !empty($notification[$payloadColumn])) {
+            $decoded = json_decode((string)$notification[$payloadColumn], true);
+            if (is_array($decoded)) {
+                $payload = $decoded;
+            }
+        }
+
+        $type = isset($payload['type']) ? (string)$payload['type'] : (string)($notification[$notificationSchema['channel'] ?? ''] ?? 'general');
+        $screen = isset($payload['screen']) ? (string)$payload['screen'] : (string)($payload['deep_link'] ?? '');
+        $entityId = isset($payload['entity_id']) ? (string)$payload['entity_id'] : (string)($payload['id'] ?? '');
+
+        return [
+            'type' => $type,
+            'screen' => $screen,
+            'entity_id' => $entityId,
+        ];
+    }
+}
+
+if (!function_exists('notification_send_fcm_v1')) {
+    function notification_send_fcm_v1(string $projectId, string $accessToken, string $targetToken, string $title, string $message, array $data): array
+    {
+        $url = 'https://fcm.googleapis.com/v1/projects/' . rawurlencode($projectId) . '/messages:send';
+        $requestBody = [
+            'message' => [
+                'token' => $targetToken,
+                'notification' => [
+                    'title' => $title,
+                    'body' => $message,
+                ],
+                'data' => [
+                    'type' => (string)($data['type'] ?? ''),
+                    'screen' => (string)($data['screen'] ?? ''),
+                    'entity_id' => (string)($data['entity_id'] ?? ''),
+                ],
+                'android' => [
+                    'priority' => 'high',
+                ],
+                'apns' => [
+                    'headers' => [
+                        'apns-priority' => '10',
+                    ],
+                ],
+            ],
+        ];
+
+        $jsonBody = json_encode($requestBody, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($jsonBody === false) {
+            throw new RuntimeException('FCM isteği JSON formatına dönüştürülemedi.');
+        }
+
+        $ch = curl_init($url);
+        if ($ch === false) {
+            throw new RuntimeException('FCM bağlantısı başlatılamadı.');
+        }
+
+        $timeout = defined('FIREBASE_FCM_TIMEOUT') ? (int)FIREBASE_FCM_TIMEOUT : 15;
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => $timeout,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $accessToken,
+                'Content-Type: application/json; charset=utf-8',
+            ],
+            CURLOPT_POSTFIELDS => $jsonBody,
+        ]);
+
+        $rawResponse = curl_exec($ch);
+        $curlErrNo = curl_errno($ch);
+        $curlErr = curl_error($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($curlErrNo !== 0) {
+            return [
+                'ok' => false,
+                'http_code' => 0,
+                'response_message' => 'cURL error: ' . $curlErr,
+                'response_body' => null,
+                'message_id' => null,
+                'error_codes' => [],
+            ];
+        }
+
+        $decoded = [];
+        if (is_string($rawResponse) && trim($rawResponse) !== '') {
+            $tmp = json_decode($rawResponse, true);
+            if (is_array($tmp)) {
+                $decoded = $tmp;
+            }
+        }
+
+        $isSuccess = $httpCode >= 200 && $httpCode < 300 && !empty($decoded['name']);
+        $name = trim((string)($decoded['name'] ?? ''));
+        $messageId = '';
+        if ($name !== '') {
+            $parts = explode('/', $name);
+            $messageId = trim((string)end($parts));
+        }
+
+        if ($isSuccess) {
+            return [
+                'ok' => true,
+                'http_code' => $httpCode,
+                'response_message' => 'FCM accepted',
+                'response_body' => is_string($rawResponse) ? $rawResponse : null,
+                'message_id' => ($messageId !== '' ? $messageId : $name),
+                'error_codes' => [],
+            ];
+        }
+
+        $errorCodes = notification_extract_fcm_error_codes($decoded);
+        $errorMessage = trim((string)($decoded['error']['message'] ?? 'FCM gönderim hatası'));
+
+        return [
+            'ok' => false,
+            'http_code' => $httpCode,
+            'response_message' => $errorMessage !== '' ? $errorMessage : 'FCM gönderim hatası',
+            'response_body' => is_string($rawResponse) ? $rawResponse : null,
+            'message_id' => null,
+            'error_codes' => $errorCodes,
+        ];
+    }
+}
+
 if (!function_exists('send_push_notification')) {
     function send_push_notification(PDO $pdo, string $notificationId): array
     {
@@ -483,15 +828,84 @@ if (!function_exists('send_push_notification')) {
 
         $targets = resolve_notification_targets($pdo, $notificationId);
         $tokens = get_active_tokens_for_users($pdo, $targets);
+        $fcmData = notification_build_fcm_data($notification, $n);
 
         $total = count($tokens);
         $success = 0;
         $failed = 0;
 
+        $accessToken = null;
+        $projectId = '';
+        $initError = null;
+
+        try {
+            $projectId = notification_get_firebase_project_id();
+            $tokenBundle = notification_get_firebase_access_token();
+            $accessToken = (string)($tokenBundle['access_token'] ?? '');
+            if ($projectId === '' || $accessToken === '') {
+                throw new RuntimeException('Firebase erişim bilgileri eksik.');
+            }
+        } catch (Throwable $e) {
+            $initError = $e;
+            error_log('[notification.send_push_notification] Firebase init error: ' . $e->getMessage());
+        }
+
         foreach ($tokens as $token) {
-            $mockSuccess = true;
-            $status = $mockSuccess ? 'mock_sent' : 'mock_failed';
-            if ($mockSuccess) {
+            $tokenValue = trim((string)($token['fcm_token'] ?? ''));
+            $tokenMasked = mask_token($tokenValue);
+
+            $isSuccess = false;
+            $responseCode = 500;
+            $responseMessage = 'Bilinmeyen hata';
+            $responseBody = null;
+
+            try {
+                if ($initError !== null) {
+                    throw new RuntimeException($initError->getMessage());
+                }
+
+                if ($tokenValue === '') {
+                    throw new RuntimeException('FCM token boş olduğu için gönderim atlandı.');
+                }
+
+                $sendResult = notification_send_fcm_v1(
+                    $projectId,
+                    (string)$accessToken,
+                    $tokenValue,
+                    trim((string)($notification[$n['title']] ?? '')),
+                    trim((string)($notification[$n['message']] ?? '')),
+                    $fcmData
+                );
+
+                $isSuccess = (bool)($sendResult['ok'] ?? false);
+                $responseCode = (int)($sendResult['http_code'] ?? 500);
+                $responseBody = $sendResult['response_body'] ?? null;
+
+                if ($isSuccess) {
+                    $messageId = trim((string)($sendResult['message_id'] ?? ''));
+                    $responseMessage = $messageId !== ''
+                        ? 'FCM message accepted (message_id: ' . $messageId . ')'
+                        : 'FCM message accepted';
+                } else {
+                    $responseMessage = (string)($sendResult['response_message'] ?? 'FCM gönderim hatası');
+
+                    $errorCodes = array_map('strtoupper', $sendResult['error_codes'] ?? []);
+                    $shouldDisableToken = in_array('UNREGISTERED', $errorCodes, true)
+                        || in_array('INVALID_ARGUMENT', $errorCodes, true)
+                        || in_array('NOT_FOUND', $errorCodes, true);
+
+                    if ($shouldDisableToken) {
+                        notification_disable_push_token($pdo, $token);
+                    }
+                }
+            } catch (Throwable $e) {
+                $isSuccess = false;
+                $responseCode = ($responseCode > 0 ? $responseCode : 500);
+                $responseMessage = $e->getMessage();
+                $responseBody = $responseBody ?? null;
+            }
+
+            if ($isSuccess) {
                 $success++;
             } else {
                 $failed++;
@@ -500,13 +914,13 @@ if (!function_exists('send_push_notification')) {
             log_notification_result($pdo, $notificationId, [
                 'user_id' => (string)($token['user_id'] ?? ''),
                 'token_id' => (string)($token['token_id'] ?? ''),
-                'token_masked' => mask_token((string)($token['fcm_token'] ?? '')),
+                'token_masked' => $tokenMasked,
                 'platform' => (string)($token['platform'] ?? 'unknown'),
-                'status' => $status,
-                'is_success' => $mockSuccess ? 1 : 0,
-                'response_code' => $mockSuccess ? 200 : 500,
-                'response_message' => $mockSuccess ? 'Mock Firebase accepted' : 'Mock Firebase failed',
-                'response_body' => json_encode(['mock' => true], JSON_UNESCAPED_UNICODE),
+                'status' => $isSuccess ? 'sent' : 'failed',
+                'is_success' => $isSuccess ? 1 : 0,
+                'response_code' => $responseCode,
+                'response_message' => $responseMessage,
+                'response_body' => is_string($responseBody) ? $responseBody : null,
             ]);
         }
 
@@ -525,7 +939,7 @@ if (!function_exists('send_push_notification')) {
             'total_target' => $total,
             'success' => $success,
             'failed' => $failed,
-            'mock' => true,
+            'mock' => false,
         ];
     }
 }
