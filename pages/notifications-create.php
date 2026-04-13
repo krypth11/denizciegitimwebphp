@@ -2,10 +2,12 @@
 require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
+require_once '../includes/notification_helper.php';
 
 $user = require_auth();
 $current_page = 'notifications-create';
 $page_title = 'Yeni Bildirim';
+$deepLinkPages = notification_deep_link_pages();
 
 include '../includes/header.php';
 include '../includes/sidebar.php';
@@ -52,8 +54,13 @@ include '../includes/sidebar.php';
                             <input type="url" class="form-control" id="image_url" placeholder="https://...">
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Deep Link (opsiyonel)</label>
-                            <input type="text" class="form-control" id="deep_link" placeholder="denizci://...">
+                            <label class="form-label">Uygulama Sayfası (opsiyonel)</label>
+                            <select class="form-select" id="deep_link">
+                                <option value="">Sayfa seçiniz</option>
+                                <?php foreach ($deepLinkPages as $slug => $label): ?>
+                                    <option value="<?= e((string)$slug) ?>"><?= e((string)$label) ?></option>
+                                <?php endforeach; ?>
+                            </select>
                         </div>
                         <div class="col-12">
                             <label class="form-label">Payload JSON (opsiyonel)</label>
@@ -70,8 +77,8 @@ include '../includes/sidebar.php';
                         <div class="col-md-6">
                             <label class="form-label">Hedef Tipi *</label>
                             <select class="form-select" id="target_type">
+                                <option value="all_users" selected>Tüm kullanıcılar</option>
                                 <option value="single_user">Tek kullanıcı</option>
-                                <option value="all_users">Tüm kullanıcılar</option>
                                 <option value="premium_users">Premium kullanıcılar</option>
                                 <option value="free_users">Free kullanıcılar</option>
                                 <option value="qualification">Belirli yeterlilik</option>
@@ -265,6 +272,7 @@ $(function () {
         await submit(action);
     });
 
+    $('#target_type').val('all_users');
     toggleTargetFields();
     toggleScheduleField();
     loadQualifications();

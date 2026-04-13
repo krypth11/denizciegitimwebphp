@@ -103,12 +103,31 @@ function notifications_list_history(PDO $pdo): array
         $select[] = $column ? notification_q($column) . ' AS ' . $alias : 'NULL AS ' . $alias;
     }
 
-    $orderBy = $n['created_at'] ? notification_q($n['created_at']) : notification_q($n['id']);
+    $countSql = 'SELECT COUNT(*) FROM ' . notification_q($n['table']);
+    $totalCount = (int)$pdo->query($countSql)->fetchColumn();
+
+    $orderBy = null;
+    if ($n['sent_at'] && $n['created_at']) {
+        $orderBy = 'COALESCE(' . notification_q($n['sent_at']) . ', ' . notification_q($n['created_at']) . ')';
+    } elseif ($n['sent_at']) {
+        $orderBy = notification_q($n['sent_at']);
+    } elseif ($n['created_at']) {
+        $orderBy = notification_q($n['created_at']);
+    } else {
+        $orderBy = notification_q($n['id']);
+    }
+
     $sql = 'SELECT ' . implode(', ', $select)
         . ' FROM ' . notification_q($n['table'])
         . ' ORDER BY ' . $orderBy . ' DESC LIMIT 500';
 
-    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $items = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    return [
+        'items' => $items,
+        'total_count' => $totalCount,
+        'listed_count' => count($items),
+    ];
 }
 
 function notifications_stats_summary(PDO $pdo): array
@@ -200,7 +219,7 @@ try {
             $title = trim((string)($_POST['title'] ?? ''));
             $message = trim((string)($_POST['message'] ?? ''));
             $imageUrl = trim((string)($_POST['image_url'] ?? ''));
-            $deepLink = trim((string)($_POST['deep_link'] ?? ''));
+            $deepLink = notification_normalize_deep_link((string)($_POST['deep_link'] ?? ''));
             $payloadJsonRaw = (string)($_POST['payload_json'] ?? '');
             $channel = notifications_validate_channel(trim((string)($_POST['channel'] ?? 'general')));
             $targetType = notifications_normalize_target_type(trim((string)($_POST['target_type'] ?? 'all_users')));
@@ -234,7 +253,7 @@ try {
                 'title' => $title,
                 'message' => $message,
                 'image_url' => ($imageUrl !== '' ? $imageUrl : null),
-                'deep_link' => ($deepLink !== '' ? $deepLink : null),
+                'deep_link' => $deepLink,
                 'payload_json' => !empty($payloadJson) ? json_encode($payloadJson, JSON_UNESCAPED_UNICODE) : null,
                 'channel' => $channel,
                 'target_type' => $targetType,
@@ -258,8 +277,8 @@ try {
         }
 
         case 'list_history': {
-            $items = notifications_list_history($pdo);
-            notifications_json(true, '', ['items' => $items]);
+            $history = notifications_list_history($pdo);
+            notifications_json(true, '', $history);
             break;
         }
 
@@ -286,7 +305,13 @@ try {
             $stmt->execute([$id]);
             $logs = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-            notifications_json(true, '', ['notification' => $notification, 'logs' => $logs]);
+            $notificationView = [
+                'id' => (string)($notification[$n['id']] ?? ''),
+                'title' => (string)($notification[$n['title']] ?? ''),
+                'message' => (string)($notification[$n['message']] ?? ''),
+            ];
+
+            notifications_json(true, '', ['notification' => $notificationView, 'logs' => $logs]);
             break;
         }
 

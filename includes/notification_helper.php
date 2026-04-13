@@ -7,6 +7,39 @@ if (!function_exists('notification_q')) {
     }
 }
 
+if (!function_exists('notification_deep_link_pages')) {
+    function notification_deep_link_pages(): array
+    {
+        return [
+            'dashboard' => 'Anasayfa',
+            'study' => 'Çalışma Alanı',
+            'exam' => 'Deneme Sınavı',
+            'word_game' => 'Kelime Oyunu',
+            'offline' => 'Offline İçerikler',
+            'maritime' => 'Maritime English',
+            'daily_quiz' => 'Daily Quiz',
+            'profile' => 'Profil',
+        ];
+    }
+}
+
+if (!function_exists('notification_normalize_deep_link')) {
+    function notification_normalize_deep_link(?string $deepLink): ?string
+    {
+        $value = trim((string)$deepLink);
+        if ($value === '') {
+            return null;
+        }
+
+        $allowed = array_keys(notification_deep_link_pages());
+        if (!in_array($value, $allowed, true)) {
+            throw new InvalidArgumentException('Deep Link değeri geçersiz.');
+        }
+
+        return $value;
+    }
+}
+
 if (!function_exists('notification_pick_column')) {
     function notification_pick_column(array $columns, array $candidates, bool $required = true): ?string
     {
@@ -696,7 +729,14 @@ if (!function_exists('notification_build_fcm_data')) {
         }
 
         $type = isset($payload['type']) ? (string)$payload['type'] : (string)($notification[$notificationSchema['channel'] ?? ''] ?? 'general');
-        $screen = isset($payload['screen']) ? (string)$payload['screen'] : (string)($payload['deep_link'] ?? '');
+        $notificationDeepLink = '';
+        $deepLinkColumn = $notificationSchema['deep_link'] ?? null;
+        if ($deepLinkColumn && isset($notification[$deepLinkColumn])) {
+            $notificationDeepLink = (string)$notification[$deepLinkColumn];
+        }
+        $screen = isset($payload['screen'])
+            ? (string)$payload['screen']
+            : (isset($payload['deep_link']) ? (string)$payload['deep_link'] : $notificationDeepLink);
         $entityId = isset($payload['entity_id']) ? (string)$payload['entity_id'] : (string)($payload['id'] ?? '');
 
         return [

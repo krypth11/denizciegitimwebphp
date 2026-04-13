@@ -20,6 +20,9 @@ include '../includes/sidebar.php';
 
     <div class="card">
         <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="text-muted small" id="historyCountText">Toplam Gönderim: 0 / Listelenen: 0</div>
+            </div>
             <div class="table-responsive">
                 <table class="table table-hover align-middle mobile-card-table">
                     <thead>
@@ -44,28 +47,22 @@ include '../includes/sidebar.php';
 </div>
 
 <div class="modal fade" id="historyDetailModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Bildirim Detayı</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <div id="historyDetailMeta" class="mb-3"></div>
-                <div class="table-responsive">
-                    <table class="table table-sm align-middle">
-                        <thead>
-                            <tr>
-                                <th>Zaman</th>
-                                <th>Kullanıcı</th>
-                                <th>Platform</th>
-                                <th>Token</th>
-                                <th>Durum</th>
-                                <th>Mesaj</th>
-                            </tr>
-                        </thead>
-                        <tbody id="historyLogsBody"></tbody>
-                    </table>
+                <div id="historyDetailMeta">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Başlık</label>
+                        <div class="border rounded p-2 bg-light" id="historyDetailTitle">-</div>
+                    </div>
+                    <div>
+                        <label class="form-label fw-semibold">İçerik</label>
+                        <div class="border rounded p-2 bg-light" id="historyDetailMessage">-</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -78,7 +75,6 @@ $extra_js = <<<'JAVASCRIPT'
 $(function () {
     const endpoint = '../ajax/notifications.php';
     const appAlert = (title, message, type = 'info') => window.showAppAlert({ title, message, type });
-    const appConfirm = (title, message, options = {}) => window.showAppConfirm({ title, message, ...options });
 
     const api = async (action, method = 'GET', data = {}) => {
         return await window.appAjax({ url: endpoint + '?action=' + encodeURIComponent(action), method, data, dataType: 'json' });
@@ -104,13 +100,15 @@ $(function () {
                     <td>
                         <div class="table-actions">
                             <button class="btn btn-sm btn-secondary js-detail" data-id="${esc(r.id)}"><i class="bi bi-eye"></i></button>
-                            <button class="btn btn-sm btn-warning js-copy" data-id="${esc(r.id)}"><i class="bi bi-files"></i></button>
-                            <button class="btn btn-sm btn-primary js-resend" data-id="${esc(r.id)}"><i class="bi bi-arrow-repeat"></i></button>
                         </div>
                     </td>
                 </tr>
             `);
         });
+    }
+
+    function renderCount(totalCount, listedCount) {
+        $('#historyCountText').text(`Toplam Gönderim: ${Number(totalCount || 0)} / Listelenen: ${Number(listedCount || 0)}`);
     }
 
     async function load() {
@@ -119,7 +117,9 @@ $(function () {
             await appAlert('Hata', res.message || 'Geçmiş listelenemedi.', 'error');
             return;
         }
-        renderRows(res.data?.items || []);
+        const items = res.data?.items || [];
+        renderRows(items);
+        renderCount(res.data?.total_count || 0, res.data?.listed_count || items.length);
     }
 
     $(document).on('click', '.js-detail', async function () {
@@ -128,49 +128,10 @@ $(function () {
         if (!res.success) return appAlert('Hata', res.message || 'Detay alınamadı.', 'error');
 
         const n = res.data?.notification || {};
-        const logs = res.data?.logs || [];
-
-        $('#historyDetailMeta').html(`
-            <div class="card bg-light border-0"><div class="card-body py-2">
-                <div><strong>${esc(n.title || '-')}</strong></div>
-                <div class="text-muted small">${esc(n.message || '')}</div>
-            </div></div>
-        `);
-
-        const $lb = $('#historyLogsBody').empty();
-        logs.forEach(l => {
-            $lb.append(`
-                <tr>
-                    <td>${esc(l.created_at || '-')}</td>
-                    <td>${esc(l.user_id || '-')}</td>
-                    <td>${esc(l.platform || '-')}</td>
-                    <td><span class="small text-muted">${esc(l.token_masked || '-')}</span></td>
-                    <td>${esc(l.status || '-')}</td>
-                    <td>${esc(l.response_message || '-')}</td>
-                </tr>
-            `);
-        });
+        $('#historyDetailTitle').text(n.title || '-');
+        $('#historyDetailMessage').text(n.message || '-');
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('historyDetailModal')).show();
-    });
-
-    $(document).on('click', '.js-copy', async function () {
-        const id = $(this).data('id');
-        const res = await api('duplicate_notification', 'POST', { notification_id: id });
-        if (!res.success) return appAlert('Hata', res.message || 'Kopyalanamadı.', 'error');
-        await appAlert('Başarılı', 'Bildirim kopyalandı.', 'success');
-        load();
-    });
-
-    $(document).on('click', '.js-resend', async function () {
-        const id = $(this).data('id');
-        const ok = await appConfirm('Yeniden Gönder', 'Bu bildirimi tekrar göndermek istiyor musunuz?', { type: 'warning', confirmText: 'Gönder', cancelText: 'İptal' });
-        if (!ok) return;
-
-        const res = await api('resend_notification', 'POST', { notification_id: id });
-        if (!res.success) return appAlert('Hata', res.message || 'Yeniden gönderilemedi.', 'error');
-        await appAlert('Başarılı', 'Bildirim yeniden gönderildi.', 'success');
-        load();
     });
 
     load();
