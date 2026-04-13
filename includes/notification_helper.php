@@ -11,14 +11,14 @@ if (!function_exists('notification_deep_link_pages')) {
     function notification_deep_link_pages(): array
     {
         return [
-            'dashboard' => 'Anasayfa',
-            'study' => 'Çalışma Alanı',
-            'exam' => 'Deneme Sınavı',
-            'word_game' => 'Kelime Oyunu',
-            'offline' => 'Offline İçerikler',
-            'maritime' => 'Maritime English',
-            'daily_quiz' => 'Daily Quiz',
-            'profile' => 'Profil',
+            ['value' => 'dashboard', 'label' => 'Anasayfa'],
+            ['value' => 'study', 'label' => 'Çalışma Alanı'],
+            ['value' => 'exam', 'label' => 'Deneme Sınavı'],
+            ['value' => 'word_game', 'label' => 'Kelime Oyunu'],
+            ['value' => 'offline', 'label' => 'Offline İçerikler'],
+            ['value' => 'maritime', 'label' => 'Maritime English'],
+            ['value' => 'daily_quiz', 'label' => 'Daily Quiz'],
+            ['value' => 'profile', 'label' => 'Profil'],
         ];
     }
 }
@@ -31,7 +31,22 @@ if (!function_exists('notification_normalize_deep_link')) {
             return null;
         }
 
-        $allowed = array_keys(notification_deep_link_pages());
+        $allowed = [];
+        foreach (notification_deep_link_pages() as $key => $item) {
+            if (is_array($item)) {
+                $candidate = trim((string)($item['value'] ?? ''));
+                if ($candidate !== '') {
+                    $allowed[] = $candidate;
+                }
+                continue;
+            }
+
+            if (is_string($key) && $key !== '') {
+                $allowed[] = $key;
+            }
+        }
+
+        $allowed = array_values(array_unique($allowed));
         if (!in_array($value, $allowed, true)) {
             throw new InvalidArgumentException('Deep Link değeri geçersiz.');
         }

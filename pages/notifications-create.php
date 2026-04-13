@@ -7,7 +7,26 @@ require_once '../includes/notification_helper.php';
 $user = require_auth();
 $current_page = 'notifications-create';
 $page_title = 'Yeni Bildirim';
-$deepLinkPages = notification_deep_link_pages();
+$deepLinkPagesRaw = notification_deep_link_pages();
+$deepLinkPages = [];
+foreach ($deepLinkPagesRaw as $key => $item) {
+    if (is_array($item)) {
+        $value = trim((string)($item['value'] ?? ''));
+        $label = trim((string)($item['label'] ?? ''));
+    } else {
+        $value = is_string($key) ? trim($key) : '';
+        $label = trim((string)$item);
+    }
+
+    if ($value === '' || $label === '') {
+        continue;
+    }
+
+    $deepLinkPages[] = [
+        'value' => $value,
+        'label' => $label,
+    ];
+}
 
 include '../includes/header.php';
 include '../includes/sidebar.php';
@@ -57,8 +76,8 @@ include '../includes/sidebar.php';
                             <label class="form-label">Uygulama Sayfası (opsiyonel)</label>
                             <select class="form-select" id="deep_link">
                                 <option value="">Sayfa seçiniz</option>
-                                <?php foreach ($deepLinkPages as $slug => $label): ?>
-                                    <option value="<?= e((string)$slug) ?>"><?= e((string)$label) ?></option>
+                                <?php foreach ($deepLinkPages as $page): ?>
+                                    <option value="<?= e((string)$page['value']) ?>"><?= e((string)$page['label']) ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
