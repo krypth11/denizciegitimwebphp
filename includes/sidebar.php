@@ -20,6 +20,11 @@ $menuGroups = [
     [
         ['slug' => 'users', 'url' => '/pages/users.php', 'icon' => 'bi-people', 'label' => 'Kullanıcılar'],
         ['slug' => 'stories', 'url' => '/pages/stories.php', 'icon' => 'bi-images', 'label' => 'Dashboard Hikayeleri'],
+        ['slug' => 'notifications-create', 'url' => '/pages/notifications-create.php', 'icon' => 'bi-bell', 'label' => 'Yeni Bildirim'],
+        ['slug' => 'notifications-history', 'url' => '/pages/notifications-history.php', 'icon' => 'bi-clock-history', 'label' => 'Gönderim Geçmişi'],
+        ['slug' => 'notifications-tokens', 'url' => '/pages/notifications-tokens.php', 'icon' => 'bi-phone', 'label' => 'Tokenlar'],
+        ['slug' => 'notifications-rules', 'url' => '/pages/notifications-rules.php', 'icon' => 'bi-sliders', 'label' => 'Kurallar'],
+        ['slug' => 'notifications-stats', 'url' => '/pages/notifications-stats.php', 'icon' => 'bi-graph-up-arrow', 'label' => 'İstatistikler'],
         ['slug' => 'community-rooms', 'url' => '/pages/community-rooms.php', 'icon' => 'bi-chat-dots', 'label' => 'Topluluk Odaları'],
         ['slug' => 'community-messages', 'url' => '/pages/community-messages.php', 'icon' => 'bi-chat-left-text', 'label' => 'Topluluk Mesajları'],
         ['slug' => 'community-reports', 'url' => '/pages/community-reports.php', 'icon' => 'bi-flag', 'label' => 'Raporlanan Mesajlar'],
@@ -31,9 +36,19 @@ $menuGroups = [
 function render_sidebar_menu($menuGroups, $current_page)
 {
     foreach ($menuGroups as $groupIndex => $group) {
+        $notificationsHeaderPrinted = false;
         foreach ($group as $item) {
+            if (str_starts_with($item['slug'], 'notifications-') && !$notificationsHeaderPrinted) {
+                echo '<div class="nav-link disabled text-uppercase small fw-semibold opacity-75" style="pointer-events:none;">';
+                echo '<i class="bi bi-bell"></i><span>Bildirim Yönetimi</span>';
+                echo '</div>';
+                $notificationsHeaderPrinted = true;
+            }
+
             $isActive = ($current_page ?? '') === $item['slug'] ? 'active' : '';
-            echo '<a class="nav-link ' . $isActive . '" href="' . $item['url'] . '">';
+            $isNotificationItem = str_starts_with($item['slug'], 'notifications-');
+            $extraClass = $isNotificationItem ? ' ps-4' : '';
+            echo '<a class="nav-link ' . $isActive . $extraClass . '" href="' . $item['url'] . '">';
             echo '<i class="bi ' . $item['icon'] . '"></i><span>' . htmlspecialchars($item['label']) . '</span>';
             echo '</a>';
         }
@@ -88,6 +103,8 @@ function render_sidebar_menu($menuGroups, $current_page)
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
+
 
 
 
