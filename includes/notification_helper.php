@@ -83,7 +83,7 @@ if (!function_exists('notification_schema')) {
                 'payload_json' => notification_pick_column($nCols, ['payload_json', 'payload', 'data_json'], false),
                 'channel' => notification_pick_column($nCols, ['channel', 'topic', 'notification_channel'], false),
                 'target_type' => notification_pick_column($nCols, ['target_type', 'audience_type'], false),
-                'target_value' => notification_pick_column($nCols, ['target_value', 'audience_value', 'target_payload'], false),
+                'target_value' => notification_pick_column($nCols, ['target_value', 'target_filter_json', 'audience_value', 'target_payload'], false),
                 'status' => notification_pick_column($nCols, ['status'], false),
                 'schedule_type' => notification_pick_column($nCols, ['schedule_type'], false),
                 'scheduled_at' => notification_pick_column($nCols, ['scheduled_at', 'planned_at'], false),
@@ -827,6 +827,16 @@ if (!function_exists('send_push_notification')) {
         }
 
         $targets = resolve_notification_targets($pdo, $notificationId);
+        $resolvedTargetCount = count($targets);
+
+        if ($resolvedTargetCount === 0) {
+            $targetType = $n['target_type'] ? (string)($notification[$n['target_type']] ?? 'all_users') : 'all_users';
+            if ($targetType === 'single_user') {
+                throw new InvalidArgumentException('Tek kullanıcı bulunamadı. Lütfen kullanıcı seçimini kontrol edin.');
+            }
+            throw new InvalidArgumentException('Hedef kullanıcı bulunamadı. Bildirim gönderimi iptal edildi.');
+        }
+
         $tokens = get_active_tokens_for_users($pdo, $targets);
         $fcmData = notification_build_fcm_data($notification, $n);
 
@@ -927,7 +937,7 @@ if (!function_exists('send_push_notification')) {
         $update = [];
         if ($n['status']) $update[$n['status']] = 'sent';
         if ($n['sent_at']) $update[$n['sent_at']] = date('Y-m-d H:i:s');
-        if ($n['total_target']) $update[$n['total_target']] = $total;
+        if ($n['total_target']) $update[$n['total_target']] = $resolvedTargetCount;
         if ($n['success_count']) $update[$n['success_count']] = $success;
         if ($n['failure_count']) $update[$n['failure_count']] = $failed;
         if ($n['updated_at']) $update[$n['updated_at']] = date('Y-m-d H:i:s');
@@ -936,7 +946,9 @@ if (!function_exists('send_push_notification')) {
 
         return [
             'notification_id' => $notificationId,
-            'total_target' => $total,
+            'resolved_target_count' => $resolvedTargetCount,
+            'total_target' => $resolvedTargetCount,
+            'token_target_count' => $total,
             'success' => $success,
             'failed' => $failed,
             'mock' => false,

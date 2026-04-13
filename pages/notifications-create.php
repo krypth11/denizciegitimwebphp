@@ -17,8 +17,7 @@ include '../includes/sidebar.php';
             <p class="text-muted mb-0">Firebase push kampanyası oluşturun, hedefleyin ve gönderin.</p>
         </div>
         <div class="page-actions d-flex gap-2 flex-wrap">
-            <button class="btn btn-warning" id="sendTestBtn"><i class="bi bi-flask"></i> Test Olarak Bana Gönder</button>
-            <button class="btn btn-secondary" id="saveBtn"><i class="bi bi-save"></i> Kaydet</button>
+            <button class="btn btn-secondary" id="saveBtn"><i class="bi bi-save"></i> Taslak Olarak Kaydet</button>
             <button class="btn btn-primary" id="sendBtn"><i class="bi bi-send"></i> Gönder</button>
         </div>
     </div>
@@ -107,10 +106,6 @@ include '../includes/sidebar.php';
                             <input class="form-check-input" type="radio" name="schedule_mode" id="schedule_scheduled" value="scheduled">
                             <label class="form-check-label" for="schedule_scheduled">Planlı gönder</label>
                         </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="schedule_mode" id="schedule_draft" value="draft">
-                            <label class="form-check-label" for="schedule_draft">Taslak kaydet</label>
-                        </div>
                     </div>
                     <div class="mt-3 d-none" id="scheduledAtWrap">
                         <label class="form-label">Planlanan Tarih/Saat</label>
@@ -123,15 +118,10 @@ include '../includes/sidebar.php';
 </div>
 
 <?php
-$currentUserIdJs = json_encode((string)($user['user_id'] ?? ($_SESSION['user_id'] ?? '')));
-
-$extra_js = '<script>window.__notificationsCreateCurrentUserId = ' . $currentUserIdJs . ';</script>';
-
-$extra_js .= <<<'JAVASCRIPT'
+$extra_js = <<<'JAVASCRIPT'
 <script>
 $(function () {
     const endpoint = '../ajax/notifications.php';
-    const currentUserId = (window.__notificationsCreateCurrentUserId ?? '').toString();
 
     const appAlert = (title, message, type = 'info') =>
         window.showAppAlert
@@ -193,7 +183,7 @@ $(function () {
         }
     }
 
-    function collectPayload(forceTest = false) {
+    function collectPayload() {
         const payload = {
             title: ($('#title').val() || '').trim(),
             message: ($('#message').val() || '').trim(),
@@ -208,11 +198,6 @@ $(function () {
             scheduled_at: $('#scheduled_at').val() || ''
         };
 
-        if (forceTest) {
-            payload.target_type = 'single_user';
-            payload.target_user_id = currentUserId;
-            payload.schedule_mode = 'now';
-        }
         return payload;
     }
 
@@ -235,8 +220,12 @@ $(function () {
         return null;
     }
 
-    async function submit(action, forceTest = false) {
-        const payload = collectPayload(forceTest);
+    async function submit(action) {
+        const payload = collectPayload();
+        if (action === 'save_draft') {
+            payload.schedule_mode = 'draft';
+            payload.scheduled_at = '';
+        }
         const err = validatePayload(payload);
         if (err) {
             await appAlert('Doğrulama', err, 'warning');
@@ -267,19 +256,13 @@ $(function () {
     });
 
     $('#saveBtn').on('click', async function () {
-        const mode = $('input[name="schedule_mode"]:checked').val() || 'now';
-        const action = mode === 'draft' ? 'save_draft' : 'create_notification';
-        await submit(action, false);
+        await submit('save_draft');
     });
 
     $('#sendBtn').on('click', async function () {
-        $('input[name="schedule_mode"][value="now"]').prop('checked', true);
-        toggleScheduleField();
-        await submit('send_now', false);
-    });
-
-    $('#sendTestBtn').on('click', async function () {
-        await submit('send_now', true);
+        const mode = $('input[name="schedule_mode"]:checked').val() || 'now';
+        const action = mode === 'scheduled' ? 'create_notification' : 'send_now';
+        await submit(action);
     });
 
     toggleTargetFields();

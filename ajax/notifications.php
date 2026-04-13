@@ -204,7 +204,13 @@ try {
             $payloadJsonRaw = (string)($_POST['payload_json'] ?? '');
             $channel = notifications_validate_channel(trim((string)($_POST['channel'] ?? 'general')));
             $targetType = notifications_normalize_target_type(trim((string)($_POST['target_type'] ?? 'all_users')));
-            $scheduleMode = trim((string)($_POST['schedule_mode'] ?? ($action === 'save_draft' ? 'draft' : 'now')));
+            $requestScheduleMode = trim((string)($_POST['schedule_mode'] ?? 'now'));
+            $scheduleMode = $requestScheduleMode;
+            if ($action === 'save_draft') {
+                $scheduleMode = 'draft';
+            } elseif ($action === 'send_now') {
+                $scheduleMode = 'now';
+            }
             $scheduledAt = trim((string)($_POST['scheduled_at'] ?? ''));
 
             if ($title === '' || $message === '') {
@@ -215,7 +221,7 @@ try {
             $targetValue = notifications_build_target_value($targetType);
 
             $status = 'queued';
-            if ($action === 'save_draft' || $scheduleMode === 'draft') {
+            if ($scheduleMode === 'draft') {
                 $status = 'draft';
             } elseif ($scheduleMode === 'scheduled') {
                 if ($scheduledAt === '') {
@@ -242,7 +248,7 @@ try {
             $notificationId = trim((string)($_POST['notification_id'] ?? ''));
             $notificationId = notification_create_or_update($pdo, $notificationPayload, $notificationId !== '' ? $notificationId : null);
 
-            if ($action === 'send_now' || $scheduleMode === 'now') {
+            if ($action === 'send_now' || ($action === 'create_notification' && $scheduleMode === 'now')) {
                 $result = send_push_notification($pdo, $notificationId);
                 notifications_json(true, 'Bildirim gönderim kuyruğuna alındı.', ['notification_id' => $notificationId, 'send_result' => $result]);
             }
