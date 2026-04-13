@@ -123,16 +123,28 @@ include '../includes/sidebar.php';
 </div>
 
 <?php
-$extra_js = <<<'JAVASCRIPT'
+$currentUserIdJs = json_encode((string)($user['user_id'] ?? ($_SESSION['user_id'] ?? '')));
+
+$extra_js = '<script>window.__notificationsCreateCurrentUserId = ' . $currentUserIdJs . ';</script>';
+
+$extra_js .= <<<'JAVASCRIPT'
 <script>
 $(function () {
     const endpoint = '../ajax/notifications.php';
-    const currentUserId = <?= json_encode((string)($user['user_id'] ?? ($_SESSION['user_id'] ?? ''))) ?>;
+    const currentUserId = (window.__notificationsCreateCurrentUserId ?? '').toString();
 
     const appAlert = (title, message, type = 'info') =>
-        window.showAppAlert ? window.showAppAlert({ title, message, type }) : Promise.resolve();
+        window.showAppAlert
+            ? window.showAppAlert({ title, message, type })
+            : Promise.resolve(window.alert(message || title || 'Bir hata oluştu.'));
 
     const api = async (action, method = 'GET', data = {}) => {
+        if (typeof window.appAjax !== 'function') {
+            console.error('[notifications-create] window.appAjax bulunamadı.');
+            await appAlert('Hata', 'İstek altyapısı yüklenemedi (appAjax). Sayfayı yenileyip tekrar deneyin.', 'error');
+            throw new Error('window.appAjax is not available');
+        }
+
         return await window.appAjax({
             url: endpoint + '?action=' + encodeURIComponent(action),
             method,
@@ -155,22 +167,30 @@ $(function () {
     }
 
     async function loadQualifications() {
-        const res = await api('list_qualifications');
-        const items = res.data?.items || [];
-        const $sel = $('#target_qualification_id');
-        $sel.empty().append('<option value="">Seçiniz...</option>');
-        items.forEach(i => $sel.append('<option value="' + esc(i.id) + '">' + esc(i.name) + '</option>'));
+        try {
+            const res = await api('list_qualifications');
+            const items = res.data?.items || [];
+            const $sel = $('#target_qualification_id');
+            $sel.empty().append('<option value="">Seçiniz...</option>');
+            items.forEach(i => $sel.append('<option value="' + esc(i.id) + '">' + esc(i.name) + '</option>'));
+        } catch (e) {
+            console.error('[notifications-create] loadQualifications', e);
+        }
     }
 
     async function searchUsers(q = '') {
-        const res = await api('search_users', 'GET', { q });
-        const items = res.data?.items || [];
-        const $sel = $('#target_user_id');
-        $sel.empty().append('<option value="">Kullanıcı seçiniz...</option>');
-        items.forEach(i => {
-            const label = (i.full_name || '') + (i.email ? ' (' + i.email + ')' : '');
-            $sel.append('<option value="' + esc(i.id) + '">' + esc(label.trim()) + '</option>');
-        });
+        try {
+            const res = await api('search_users', 'GET', { q });
+            const items = res.data?.items || [];
+            const $sel = $('#target_user_id');
+            $sel.empty().append('<option value="">Kullanıcı seçiniz...</option>');
+            items.forEach(i => {
+                const label = (i.full_name || '') + (i.email ? ' (' + i.email + ')' : '');
+                $sel.append('<option value="' + esc(i.id) + '">' + esc(label.trim()) + '</option>');
+            });
+        } catch (e) {
+            console.error('[notifications-create] searchUsers', e);
+        }
     }
 
     function collectPayload(forceTest = false) {
@@ -223,12 +243,17 @@ $(function () {
             return;
         }
 
-        const res = await api(action, 'POST', payload);
-        if (!res.success) {
-            await appAlert('Hata', res.message || 'İşlem başarısız.', 'error');
-            return;
+        try {
+            const res = await api(action, 'POST', payload);
+            if (!res.success) {
+                await appAlert('Hata', res.message || 'İşlem başarısız.', 'error');
+                return;
+            }
+            await appAlert('Başarılı', res.message || 'İşlem başarılı.', 'success');
+        } catch (e) {
+            console.error('[notifications-create] submit', e);
+            await appAlert('Hata', 'İşlem sırasında beklenmeyen bir hata oluştu.', 'error');
         }
-        await appAlert('Başarılı', res.message || 'İşlem başarılı.', 'success');
     }
 
     $('#target_type').on('change', toggleTargetFields);
