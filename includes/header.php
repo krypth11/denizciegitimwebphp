@@ -43,6 +43,10 @@ $customCssVersion = file_exists($customCssPath) ? filemtime($customCssPath) : ti
 
     <!-- Custom CSS -->
     <link href="/assets/css/custom.css?v=<?= (int)$customCssVersion ?>" rel="stylesheet">
+
+    <?php if (isset($extra_head)): ?>
+        <?= $extra_head ?>
+    <?php endif; ?>
 </head>
 <body>
     <div class="app-shell">

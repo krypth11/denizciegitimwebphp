@@ -11,6 +11,16 @@ $menuGroups = [
         ['slug' => 'questions', 'url' => '/pages/questions.php', 'icon' => 'bi-question-circle', 'label' => 'Sorular'],
         ['slug' => 'questions-export', 'url' => '/pages/questions-export.php', 'icon' => 'bi-file-earmark-arrow-down', 'label' => 'Soru Dışa Aktar'],
         ['slug' => 'word-game-questions', 'url' => '/pages/word-game-questions.php', 'icon' => 'bi-controller', 'label' => 'Kelime Oyunu'],
+        [
+            'slug' => 'kart-game',
+            'icon' => 'bi-grid-3x3-gap',
+            'label' => 'Kart Oyunu',
+            'children' => [
+                ['slug' => 'kart-game-categories', 'url' => '/pages/kart-game-categories.php', 'icon' => 'bi-collection', 'label' => 'Başlıklar'],
+                ['slug' => 'kart-game-mappings', 'url' => '/pages/kart-game-mappings.php', 'icon' => 'bi-diagram-2', 'label' => 'Başlık - Yeterlilik Eşleştirme'],
+                ['slug' => 'kart-game-questions', 'url' => '/pages/kart-game-questions.php', 'icon' => 'bi-card-image', 'label' => 'Sorular'],
+            ],
+        ],
         ['slug' => 'ai-question-review', 'url' => '/pages/ai-question-review.php', 'icon' => 'bi-robot', 'label' => 'AI Soru Kontrol'],
     ],
     [
@@ -77,6 +87,26 @@ function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default
         $notificationRendered = false;
 
         foreach ($group as $item) {
+            if (!empty($item['children']) && is_array($item['children'])) {
+                $submenuId = 'submenu-' . ($item['slug'] ?? 'item') . '-' . $instanceKey . '-' . $groupIndex;
+                $childSlugs = array_map(static fn($child) => (string)($child['slug'] ?? ''), $item['children']);
+                $isOpen = in_array((string)$current_page, $childSlugs, true);
+                $toggleClass = $isOpen ? '' : ' collapsed';
+                $showClass = $isOpen ? ' show' : '';
+                $parentActiveClass = $isOpen ? ' active' : '';
+
+                echo '<a class="nav-link submenu-toggle' . $toggleClass . $parentActiveClass . '" data-bs-toggle="collapse" href="#' . $submenuId . '" role="button" aria-expanded="' . ($isOpen ? 'true' : 'false') . '" aria-controls="' . $submenuId . '">';
+                echo '<i class="bi ' . htmlspecialchars((string)($item['icon'] ?? 'bi-list')) . '"></i><span>' . htmlspecialchars((string)($item['label'] ?? 'Menü')) . '</span><i class="bi bi-chevron-down submenu-chevron ms-auto"></i>';
+                echo '</a>';
+
+                echo '<div class="collapse submenu-container' . $showClass . '" id="' . $submenuId . '">';
+                foreach ($item['children'] as $child) {
+                    render_sidebar_link($child, (string)$current_page, ' submenu-item');
+                }
+                echo '</div>';
+                continue;
+            }
+
             if (is_notification_menu_item($item)) {
                 if (!$notificationRendered) {
                     render_notification_submenu($notificationItems, (string)$current_page, (string)$instanceKey . '-' . $groupIndex);
@@ -139,6 +169,7 @@ function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
 
 
 
