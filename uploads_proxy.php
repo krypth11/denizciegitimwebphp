@@ -31,7 +31,9 @@ if ($relative === '') {
 }
 
 $isStoriesPath = ($relative === 'stories') || (strpos($relative, 'stories/') === 0);
-if (!$isStoriesPath) {
+$isKartOyunuPath = ($relative === 'kart-oyunu') || (strpos($relative, 'kart-oyunu/') === 0);
+
+if (!$isStoriesPath && !$isKartOyunuPath) {
     uploads_proxy_forbidden();
 }
 
