@@ -209,6 +209,8 @@ try {
             'qualification_id' => $row['qualification_id'] ?? null,
             'qualification_name' => (string)($row['qualification_name'] ?? ''),
             'total_answer_attempts' => (int)($row['total_answer_attempts'] ?? 0),
+            'solved_count' => (int)($row['total_answer_attempts'] ?? 0),
+            'answered_count' => (int)($row['total_answer_attempts'] ?? 0),
             'total_correct' => $correct,
             'total_wrong' => $wrong,
             'success_rate' => dd_rate($correct, $wrong),
