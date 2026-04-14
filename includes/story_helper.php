@@ -50,13 +50,44 @@ function story_upload_error_message(int $errorCode): string
 
 function story_upload_root_abs(): string
 {
-    $custom = trim((string)(getenv('STORY_UPLOAD_ROOT') ?: ''));
+    $custom = trim((string)(defined('STORY_UPLOAD_ROOT') ? STORY_UPLOAD_ROOT : (getenv('STORY_UPLOAD_ROOT') ?: '')));
     if ($custom !== '') {
         $clean = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $custom);
         return rtrim($clean, DIRECTORY_SEPARATOR);
     }
 
     return story_project_root() . DIRECTORY_SEPARATOR . 'uploads';
+}
+
+function story_upload_public_prefix(): string
+{
+    static $cached = null;
+    if (is_string($cached)) {
+        return $cached;
+    }
+
+    $prefix = trim((string)(defined('UPLOADS_PUBLIC_PREFIX') ? UPLOADS_PUBLIC_PREFIX : (getenv('UPLOADS_PUBLIC_PREFIX') ?: 'uploads')));
+    $prefix = trim(str_replace('\\', '/', $prefix), '/');
+    $cached = $prefix !== '' ? $prefix : 'uploads';
+
+    return $cached;
+}
+
+function story_sanitize_relative_path(string $path): string
+{
+    $path = str_replace('\\', '/', $path);
+    $parts = explode('/', $path);
+    $safe = [];
+
+    foreach ($parts as $part) {
+        $part = trim($part);
+        if ($part === '' || $part === '.' || $part === '..') {
+            continue;
+        }
+        $safe[] = $part;
+    }
+
+    return implode('/', $safe);
 }
 
 function story_ensure_directory_ready(string $dir): void
@@ -345,7 +376,23 @@ function story_public_url_to_abs(?string $url): string
         return '';
     }
 
-    $cleanPath = ltrim(str_replace('..', '', $relativePath), '/');
+    $cleanPath = story_sanitize_relative_path($relativePath);
+    if ($cleanPath === '') {
+        return '';
+    }
+
+    $prefix = story_upload_public_prefix();
+    $hasPrefix = ($cleanPath === $prefix) || (strpos($cleanPath, $prefix . '/') === 0);
+    if ($hasPrefix) {
+        $tail = ltrim(substr($cleanPath, strlen($prefix)), '/');
+        $safeTail = story_sanitize_relative_path($tail);
+        if ($safeTail === '') {
+            return '';
+        }
+
+        return story_upload_root_abs() . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $safeTail);
+    }
+
     return story_project_root() . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $cleanPath);
 }
 
@@ -357,7 +404,10 @@ function story_store_uploaded_image(array $file, string $type): string
     $validated = story_validate_upload($file, $label);
     $dirs = story_upload_dirs();
     $dir = $type === 'thumbnail' ? $dirs['thumbnails'] : $dirs['images'];
-    $relativeDir = $type === 'thumbnail' ? 'uploads/stories/thumbnails' : 'uploads/stories/images';
+    $publicUploadsPrefix = story_upload_public_prefix();
+    $relativeDir = $type === 'thumbnail'
+        ? ($publicUploadsPrefix . '/stories/thumbnails')
+        : ($publicUploadsPrefix . '/stories/images');
 
     story_log('upload hazırlığı', [
         'type' => $type,

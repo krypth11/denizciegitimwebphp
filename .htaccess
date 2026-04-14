@@ -7,6 +7,12 @@ DirectoryIndex index.php
     RewriteEngine On
     RewriteBase /
 
+    # /uploads için öncelik symlink/fiziksel dosyada. Yoksa güvenli proxy fallback.
+    RewriteCond %{REQUEST_URI} ^/uploads/ [NC]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^uploads/(.*)$ uploads_proxy.php?path=$1 [L,QSA,NC]
+
     # REST benzeri API yollarını .php dosyalarına yönlendir
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d

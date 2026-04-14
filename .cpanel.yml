@@ -1,5 +1,10 @@
 deployment:
   tasks:
     - export DEPLOYPATH=/home/u2621168/admin.denizciegitim.com
-    - /bin/find $DEPLOYPATH -mindepth 1 -maxdepth 1 ! -name '.well-known' -exec rm -rf {} \;
-    - /bin/cp -R ./* $DEPLOYPATH
+    - export SHARED_UPLOADS=/home/u2621168/shared_uploads
+    - /bin/mkdir -p "$DEPLOYPATH"
+    - /bin/mkdir -p "$SHARED_UPLOADS/stories/thumbnails" "$SHARED_UPLOADS/stories/images"
+    - /bin/find "$DEPLOYPATH" -mindepth 1 -maxdepth 1 ! -name '.well-known' ! -name 'uploads' -exec rm -rf {} \;
+    - /bin/cp -R ./. "$DEPLOYPATH"
+    - if [ -e "$DEPLOYPATH/uploads" ] && [ ! -L "$DEPLOYPATH/uploads" ]; then /bin/rm -rf "$DEPLOYPATH/uploads"; fi
+    - /bin/ln -sfn "$SHARED_UPLOADS" "$DEPLOYPATH/uploads"

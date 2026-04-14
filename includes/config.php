@@ -18,6 +18,9 @@ define('DB_NAME', 'u2621168_denizciegitim');
 define('SITE_URL', 'https://denizciegitim.com');
 define('SITE_NAME', 'Denizci Eğitim Admin Panel');
 define('STORY_PUBLIC_BASE_URL', getenv('STORY_PUBLIC_BASE_URL') ?: '');
+define('SHARED_UPLOADS_ROOT', getenv('SHARED_UPLOADS_ROOT') ?: '/home/u2621168/shared_uploads');
+define('STORY_UPLOAD_ROOT', getenv('STORY_UPLOAD_ROOT') ?: SHARED_UPLOADS_ROOT);
+define('UPLOADS_PUBLIC_PREFIX', getenv('UPLOADS_PUBLIC_PREFIX') ?: 'uploads');
 
 // Firebase (FCM HTTP v1)
 define('FIREBASE_SERVICE_ACCOUNT_PATH', getenv('FIREBASE_SERVICE_ACCOUNT_PATH') ?: '/home/u2621168/firebase/denizci-egitim-firebase-adminsdk-fbsvc-e2454f0564.json');
