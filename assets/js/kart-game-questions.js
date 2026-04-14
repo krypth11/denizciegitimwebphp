@@ -15,12 +15,14 @@
         perPage: 20,
         totalPages: 1,
         croppedBlob: null,
+        previewBlobUrl: '',
         editMode: false,
         keepExistingImage: false,
     };
 
     let cropper = null;
     let cropSourceUrl = '';
+    let pendingCropFile = null;
 
     async function api(action, method = 'GET', data = {}) {
         return await window.appAjax({
@@ -50,14 +52,35 @@
         }
     }
 
-    function setPreview(src, hasImage = false) {
+    function clearPreviewBlobUrl() {
+        if (state.previewBlobUrl) {
+            URL.revokeObjectURL(state.previewBlobUrl);
+            state.previewBlobUrl = '';
+        }
+    }
+
+    function setPreview(src, hasImage = false, isTemporary = false) {
         const $img = $('#kgqImagePreview');
         const $hint = $('#kgqImagePreviewHint');
+        const $wrap = $('#kgqImagePreviewWrap');
+
+        if (!isTemporary) {
+            clearPreviewBlobUrl();
+        }
+
+        $wrap.removeClass('is-empty is-existing is-new');
+
         if (src) {
             $img.attr('src', src).removeClass('d-none');
-            $hint.text(hasImage ? 'Kayıtlı görsel önizlemesi.' : 'Kırpılmış yeni görsel hazır.');
+            $wrap.addClass(hasImage ? 'is-existing' : 'is-new');
+            $hint.text(hasImage ? 'Kayıtlı görsel önizlemesi.' : 'Yeni kırpılmış görsel hazır. Kaydet ile yüklenir.');
+
+            if (isTemporary) {
+                state.previewBlobUrl = src;
+            }
         } else {
             $img.attr('src', '').addClass('d-none');
+            $wrap.addClass('is-empty');
             $hint.text('Henüz görsel seçilmedi.');
         }
     }
@@ -191,31 +214,93 @@
             URL.revokeObjectURL(cropSourceUrl);
             cropSourceUrl = '';
         }
+        pendingCropFile = null;
+        $('#kgqCropImage').attr('src', '');
+    }
+
+    function fitCropperInitialLayout() {
+        if (!cropper) return;
+
+        const containerData = cropper.getContainerData();
+        const imageData = cropper.getImageData();
+
+        if (!containerData?.width || !containerData?.height || !imageData?.naturalWidth || !imageData?.naturalHeight) {
+            return;
+        }
+
+        cropper.reset();
+
+        const fitScale = Math.min(
+            containerData.width / imageData.naturalWidth,
+            containerData.height / imageData.naturalHeight
+        );
+        if (Number.isFinite(fitScale) && fitScale > 0) {
+            cropper.zoomTo(fitScale);
+        }
+        cropper.center();
+
+        const maxCropW = containerData.width * 0.78;
+        const maxCropH = containerData.height * 0.88;
+        let cropW = maxCropW;
+        let cropH = cropW / cropAspectRatio;
+
+        if (cropH > maxCropH) {
+            cropH = maxCropH;
+            cropW = cropH * cropAspectRatio;
+        }
+
+        cropper.setCropBoxData({
+            width: cropW,
+            height: cropH,
+            left: (containerData.width - cropW) / 2,
+            top: (containerData.height - cropH) / 2,
+        });
     }
 
     function openCropModal(file) {
-        destroyCropper();
-        cropSourceUrl = URL.createObjectURL(file);
-        const image = document.getElementById('kgqCropImage');
-        image.src = cropSourceUrl;
-
+        pendingCropFile = file;
         const cropModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('kgqCropModal'));
         cropModal.show();
+    }
+
+    function initCropperForPendingFile() {
+        if (!pendingCropFile) return;
+
+        if (cropper) {
+            cropper.destroy();
+            cropper = null;
+        }
+        if (cropSourceUrl) {
+            URL.revokeObjectURL(cropSourceUrl);
+            cropSourceUrl = '';
+        }
+
+        const image = document.getElementById('kgqCropImage');
+        cropSourceUrl = URL.createObjectURL(pendingCropFile);
 
         image.onload = function () {
-            if (cropper) {
-                cropper.destroy();
-                cropper = null;
-            }
+            image.onload = null;
             cropper = new Cropper(image, {
                 aspectRatio: cropAspectRatio,
                 viewMode: 1,
-                autoCropArea: 0.95,
+                autoCropArea: 0.82,
+                dragMode: 'move',
                 responsive: true,
                 background: false,
                 zoomable: true,
+                zoomOnWheel: true,
+                movable: true,
+                guides: true,
+                center: true,
+                highlight: false,
+                toggleDragModeOnDblclick: false,
+                ready() {
+                    requestAnimationFrame(fitCropperInitialLayout);
+                }
             });
         };
+
+        image.src = cropSourceUrl;
     }
 
     function formatErrors(res) {
@@ -238,8 +323,28 @@
 
     $('#kgqCropUseBtn').on('click', async function () {
         if (!cropper) return;
+
+        const cropData = cropper.getData(true);
+        const naturalCropW = Math.round(cropData?.width || 0);
+        const naturalCropH = Math.round(cropData?.height || 0);
+
+        if (naturalCropW < minCropWidth || naturalCropH < minCropHeight) {
+            await appAlert('Uyarı', `Crop sonucu çok küçük. Minimum ${minCropWidth}x${minCropHeight} olmalı.`, 'warning');
+            return;
+        }
+
+        let exportWidth = Math.max(minCropWidth, Math.min(1800, naturalCropW));
+        let exportHeight = Math.round(exportWidth / cropAspectRatio);
+        if (exportHeight < minCropHeight) {
+            exportHeight = minCropHeight;
+            exportWidth = Math.round(exportHeight * cropAspectRatio);
+        }
+
         const canvas = cropper.getCroppedCanvas({
+            width: exportWidth,
+            height: exportHeight,
             imageSmoothingQuality: 'high',
+            imageSmoothingEnabled: true,
             fillColor: '#fff'
         });
         if (!canvas) {
@@ -265,9 +370,13 @@
             $('#kgq_cropped_ready').val('1');
 
             const previewUrl = URL.createObjectURL(blob);
-            setPreview(previewUrl, false);
+            setPreview(previewUrl, false, true);
             bootstrap.Modal.getOrCreateInstance(document.getElementById('kgqCropModal')).hide();
-        }, 'image/jpeg', 0.92);
+        }, 'image/jpeg', 0.94);
+    });
+
+    $('#kgqCropModal').on('shown.bs.modal', function () {
+        initCropperForPendingFile();
     });
 
     $('#kgqCropModal').on('hidden.bs.modal', function () {

@@ -634,33 +634,137 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .kgq-image-preview-wrap {
-    padding: 10px;
-    border: 1px dashed var(--border);
-    border-radius: 10px;
-    background: var(--bg-soft);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: linear-gradient(145deg, var(--bg-soft), var(--bg-surface));
+    transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+
+.kgq-image-preview-wrap.is-empty {
+    border-style: dashed;
+}
+
+.kgq-image-preview-wrap.is-existing {
+    border-color: rgba(119, 168, 138, 0.45);
+    box-shadow: 0 6px 18px rgba(72, 112, 88, 0.08);
+}
+
+.kgq-image-preview-wrap.is-new {
+    border-color: rgba(141, 169, 216, 0.5);
+    box-shadow: 0 7px 22px rgba(73, 93, 138, 0.1);
+}
+
+.kgq-image-preview-frame {
+    width: 146px;
+    aspect-ratio: 4 / 5;
+    flex: 0 0 auto;
+    border-radius: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-soft);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.kgq-image-preview-meta {
+    min-width: 0;
+}
+
+.kgq-image-preview-title {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 4px;
 }
 
 .kgq-image-preview {
-    width: 140px;
-    height: 175px;
+    width: 100%;
+    height: 100%;
     object-fit: cover;
-    border-radius: 10px;
+    border-radius: 11px;
     border: 1px solid var(--border);
     box-shadow: var(--shadow-soft);
 }
 
+.kgq-crop-modal .modal-content {
+    overflow: hidden;
+}
+
+.kgq-crop-modal-dialog {
+    max-width: min(1320px, 96vw);
+    margin: 1rem auto;
+}
+
+.kgq-crop-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px 16px 10px;
+}
+
+.kgq-crop-info {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.kgq-crop-info-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-soft);
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 5px 10px;
+}
+
 .kgq-cropper-stage {
     width: 100%;
-    min-height: 360px;
-    max-height: 70vh;
-    background: #111;
+    height: min(74vh, 860px);
+    min-height: 480px;
+    background: radial-gradient(circle at 50% 35%, #2a3448 0%, #161d2d 62%, #101624 100%);
     border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
     overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 .kgq-cropper-stage img {
     display: block;
     max-width: 100%;
+    max-height: 100%;
+}
+
+.kgq-cropper-stage .cropper-container,
+.kgq-cropper-stage .cropper-wrap-box,
+.kgq-cropper-stage .cropper-canvas,
+.kgq-cropper-stage .cropper-drag-box {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.kgq-cropper-stage .cropper-view-box,
+.kgq-cropper-stage .cropper-face {
+    border-radius: 12px;
+}
+
+[data-theme="dark"] .kgq-crop-info-chip {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-soft);
+}
+
+[data-theme="dark"] .kgq-image-preview-wrap {
+    background: linear-gradient(145deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
 }
 
 .mapping-card .form-check {
@@ -977,6 +1081,35 @@ h1, h2, h3, h4, h5, h6 {
         width: 100%;
         min-height: 36px;
         justify-content: center;
+    }
+
+    .kgq-image-preview-wrap {
+        gap: 10px;
+        padding: 10px;
+    }
+
+    .kgq-image-preview-frame {
+        width: 108px;
+    }
+
+    .kgq-crop-modal-dialog {
+        max-width: calc(100vw - 14px);
+        margin: 0.4rem auto;
+    }
+
+    .kgq-crop-modal-body {
+        padding: 10px;
+        gap: 8px;
+    }
+
+    .kgq-cropper-stage {
+        min-height: 56vh;
+        height: 56vh;
+    }
+
+    .kgq-crop-info-chip {
+        font-size: 11px;
+        padding: 4px 8px;
     }
 
     .qualifications-mobile-tools .form-select,

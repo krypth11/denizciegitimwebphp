@@ -128,9 +128,14 @@ include '../includes/sidebar.php';
                             <div class="form-text">Görsel seçildikten sonra crop modalı açılır.</div>
                         </div>
                         <div class="col-12">
-                            <div class="kgq-image-preview-wrap">
-                                <img src="" alt="Önizleme" id="kgqImagePreview" class="kgq-image-preview d-none">
-                                <div class="small text-muted mt-2" id="kgqImagePreviewHint">Henüz görsel seçilmedi.</div>
+                            <div class="kgq-image-preview-wrap is-empty" id="kgqImagePreviewWrap">
+                                <div class="kgq-image-preview-frame">
+                                    <img src="" alt="Önizleme" id="kgqImagePreview" class="kgq-image-preview d-none">
+                                </div>
+                                <div class="kgq-image-preview-meta">
+                                    <div class="kgq-image-preview-title">Görsel Önizleme (4:5)</div>
+                                    <div class="small text-muted" id="kgqImagePreviewHint">Henüz görsel seçilmedi.</div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -144,18 +149,22 @@ include '../includes/sidebar.php';
     </div>
 </div>
 
-<div class="modal fade" id="kgqCropModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-centered">
+<div class="modal fade kgq-crop-modal" id="kgqCropModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-centered kgq-crop-modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">Görseli Kırp (4:5)</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body kgq-crop-modal-body">
+                <div class="kgq-crop-info">
+                    <span class="kgq-crop-info-chip"><i class="bi bi-arrows-move"></i> Sürükle</span>
+                    <span class="kgq-crop-info-chip"><i class="bi bi-zoom-in"></i> Zoom yap</span>
+                    <span class="kgq-crop-info-chip"><i class="bi bi-aspect-ratio"></i> 4:5 kart alanını ayarla</span>
+                </div>
                 <div class="kgq-cropper-stage">
                     <img id="kgqCropImage" src="" alt="Crop">
                 </div>
-                <div class="small text-muted mt-2">Fare ile alanı sürükleyin, tekerlek/pinch ile zoom yapın.</div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Vazgeç</button>
