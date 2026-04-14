@@ -15,7 +15,7 @@ include '../includes/sidebar.php';
     <div class="page-header">
         <div>
             <h2>Soru Dışa Aktar</h2>
-            <p class="text-muted mb-0">Seçilen filtrelere göre soruları CSV olarak dışa aktar</p>
+            <p class="text-muted mb-0">Soruları CSV, Excel, JSON ve AI paket formatlarında dışa aktarın</p>
         </div>
     </div>
 
@@ -44,19 +44,81 @@ include '../includes/sidebar.php';
                 </div>
 
                 <div class="col-md-6">
-                    <label class="form-label">İndir formatı</label>
+                    <label class="form-label">Export formatı</label>
                     <select class="form-select" id="exportFormat">
                         <option value="csv" selected>CSV</option>
+                        <option value="xlsx">Excel (.xlsx)</option>
+                        <option value="json">JSON</option>
+                        <option value="md">AI Analiz Paketi (.md)</option>
+                    </select>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">İçerik şablonu / Export profili</label>
+                    <select class="form-select" id="exportProfile">
+                        <option value="full_data" selected>Tam veri</option>
+                        <option value="question_texts">Sadece soru metinleri</option>
+                        <option value="question_correct">Soru + doğru cevap</option>
+                        <option value="question_correct_explanation">Soru + doğru cevap + açıklama</option>
+                        <option value="ai_generation">AI üretim formatı</option>
+                        <option value="ai_analysis">AI analiz formatı</option>
                     </select>
                 </div>
 
                 <div class="col-12">
-                    <div class="alert alert-info mb-0" id="exportCountInfo">Yeterlilik seçtiğinizde dışa aktarılacak soru sayısı gösterilecektir.</div>
+                    <label class="form-label d-block mb-2">İçerik seçenekleri</label>
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="includeOptions" checked>
+                                <label class="form-check-label" for="includeOptions">Şıkları dahil et</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="includeCorrectAnswer" checked>
+                                <label class="form-check-label" for="includeCorrectAnswer">Doğru cevabı dahil et</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="includeExplanation" checked>
+                                <label class="form-check-label" for="includeExplanation">Açıklamayı dahil et</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="includeTaxonomy" checked>
+                                <label class="form-check-label" for="includeTaxonomy">Yeterlilik / ders / konu bilgilerini dahil et</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="includeIds" checked>
+                                <label class="form-check-label" for="includeIds">ID alanlarını dahil et</label>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="col-12">
-                    <button type="submit" class="btn btn-primary w-100" id="downloadCsvBtn">
-                        <i class="bi bi-download"></i> CSV Olarak İndir
+                    <div class="card bg-light-subtle border">
+                        <div class="card-body py-3">
+                            <h6 class="mb-2">Önizleme</h6>
+                            <div class="small text-muted mb-2" id="exportCountInfo">Yeterlilik seçtiğinizde dışa aktarılacak soru sayısı gösterilecektir.</div>
+                            <ul class="mb-0 ps-3 small">
+                                <li><strong>Toplam Soru:</strong> <span id="previewTotal">-</span></li>
+                                <li><strong>Filtre:</strong> <span id="previewFilters">-</span></li>
+                                <li><strong>Format:</strong> <span id="previewFormat">CSV</span></li>
+                                <li><strong>Profil:</strong> <span id="previewProfile">Tam veri</span></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary w-100" id="downloadExportBtn">
+                        <i class="bi bi-download"></i> Dışa Aktar ve İndir
                     </button>
                 </div>
             </form>
@@ -80,8 +142,100 @@ $(function () {
             qualification_id: '',
             course_id: '',
             topic_id: ''
+        },
+        preview: {
+            total: 0,
+            filters: {
+                qualification_name: '',
+                course_name: '',
+                topic_name: ''
+            }
         }
     };
+
+    const profileDefaults = {
+        full_data: {
+            include_options: true,
+            include_correct_answer: true,
+            include_explanation: true,
+            include_taxonomy: true,
+            include_ids: true
+        },
+        question_texts: {
+            include_options: false,
+            include_correct_answer: false,
+            include_explanation: false,
+            include_taxonomy: false,
+            include_ids: false
+        },
+        question_correct: {
+            include_options: false,
+            include_correct_answer: true,
+            include_explanation: false,
+            include_taxonomy: false,
+            include_ids: false
+        },
+        question_correct_explanation: {
+            include_options: false,
+            include_correct_answer: true,
+            include_explanation: true,
+            include_taxonomy: false,
+            include_ids: false
+        },
+        ai_generation: {
+            include_options: true,
+            include_correct_answer: true,
+            include_explanation: true,
+            include_taxonomy: true,
+            include_ids: false
+        },
+        ai_analysis: {
+            include_options: true,
+            include_correct_answer: true,
+            include_explanation: true,
+            include_taxonomy: true,
+            include_ids: true
+        }
+    };
+
+    function formatLabel(value) {
+        return $('#exportFormat option[value="' + value + '"]').text() || 'CSV';
+    }
+
+    function profileLabel(value) {
+        return $('#exportProfile option[value="' + value + '"]').text() || 'Tam veri';
+    }
+
+    function getSelectedOptions() {
+        return {
+            include_options: $('#includeOptions').is(':checked') ? '1' : '0',
+            include_correct_answer: $('#includeCorrectAnswer').is(':checked') ? '1' : '0',
+            include_explanation: $('#includeExplanation').is(':checked') ? '1' : '0',
+            include_taxonomy: $('#includeTaxonomy').is(':checked') ? '1' : '0',
+            include_ids: $('#includeIds').is(':checked') ? '1' : '0'
+        };
+    }
+
+    function applyProfileDefaults(profile) {
+        const d = profileDefaults[profile] || profileDefaults.full_data;
+        $('#includeOptions').prop('checked', !!d.include_options);
+        $('#includeCorrectAnswer').prop('checked', !!d.include_correct_answer);
+        $('#includeExplanation').prop('checked', !!d.include_explanation);
+        $('#includeTaxonomy').prop('checked', !!d.include_taxonomy);
+        $('#includeIds').prop('checked', !!d.include_ids);
+    }
+
+    function renderPreviewFromState() {
+        const qName = state.preview.filters.qualification_name || '—';
+        const cName = state.preview.filters.course_name || 'Tüm dersler';
+        const tName = state.preview.filters.topic_name || 'Tüm konular';
+        const filterText = qName + ' / ' + cName + ' / ' + tName;
+
+        $('#previewTotal').text(Number(state.preview.total || 0).toLocaleString('tr-TR'));
+        $('#previewFilters').text(filterText);
+        $('#previewFormat').text(formatLabel($('#exportFormat').val()));
+        $('#previewProfile').text(profileLabel($('#exportProfile').val()));
+    }
 
     async function loadQualifications() {
         const res = await window.appAjax({
@@ -155,28 +309,49 @@ $(function () {
         const $info = $('#exportCountInfo');
         if (!state.filters.qualification_id) {
             $info.text('Yeterlilik seçtiğinizde dışa aktarılacak soru sayısı gösterilecektir.');
+            state.preview.total = 0;
+            state.preview.filters = {
+                qualification_name: '',
+                course_name: '',
+                topic_name: ''
+            };
+            renderPreviewFromState();
             return;
         }
+
+        const req = {
+            action: 'preview_count',
+            qualification_id: state.filters.qualification_id,
+            course_id: state.filters.course_id,
+            topic_id: state.filters.topic_id,
+            format: $('#exportFormat').val() || 'csv',
+            profile: $('#exportProfile').val() || 'full_data',
+            ...getSelectedOptions()
+        };
 
         const res = await window.appAjax({
             url: '../ajax/questions-export.php',
             method: 'GET',
-            data: {
-                action: 'preview_count',
-                qualification_id: state.filters.qualification_id,
-                course_id: state.filters.course_id,
-                topic_id: state.filters.topic_id
-            },
+            data: req,
             dataType: 'json'
         });
 
         if (!res.success) {
             $info.text('Soru sayısı alınamadı.');
+            state.preview.total = 0;
+            renderPreviewFromState();
             return;
         }
 
-        const total = Number(res.data?.total_count || 0);
-        $info.text('Toplam ' + total.toLocaleString('tr-TR') + ' soru dışa aktarılacak');
+        state.preview.total = Number(res.data?.total_count || 0);
+        state.preview.filters = {
+            qualification_name: res.data?.filters?.qualification_name || '',
+            course_name: res.data?.filters?.course_name || '',
+            topic_name: res.data?.filters?.topic_name || ''
+        };
+
+        $info.text('Toplam ' + state.preview.total.toLocaleString('tr-TR') + ' soru dışa aktarılacak');
+        renderPreviewFromState();
     }
 
     $('#exportQualification').on('change', async function () {
@@ -211,6 +386,38 @@ $(function () {
         await refreshPreviewCount();
     });
 
+    $('#exportFormat').on('change', async function () {
+        const selectedFormat = $(this).val() || 'csv';
+        if (selectedFormat === 'md') {
+            const profile = $('#exportProfile').val() || '';
+            if (!['ai_generation', 'ai_analysis'].includes(profile)) {
+                $('#exportProfile').val('ai_analysis');
+                applyProfileDefaults('ai_analysis');
+            }
+        }
+
+        renderPreviewFromState();
+        await refreshPreviewCount();
+    });
+
+    $('#exportProfile').on('change', async function () {
+        const profile = $(this).val() || 'full_data';
+        if (profileDefaults[profile]) {
+            applyProfileDefaults(profile);
+        }
+
+        if ($('#exportFormat').val() === 'md' && !['ai_generation', 'ai_analysis'].includes(profile)) {
+            $('#exportFormat').val('csv');
+        }
+
+        renderPreviewFromState();
+        await refreshPreviewCount();
+    });
+
+    $('#includeOptions, #includeCorrectAnswer, #includeExplanation, #includeTaxonomy, #includeIds').on('change', async function () {
+        await refreshPreviewCount();
+    });
+
     $('#questionExportForm').on('submit', async function (e) {
         e.preventDefault();
 
@@ -219,23 +426,26 @@ $(function () {
             return;
         }
 
-        const $btn = $('#downloadCsvBtn');
+        const $btn = $('#downloadExportBtn');
         window.appSetButtonLoading($btn, true, 'Hazırlanıyor...');
+
+        const payload = {
+            action: 'download_export',
+            qualification_id: state.filters.qualification_id,
+            course_id: state.filters.course_id,
+            topic_id: state.filters.topic_id,
+            format: $('#exportFormat').val() || 'csv',
+            profile: $('#exportProfile').val() || 'full_data',
+            ...getSelectedOptions()
+        };
 
         const $tmpForm = $('<form>', {
             method: 'GET',
             action: '../ajax/questions-export.php'
         }).css('display', 'none');
 
-        const fields = {
-            action: 'download_csv',
-            qualification_id: state.filters.qualification_id,
-            course_id: state.filters.course_id,
-            topic_id: state.filters.topic_id
-        };
-
-        Object.keys(fields).forEach((key) => {
-            $('<input>', { type: 'hidden', name: key, value: fields[key] || '' }).appendTo($tmpForm);
+        Object.keys(payload).forEach((key) => {
+            $('<input>', { type: 'hidden', name: key, value: payload[key] || '' }).appendTo($tmpForm);
         });
 
         $('body').append($tmpForm);
@@ -246,8 +456,10 @@ $(function () {
     });
 
     (async function init() {
+        applyProfileDefaults('full_data');
         await loadQualifications();
         await refreshPreviewCount();
+        renderPreviewFromState();
     })();
 });
 </script>

@@ -29,6 +29,53 @@ function questions_export_filters_from_request(): array
     ];
 }
 
+function questions_export_get_format(): string
+{
+    $format = strtolower(trim((string)($_REQUEST['format'] ?? 'csv')));
+    $available = question_export_get_available_formats();
+    return array_key_exists($format, $available) ? $format : 'csv';
+}
+
+function questions_export_get_profile(): string
+{
+    $profile = strtolower(trim((string)($_REQUEST['profile'] ?? 'full_data')));
+    $labels = question_export_profile_labels();
+    return array_key_exists($profile, $labels) ? $profile : 'full_data';
+}
+
+function questions_export_prepare_parts(PDO $pdo, array $filters): array
+{
+    $flags = question_export_get_column_flags($pdo);
+    $parts = question_export_build_query_parts($filters, $flags);
+    $whereSql = implode(' AND ', $parts['where']);
+    $orderSql = $flags['created_at'] ? 'q.created_at DESC, q.id DESC' : 'q.id DESC';
+
+    $countSql = 'SELECT COUNT(*)' . $parts['join'] . ' WHERE ' . $whereSql;
+    $countStmt = $pdo->prepare($countSql);
+    $countStmt->execute($parts['params']);
+    $totalCount = (int)$countStmt->fetchColumn();
+
+    $dataSql = 'SELECT ' . implode(', ', $parts['select']) . $parts['join'] . ' WHERE ' . $whereSql . ' ORDER BY ' . $orderSql;
+
+    return [
+        'flags' => $flags,
+        'parts' => $parts,
+        'total_count' => $totalCount,
+        'data_sql' => $dataSql,
+    ];
+}
+
+function questions_export_get_stream_stmt(PDO $pdo, string $sql, array $params): PDOStatement
+{
+    if (defined('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY')) {
+        $pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+    }
+
+    $stmt = $pdo->prepare($sql, [PDO::ATTR_CURSOR => PDO::CURSOR_FWDONLY]);
+    $stmt->execute($params);
+    return $stmt;
+}
+
 try {
     if ($action === 'preview_count') {
         $filters = questions_export_filters_from_request();
@@ -36,105 +83,88 @@ try {
             questions_export_json(false, 'Yeterlilik seçimi zorunludur.', [], 422);
         }
 
-        $flags = question_export_get_column_flags($pdo);
-        $parts = question_export_build_query_parts($filters, $flags);
-        $whereSql = implode(' AND ', $parts['where']);
+        $format = questions_export_get_format();
+        $profile = questions_export_get_profile();
+        $config = question_export_build_content_config($profile, $_REQUEST);
+        $prepared = questions_export_prepare_parts($pdo, $filters);
+        $labels = question_export_get_filter_labels($pdo, $filters);
 
-        $countSql = 'SELECT COUNT(*)' . $parts['join'] . ' WHERE ' . $whereSql;
-        $countStmt = $pdo->prepare($countSql);
-        $countStmt->execute($parts['params']);
-        $totalCount = (int)$countStmt->fetchColumn();
-
-        questions_export_json(true, '', ['total_count' => $totalCount]);
+        questions_export_json(true, '', [
+            'total_count' => $prepared['total_count'],
+            'selected_format' => $format,
+            'selected_profile' => $config['profile'],
+            'selected_profile_label' => $config['profile_label'],
+            'filters' => [
+                'qualification_id' => $filters['qualification_id'],
+                'course_id' => $filters['course_id'],
+                'topic_id' => $filters['topic_id'],
+                'qualification_name' => $labels['qualification_name'],
+                'course_name' => $labels['course_name'],
+                'topic_name' => $labels['topic_name'],
+            ],
+        ]);
     }
 
-    if ($action === 'download_csv') {
+    if ($action === 'download_export' || $action === 'download_csv') {
         $filters = questions_export_filters_from_request();
         if ($filters['qualification_id'] === '') {
             questions_export_json(false, 'Yeterlilik seçimi zorunludur.', [], 422);
         }
 
-        $flags = question_export_get_column_flags($pdo);
-        $parts = question_export_build_query_parts($filters, $flags);
-        $whereSql = implode(' AND ', $parts['where']);
+        $format = ($action === 'download_csv') ? 'csv' : questions_export_get_format();
+        $profile = questions_export_get_profile();
 
-        $qStmt = $pdo->prepare('SELECT name FROM qualifications WHERE id = ? LIMIT 1');
-        $qStmt->execute([$filters['qualification_id']]);
-        $qualificationName = (string)($qStmt->fetchColumn() ?: 'qualification');
-        $qualificationSlug = question_export_slugify($qualificationName);
-        $timestamp = date('Y-m-d_H-i');
-        $filename = 'questions_export_' . $qualificationSlug . '_' . $timestamp . '.csv';
-        $orderSql = $flags['created_at'] ? 'q.created_at DESC, q.id DESC' : 'q.id DESC';
+        if ($format === 'md' && !in_array($profile, ['ai_generation', 'ai_analysis'], true)) {
+            $profile = 'ai_analysis';
+        }
 
-        $csvSql = 'SELECT ' . implode(', ', $parts['select']) . $parts['join'] . ' WHERE ' . $whereSql . ' ORDER BY ' . $orderSql;
-        $stmt = $pdo->prepare($csvSql);
-        $stmt->execute($parts['params']);
+        $config = question_export_build_content_config($profile, $_REQUEST);
+        $prepared = questions_export_prepare_parts($pdo, $filters);
+        $parts = $prepared['parts'];
+        $flags = $prepared['flags'];
+        $labels = question_export_get_filter_labels($pdo, $filters);
+
+        $qualificationName = $labels['qualification_name'] !== '' ? $labels['qualification_name'] : 'qualification';
+        $filename = question_export_build_filename($format, $profile, $qualificationName);
+
+        $formats = question_export_get_available_formats();
+        $mime = $formats[$format]['mime'] ?? 'application/octet-stream';
 
         set_time_limit(0);
-        while (ob_get_level() > 0) {
-            ob_end_clean();
-        }
-        header('Content-Type: text/csv; charset=UTF-8');
-        header('Content-Disposition: attachment; filename="' . $filename . '"');
-        header('Pragma: no-cache');
-        header('Expires: 0');
+        ignore_user_abort(true);
 
-        $out = fopen('php://output', 'wb');
-        echo "\xEF\xBB\xBF";
+        question_export_send_headers($mime, $filename);
 
-        fputcsv($out, [
-            'question_id',
-            'qualification_id',
-            'qualification_name',
-            'course_id',
-            'course_name',
-            'topic_id',
-            'topic_name',
-            'question_type',
-            'question_text',
-            'option_a',
-            'option_b',
-            'option_c',
-            'option_d',
-            'option_e',
-            'correct_answer',
-            'explanation',
-            'status',
-            'is_active',
-            'created_at',
-            'updated_at',
-        ]);
+        $stmt = questions_export_get_stream_stmt($pdo, $prepared['data_sql'], $parts['params']);
+        $columns = question_export_build_tabular_columns($config, $flags);
 
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            fputcsv($out, [
-                (string)($row['question_id'] ?? ''),
-                (string)($row['qualification_id'] ?? ''),
-                (string)($row['qualification_name'] ?? ''),
-                (string)($row['course_id'] ?? ''),
-                (string)($row['course_name'] ?? ''),
-                (string)($row['topic_id'] ?? ''),
-                (string)($row['topic_name'] ?? ''),
-                (string)($row['question_type'] ?? ''),
-                (string)($row['question_text'] ?? ''),
-                (string)($row['option_a'] ?? ''),
-                (string)($row['option_b'] ?? ''),
-                (string)($row['option_c'] ?? ''),
-                (string)($row['option_d'] ?? ''),
-                (string)($row['option_e'] ?? ''),
-                (string)($row['correct_answer'] ?? ''),
-                (string)($row['explanation'] ?? ''),
-                (string)($row['status'] ?? ''),
-                (string)($row['is_active'] ?? ''),
-                (string)($row['created_at'] ?? ''),
-                (string)($row['updated_at'] ?? ''),
-            ]);
+        if ($format === 'csv') {
+            question_export_stream_csv($stmt, $columns);
+            exit;
         }
 
-        fclose($out);
-        exit;
+        if ($format === 'json') {
+            question_export_stream_json($stmt, $config);
+            exit;
+        }
+
+        if ($format === 'xlsx') {
+            question_export_stream_xlsx($stmt, $columns);
+            exit;
+        }
+
+        if ($format === 'md') {
+            question_export_stream_markdown($stmt, $config, $filters, $labels, $prepared['total_count']);
+            exit;
+        }
+
+        questions_export_json(false, 'Desteklenmeyen export formatı.', [], 422);
     }
 
     questions_export_json(false, 'Geçersiz işlem.', [], 400);
 } catch (Throwable $e) {
-    questions_export_json(false, 'İşlem sırasında sunucu hatası oluştu.', [], 500);
+    if (($action === 'download_export' || $action === 'download_csv') && !headers_sent()) {
+        questions_export_json(false, $e->getMessage() !== '' ? $e->getMessage() : 'İşlem sırasında sunucu hatası oluştu.', [], 500);
+    }
+    exit;
 }
