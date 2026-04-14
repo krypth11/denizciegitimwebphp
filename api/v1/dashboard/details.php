@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once __DIR__ . '/stats_filters.php';
 
 api_require_method('GET');
 
@@ -87,10 +88,12 @@ try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
     $minimumSolved = api_get_int_query('min_solved', 10, 1, 100);
+    $window = stats_resolve_date_window($_GET, 'range', 'start_date', 'end_date', 'all');
 
     $details = [
         'qualification_stats' => [],
         'course_stats' => [],
+        'topic_stats' => [],
         'strengths' => [],
         'weaknesses' => [],
         'bookmarks_summary' => [
@@ -113,6 +116,10 @@ try {
     $qCols = get_table_columns($pdo, 'questions');
     $cCols = get_table_columns($pdo, 'courses');
     $qualCols = get_table_columns($pdo, 'qualifications');
+    $tCols = get_table_columns($pdo, 'topics');
+    $evCols = get_table_columns($pdo, 'question_attempt_events');
+    $metCols = get_table_columns($pdo, 'maritime_english_topics');
+    $mecCols = get_table_columns($pdo, 'maritime_english_categories');
 
     if (empty($upCols) || empty($qCols) || !in_array('user_id', $upCols, true)) {
         api_success('Dashboard detay istatistikleri alındı.', ['details' => $details]);
@@ -134,6 +141,23 @@ try {
 
     $qualId = dd_first($qualCols, ['id']);
     $qualName = dd_first($qualCols, ['name', 'title']);
+
+    $evUserId = dd_first($evCols, ['user_id']);
+    $evTopicId = dd_first($evCols, ['topic_id']);
+    $evSource = dd_first($evCols, ['source']);
+    $evCorrect = dd_first($evCols, ['is_correct']);
+    $evAttemptedAt = dd_first($evCols, ['attempted_at', 'created_at', 'updated_at']);
+
+    $tId = dd_first($tCols, ['id']);
+    $tName = dd_first($tCols, ['name', 'title']);
+    $tCourseId = dd_first($tCols, ['course_id']);
+
+    $metId = dd_first($metCols, ['id', 'topic_id']);
+    $metName = dd_first($metCols, ['name', 'title', 'topic_name']);
+    $metCategoryId = dd_first($metCols, ['category_id', 'maritime_english_category_id']);
+
+    $mecId = dd_first($mecCols, ['id', 'category_id']);
+    $mecName = dd_first($mecCols, ['name', 'title', 'category_name']);
 
     if (!$upQuestionId || !$qId || !$qCourseId || !$cId || !$cName) {
         api_success('Dashboard detay istatistikleri alındı.', ['details' => $details]);
@@ -191,6 +215,143 @@ try {
             'bookmark_count' => (int)($row['bookmark_count'] ?? 0),
             'last_activity_at' => $row['last_activity_at'] ?? null,
         ];
+    }
+
+    if ($evUserId && $evTopicId && $evCorrect && $evAttemptedAt) {
+        $dateParams = [];
+        $dateSql = stats_build_date_between_sql('e.' . dd_q($evAttemptedAt), $window['start_date'], $window['end_date'], $dateParams);
+
+        // Standart (topics tablosu) topic istatistikleri
+        if ($tId && $tName && $tCourseId && $cId && $cName) {
+            $where = [
+                'e.' . dd_q($evUserId) . ' = ?',
+                'e.' . dd_q($evTopicId) . ' IS NOT NULL',
+                'TRIM(COALESCE(e.' . dd_q($evTopicId) . ', "")) <> ""',
+            ];
+            $params = [$userId];
+            if ($dateSql !== '') {
+                $where[] = $dateSql;
+                $params = array_merge($params, $dateParams);
+            }
+            if ($evSource) {
+                $where[] = 'LOWER(TRIM(COALESCE(e.' . dd_q($evSource) . ', ""))) NOT IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")';
+            }
+
+            $sql = 'SELECT '
+                . 't.' . dd_q($tId) . ' AS topic_id, '
+                . 't.' . dd_q($tName) . ' AS topic_name, '
+                . 'c.' . dd_q($cId) . ' AS course_id, '
+                . 'c.' . dd_q($cName) . ' AS course_name, '
+                . ($cQualificationId ? 'c.' . dd_q($cQualificationId) . ' AS qualification_id, ' : 'NULL AS qualification_id, ')
+                . (($cQualificationId && $qualId && $qualName) ? 'qf.' . dd_q($qualName) . ' AS qualification_name, ' : "'' AS qualification_name, ")
+                . 'COUNT(*) AS total_answer_attempts, '
+                . 'SUM(CASE WHEN e.' . dd_q($evCorrect) . ' = 1 THEN 1 ELSE 0 END) AS total_correct, '
+                . 'SUM(CASE WHEN e.' . dd_q($evCorrect) . ' = 0 THEN 1 ELSE 0 END) AS total_wrong, '
+                . 'MAX(e.' . dd_q($evAttemptedAt) . ') AS last_activity_at '
+                . 'FROM `question_attempt_events` e '
+                . 'INNER JOIN `topics` t ON e.' . dd_q($evTopicId) . ' = t.' . dd_q($tId) . ' '
+                . 'INNER JOIN `courses` c ON t.' . dd_q($tCourseId) . ' = c.' . dd_q($cId) . ' '
+                . (($cQualificationId && $qualId && $qualName) ? 'LEFT JOIN `qualifications` qf ON c.' . dd_q($cQualificationId) . ' = qf.' . dd_q($qualId) . ' ' : '')
+                . 'WHERE ' . implode(' AND ', $where) . ' '
+                . 'GROUP BY '
+                . 't.' . dd_q($tId) . ', t.' . dd_q($tName) . ', '
+                . 'c.' . dd_q($cId) . ', c.' . dd_q($cName)
+                . ($cQualificationId ? ', c.' . dd_q($cQualificationId) : '')
+                . (($cQualificationId && $qualId && $qualName) ? ', qf.' . dd_q($qualName) : '')
+                . ' ORDER BY total_answer_attempts DESC, topic_name ASC';
+
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            foreach ($rows as $row) {
+                $correct = (int)($row['total_correct'] ?? 0);
+                $wrong = (int)($row['total_wrong'] ?? 0);
+                $attempts = (int)($row['total_answer_attempts'] ?? 0);
+                $details['topic_stats'][] = [
+                    'topic_id' => (string)($row['topic_id'] ?? ''),
+                    'topic_name' => (string)($row['topic_name'] ?? ''),
+                    'course_id' => $row['course_id'] ?? null,
+                    'course_name' => (string)($row['course_name'] ?? ''),
+                    'qualification_id' => $row['qualification_id'] ?? null,
+                    'qualification_name' => (string)($row['qualification_name'] ?? ''),
+                    'total_answer_attempts' => $attempts,
+                    'total_correct' => $correct,
+                    'total_wrong' => $wrong,
+                    'success_rate' => dd_rate($correct, $wrong),
+                    'last_activity_at' => $row['last_activity_at'] ?? null,
+                    'solved_count' => $attempts,
+                    'answered_count' => $attempts,
+                ];
+            }
+        }
+
+        // Maritime English topic istatistikleri (events source = maritime_english*)
+        if ($evSource && $metId && $metName && $metCategoryId) {
+            $where = [
+                'e.' . dd_q($evUserId) . ' = ?',
+                'e.' . dd_q($evTopicId) . ' IS NOT NULL',
+                'TRIM(COALESCE(e.' . dd_q($evTopicId) . ', "")) <> ""',
+                'LOWER(TRIM(COALESCE(e.' . dd_q($evSource) . ', ""))) IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")',
+            ];
+            $params = [$userId];
+            if ($dateSql !== '') {
+                $where[] = $dateSql;
+                $params = array_merge($params, $dateParams);
+            }
+
+            $sql = 'SELECT '
+                . 'mt.' . dd_q($metId) . ' AS topic_id, '
+                . 'mt.' . dd_q($metName) . ' AS topic_name, '
+                . "'maritime_english' AS course_id, "
+                . "'Maritime English' AS course_name, "
+                . ($mecId ? 'mc.' . dd_q($mecId) . ' AS qualification_id, ' : 'NULL AS qualification_id, ')
+                . (($mecId && $mecName) ? 'mc.' . dd_q($mecName) . ' AS qualification_name, ' : "'Maritime English' AS qualification_name, ")
+                . 'COUNT(*) AS total_answer_attempts, '
+                . 'SUM(CASE WHEN e.' . dd_q($evCorrect) . ' = 1 THEN 1 ELSE 0 END) AS total_correct, '
+                . 'SUM(CASE WHEN e.' . dd_q($evCorrect) . ' = 0 THEN 1 ELSE 0 END) AS total_wrong, '
+                . 'MAX(e.' . dd_q($evAttemptedAt) . ') AS last_activity_at '
+                . 'FROM `question_attempt_events` e '
+                . 'INNER JOIN `maritime_english_topics` mt ON e.' . dd_q($evTopicId) . ' = mt.' . dd_q($metId) . ' '
+                . (($mecId && $mecName) ? 'LEFT JOIN `maritime_english_categories` mc ON mt.' . dd_q($metCategoryId) . ' = mc.' . dd_q($mecId) . ' ' : '')
+                . 'WHERE ' . implode(' AND ', $where) . ' '
+                . 'GROUP BY mt.' . dd_q($metId) . ', mt.' . dd_q($metName)
+                . (($mecId && $mecName) ? ', mc.' . dd_q($mecId) . ', mc.' . dd_q($mecName) : '')
+                . ' ORDER BY total_answer_attempts DESC, topic_name ASC';
+
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            foreach ($rows as $row) {
+                $correct = (int)($row['total_correct'] ?? 0);
+                $wrong = (int)($row['total_wrong'] ?? 0);
+                $attempts = (int)($row['total_answer_attempts'] ?? 0);
+                $details['topic_stats'][] = [
+                    'topic_id' => (string)($row['topic_id'] ?? ''),
+                    'topic_name' => (string)($row['topic_name'] ?? ''),
+                    'course_id' => $row['course_id'] ?? null,
+                    'course_name' => (string)($row['course_name'] ?? ''),
+                    'qualification_id' => $row['qualification_id'] ?? null,
+                    'qualification_name' => (string)($row['qualification_name'] ?? ''),
+                    'total_answer_attempts' => $attempts,
+                    'total_correct' => $correct,
+                    'total_wrong' => $wrong,
+                    'success_rate' => dd_rate($correct, $wrong),
+                    'last_activity_at' => $row['last_activity_at'] ?? null,
+                    'solved_count' => $attempts,
+                    'answered_count' => $attempts,
+                ];
+            }
+        }
+
+        usort($details['topic_stats'], static function (array $a, array $b): int {
+            $attemptCmp = ((int)($b['total_answer_attempts'] ?? 0)) <=> ((int)($a['total_answer_attempts'] ?? 0));
+            if ($attemptCmp !== 0) {
+                return $attemptCmp;
+            }
+            return strcmp((string)($a['topic_name'] ?? ''), (string)($b['topic_name'] ?? ''));
+        });
     }
 
     $byQualification = [];
