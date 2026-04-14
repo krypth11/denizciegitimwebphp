@@ -421,6 +421,8 @@ try {
 
         case 'toggle_rule': {
             $id = trim((string)($_POST['rule_id'] ?? ''));
+            $activeProvided = array_key_exists('is_active', $_POST);
+            $configProvided = array_key_exists('config_json', $_POST);
             $active = trim((string)($_POST['is_active'] ?? ''));
             $configJson = trim((string)($_POST['config_json'] ?? ''));
 
@@ -428,14 +430,39 @@ try {
                 notifications_json(false, 'rule_id zorunludur.', [], 422, ['rule_id' => 'required']);
             }
 
+            if (!$activeProvided && !$configProvided) {
+                notifications_json(false, 'Güncellenecek alan bulunamadı.', [], 422);
+            }
+
+            $ruleSelect = [
+                notification_q($r['id']) . ' AS id',
+                ($r['slug'] ? notification_q($r['slug']) : 'NULL') . ' AS slug',
+                ($r['name'] ? notification_q($r['name']) : 'NULL') . ' AS name',
+                ($r['config_json'] ? notification_q($r['config_json']) : 'NULL') . ' AS config_json',
+            ];
+            $stmtRule = $pdo->prepare('SELECT ' . implode(', ', $ruleSelect) . ' FROM ' . notification_q($r['table']) . ' WHERE ' . notification_q($r['id']) . ' = ? LIMIT 1');
+            $stmtRule->execute([$id]);
+            $ruleRow = $stmtRule->fetch(PDO::FETCH_ASSOC);
+            if (!$ruleRow) {
+                notifications_json(false, 'Kural bulunamadı.', [], 404);
+            }
+
+            $ruleKey = notification_rule_canonical_key((string)($ruleRow['slug'] ?? ''));
+
             $payload = [];
-            if ($r['is_active']) {
+            if ($activeProvided && $r['is_active']) {
                 $payload[$r['is_active']] = ($active === '1' || strtolower($active) === 'true' || strtolower($active) === 'active') ? 1 : 0;
             }
-            if ($r['config_json'] && $configJson !== '') {
-                notifications_safe_json_decode($configJson);
-                $payload[$r['config_json']] = $configJson;
+
+            if ($configProvided && $r['config_json']) {
+                $decoded = notifications_safe_json_decode($configJson);
+                if ($ruleKey !== '') {
+                    $payload[$r['config_json']] = notification_rule_config_to_json($ruleKey, $decoded);
+                } else {
+                    $payload[$r['config_json']] = json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                }
             }
+
             if ($r['updated_at']) {
                 $payload[$r['updated_at']] = date('Y-m-d H:i:s');
             }
@@ -461,6 +488,18 @@ try {
             ];
             $sql = 'SELECT ' . implode(', ', $select) . ' FROM ' . notification_q($r['table']) . ' ORDER BY ' . ($r['created_at'] ? notification_q($r['created_at']) : notification_q($r['id'])) . ' DESC';
             $items = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            foreach ($items as &$item) {
+                $ruleKey = notification_rule_canonical_key((string)($item['slug'] ?? ''));
+                $item['rule_key'] = $ruleKey;
+
+                if ($ruleKey !== '') {
+                    $config = notification_rule_config_from_json($ruleKey, (string)($item['config_json'] ?? ''));
+                    $item['config_json'] = notification_rule_config_to_json($ruleKey, $config);
+                }
+            }
+            unset($item);
+
             notifications_json(true, '', ['items' => $items]);
             break;
         }

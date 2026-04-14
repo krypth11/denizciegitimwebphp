@@ -105,6 +105,27 @@ if (!function_exists('notification_schema')) {
         $tCols = notification_table_columns($pdo, 'user_push_tokens');
         $uCols = notification_table_columns($pdo, 'user_profiles');
 
+        $runCols = [];
+        try {
+            $runCols = get_table_columns($pdo, 'notification_rule_runs');
+        } catch (Throwable $e) {
+            $runCols = [];
+        }
+
+        $apiTokenCols = [];
+        try {
+            $apiTokenCols = get_table_columns($pdo, 'api_tokens');
+        } catch (Throwable $e) {
+            $apiTokenCols = [];
+        }
+
+        $mockAttemptCols = [];
+        try {
+            $mockAttemptCols = get_table_columns($pdo, 'mock_exam_attempts');
+        } catch (Throwable $e) {
+            $mockAttemptCols = [];
+        }
+
         $subCols = [];
         try {
             $subCols = get_table_columns($pdo, 'user_subscription_status');
@@ -193,14 +214,42 @@ if (!function_exists('notification_schema')) {
                 'is_deleted' => notification_pick_column($uCols, ['is_deleted'], false),
                 'current_qualification_id' => notification_pick_column($uCols, ['current_qualification_id', 'qualification_id'], false),
                 'last_sign_in_at' => notification_pick_column($uCols, ['last_sign_in_at', 'last_login_at'], false),
+                'created_at' => notification_pick_column($uCols, ['created_at', 'created_on'], false),
             ],
             'subscription' => [
                 'table' => 'user_subscription_status',
                 'cols' => $subCols,
                 'user_id' => in_array('user_id', $subCols, true) ? 'user_id' : null,
                 'is_pro' => in_array('is_pro', $subCols, true) ? 'is_pro' : null,
+                'expires_at' => in_array('expires_at', $subCols, true) ? 'expires_at' : null,
                 'updated_at' => in_array('updated_at', $subCols, true) ? 'updated_at' : null,
                 'created_at' => in_array('created_at', $subCols, true) ? 'created_at' : null,
+            ],
+            'rule_runs' => [
+                'table' => 'notification_rule_runs',
+                'cols' => $runCols,
+                'id' => in_array('id', $runCols, true) ? 'id' : null,
+                'rule_key' => in_array('rule_key', $runCols, true) ? 'rule_key' : null,
+                'user_id' => in_array('user_id', $runCols, true) ? 'user_id' : null,
+                'run_date' => in_array('run_date', $runCols, true) ? 'run_date' : null,
+                'notification_id' => in_array('notification_id', $runCols, true) ? 'notification_id' : null,
+                'status' => in_array('status', $runCols, true) ? 'status' : null,
+            ],
+            'api_tokens' => [
+                'table' => 'api_tokens',
+                'cols' => $apiTokenCols,
+                'user_id' => in_array('user_id', $apiTokenCols, true) ? 'user_id' : null,
+                'last_used_at' => in_array('last_used_at', $apiTokenCols, true) ? 'last_used_at' : null,
+                'expires_at' => in_array('expires_at', $apiTokenCols, true) ? 'expires_at' : null,
+                'revoked_at' => in_array('revoked_at', $apiTokenCols, true) ? 'revoked_at' : null,
+            ],
+            'mock_exam_attempts' => [
+                'table' => 'mock_exam_attempts',
+                'cols' => $mockAttemptCols,
+                'user_id' => in_array('user_id', $mockAttemptCols, true) ? 'user_id' : null,
+                'status' => in_array('status', $mockAttemptCols, true) ? 'status' : null,
+                'submitted_at' => in_array('submitted_at', $mockAttemptCols, true) ? 'submitted_at' : null,
+                'created_at' => in_array('created_at', $mockAttemptCols, true) ? 'created_at' : null,
             ],
             'qualifications' => [
                 'table' => 'qualifications',
@@ -1008,5 +1057,584 @@ if (!function_exists('send_push_notification')) {
             'failed' => $failed,
             'mock' => false,
         ];
+    }
+}
+
+if (!function_exists('notification_rule_aliases')) {
+    function notification_rule_aliases(): array
+    {
+        return [
+            'daily_reset' => 'daily_reset',
+            'daily_rights_reset' => 'daily_reset',
+            'inactive_3_days' => 'inactive_3_days',
+            'inactive_7_days_exam' => 'inactive_7_days_exam',
+            'no_exam_7_days' => 'inactive_7_days_exam',
+            'premium_expiring' => 'premium_expiring',
+        ];
+    }
+}
+
+if (!function_exists('notification_rule_canonical_key')) {
+    function notification_rule_canonical_key(?string $key): string
+    {
+        $value = strtolower(trim((string)$key));
+        if ($value === '') {
+            return '';
+        }
+
+        $aliases = notification_rule_aliases();
+        return $aliases[$value] ?? $value;
+    }
+}
+
+if (!function_exists('notification_rule_definitions')) {
+    function notification_rule_definitions(): array
+    {
+        return [
+            'daily_reset' => [
+                'name' => 'Günlük haklar yenilendi',
+                'description' => 'Kullanıcılara günlük haklarının yenilendiğini hatırlatır.',
+                'title' => 'Bugünkü hakların yenilendi',
+                'message' => 'Çalışma ve deneme hakların yeniden hazır. Hedefine devam et.',
+                'channel' => 'study',
+                'deep_link' => 'study',
+                'config_defaults' => [
+                    'send_hour' => 9,
+                    'send_minute' => 0,
+                ],
+            ],
+            'inactive_3_days' => [
+                'name' => '3 gündür aktif değil',
+                'description' => '3 gündür uygulamaya girmeyen kullanıcıları hedefler.',
+                'title' => 'Seni tekrar görmek güzel olur',
+                'message' => '3 gündür uygulamaya girmedin. Kaldığın yerden devam et.',
+                'channel' => 'general',
+                'deep_link' => 'dashboard',
+                'config_defaults' => [
+                    'days_threshold' => 3,
+                    'send_hour' => 19,
+                    'send_minute' => 0,
+                ],
+            ],
+            'inactive_7_days_exam' => [
+                'name' => '7 gündür deneme çözmedi',
+                'description' => 'Son 7 günde deneme tamamlamayan kullanıcıları hedefler.',
+                'title' => 'Bugün kısa bir deneme çöz',
+                'message' => '7 gündür deneme çözmedin. Ritmini korumak için kısa bir deneme yap.',
+                'channel' => 'exam',
+                'deep_link' => 'exam',
+                'config_defaults' => [
+                    'days_threshold' => 7,
+                    'send_hour' => 20,
+                    'send_minute' => 0,
+                ],
+            ],
+            'premium_expiring' => [
+                'name' => 'Premium süresi bitiyor',
+                'description' => 'Premium bitişi yaklaşan kullanıcıları bilgilendirir.',
+                'title' => 'Premium süren yakında bitiyor',
+                'message' => 'Sınırsız erişiminin kesilmemesi için üyeliğini kontrol et.',
+                'channel' => 'premium',
+                'deep_link' => 'profile',
+                'config_defaults' => [
+                    'days_before_expiry' => 2,
+                    'send_hour' => 12,
+                    'send_minute' => 0,
+                ],
+            ],
+        ];
+    }
+}
+
+if (!function_exists('notification_rule_default_config')) {
+    function notification_rule_default_config(string $ruleKey): array
+    {
+        $canonical = notification_rule_canonical_key($ruleKey);
+        $defs = notification_rule_definitions();
+        return (array)($defs[$canonical]['config_defaults'] ?? []);
+    }
+}
+
+if (!function_exists('notification_rule_normalize_config')) {
+    function notification_rule_normalize_config(string $ruleKey, array $config): array
+    {
+        $key = notification_rule_canonical_key($ruleKey);
+        $defaults = notification_rule_default_config($key);
+        $merged = array_merge($defaults, $config);
+
+        $normHour = static function ($value, int $fallback): int {
+            $v = (int)$value;
+            if ($v < 0 || $v > 23) {
+                return $fallback;
+            }
+            return $v;
+        };
+        $normMinute = static function ($value, int $fallback): int {
+            $v = (int)$value;
+            if ($v < 0 || $v > 59) {
+                return $fallback;
+            }
+            return $v;
+        };
+
+        if (array_key_exists('send_hour', $defaults)) {
+            $merged['send_hour'] = $normHour($merged['send_hour'] ?? $defaults['send_hour'], (int)$defaults['send_hour']);
+        }
+        if (array_key_exists('send_minute', $defaults)) {
+            $merged['send_minute'] = $normMinute($merged['send_minute'] ?? $defaults['send_minute'], (int)$defaults['send_minute']);
+        }
+
+        if ($key === 'inactive_3_days' || $key === 'inactive_7_days_exam') {
+            $defaultDays = (int)($defaults['days_threshold'] ?? ($key === 'inactive_3_days' ? 3 : 7));
+            $days = (int)($merged['days_threshold'] ?? $defaultDays);
+            $merged['days_threshold'] = max(1, min(60, $days));
+        }
+
+        if ($key === 'premium_expiring') {
+            $defaultDays = (int)($defaults['days_before_expiry'] ?? 2);
+            $days = (int)($merged['days_before_expiry'] ?? $defaultDays);
+            $merged['days_before_expiry'] = max(0, min(30, $days));
+        }
+
+        return $merged;
+    }
+}
+
+if (!function_exists('notification_rule_config_from_json')) {
+    function notification_rule_config_from_json(string $ruleKey, ?string $configJson): array
+    {
+        $raw = trim((string)$configJson);
+        $decoded = [];
+        if ($raw !== '') {
+            $tmp = json_decode($raw, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($tmp)) {
+                $decoded = $tmp;
+            }
+        }
+        return notification_rule_normalize_config($ruleKey, $decoded);
+    }
+}
+
+if (!function_exists('notification_rule_config_to_json')) {
+    function notification_rule_config_to_json(string $ruleKey, array $config): string
+    {
+        $normalized = notification_rule_normalize_config($ruleKey, $config);
+        $json = json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        return $json !== false ? $json : '{}';
+    }
+}
+
+if (!function_exists('notification_rule_is_due_now')) {
+    function notification_rule_is_due_now(array $ruleConfig, ?DateTimeImmutable $now = null, int $windowMinutes = 5): bool
+    {
+        $tz = new DateTimeZone('Europe/Istanbul');
+        $now = $now ?: new DateTimeImmutable('now', $tz);
+        if ($now->getTimezone()->getName() !== $tz->getName()) {
+            $now = $now->setTimezone($tz);
+        }
+
+        $hour = (int)($ruleConfig['send_hour'] ?? 0);
+        $minute = (int)($ruleConfig['send_minute'] ?? 0);
+        $slot = $now->setTime($hour, $minute, 0);
+        $diff = $now->getTimestamp() - $slot->getTimestamp();
+        return $diff >= 0 && $diff < (max(1, $windowMinutes) * 60);
+    }
+}
+
+if (!function_exists('notification_fetch_active_rules')) {
+    function notification_fetch_active_rules(PDO $pdo): array
+    {
+        $schema = notification_schema($pdo);
+        $r = $schema['rules'];
+        $defs = notification_rule_definitions();
+
+        $select = [
+            notification_q($r['id']) . ' AS id',
+            ($r['slug'] ? notification_q($r['slug']) : 'NULL') . ' AS slug',
+            ($r['name'] ? notification_q($r['name']) : 'NULL') . ' AS name',
+            ($r['description'] ? notification_q($r['description']) : 'NULL') . ' AS description',
+            ($r['config_json'] ? notification_q($r['config_json']) : 'NULL') . ' AS config_json',
+            ($r['is_active'] ? notification_q($r['is_active']) : '1') . ' AS is_active',
+        ];
+        $sql = 'SELECT ' . implode(', ', $select)
+            . ' FROM ' . notification_q($r['table'])
+            . ($r['is_active'] ? ' WHERE ' . notification_q($r['is_active']) . ' = 1' : '');
+
+        $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $result = [];
+
+        foreach ($rows as $row) {
+            $canonical = notification_rule_canonical_key((string)($row['slug'] ?? ''));
+            if ($canonical === '' && !empty($row['name'])) {
+                $nameKey = mb_strtolower(trim((string)$row['name']), 'UTF-8');
+                foreach ($defs as $key => $def) {
+                    if (mb_strtolower((string)($def['name'] ?? ''), 'UTF-8') === $nameKey) {
+                        $canonical = $key;
+                        break;
+                    }
+                }
+            }
+
+            if (!isset($defs[$canonical])) {
+                continue;
+            }
+
+            $result[] = [
+                'id' => (string)($row['id'] ?? ''),
+                'rule_key' => $canonical,
+                'slug' => (string)($row['slug'] ?? ''),
+                'name' => (string)($row['name'] ?: ($defs[$canonical]['name'] ?? $canonical)),
+                'description' => (string)($row['description'] ?: ($defs[$canonical]['description'] ?? '')),
+                'config' => notification_rule_config_from_json($canonical, (string)($row['config_json'] ?? '')),
+                'config_json' => (string)($row['config_json'] ?? ''),
+                'is_active' => (int)($row['is_active'] ?? 0),
+            ];
+        }
+
+        return $result;
+    }
+}
+
+if (!function_exists('notification_rule_run_exists')) {
+    function notification_rule_run_exists(PDO $pdo, string $ruleKey, string $userId, string $runDate): bool
+    {
+        $schema = notification_schema($pdo);
+        $rr = $schema['rule_runs'];
+        if (!$rr['rule_key'] || !$rr['user_id'] || !$rr['run_date']) {
+            throw new RuntimeException('notification_rule_runs tablosu zorunlu kolonları eksik.');
+        }
+
+        $sql = 'SELECT 1 FROM ' . notification_q($rr['table'])
+            . ' WHERE ' . notification_q($rr['rule_key']) . ' = ?'
+            . ' AND ' . notification_q($rr['user_id']) . ' = ?'
+            . ' AND ' . notification_q($rr['run_date']) . ' = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$ruleKey, $userId, $runDate]);
+        return (bool)$stmt->fetchColumn();
+    }
+}
+
+if (!function_exists('notification_rule_run_insert')) {
+    function notification_rule_run_insert(PDO $pdo, string $ruleKey, string $userId, string $runDate, string $status, ?string $notificationId = null): void
+    {
+        $schema = notification_schema($pdo);
+        $rr = $schema['rule_runs'];
+        if (!$rr['rule_key'] || !$rr['user_id'] || !$rr['run_date'] || !$rr['status']) {
+            throw new RuntimeException('notification_rule_runs tablosu zorunlu kolonları eksik.');
+        }
+
+        $row = [
+            $rr['rule_key'] => $ruleKey,
+            $rr['user_id'] => $userId,
+            $rr['run_date'] => $runDate,
+            $rr['status'] => $status,
+        ];
+        if ($rr['id']) {
+            $row[$rr['id']] = generate_uuid();
+        }
+        if ($rr['notification_id'] && $notificationId !== null) {
+            $row[$rr['notification_id']] = $notificationId;
+        }
+
+        notification_insert_row($pdo, $rr['table'], $row);
+    }
+}
+
+if (!function_exists('notification_rule_run_update')) {
+    function notification_rule_run_update(PDO $pdo, string $ruleKey, string $userId, string $runDate, string $status, ?string $notificationId = null): void
+    {
+        $schema = notification_schema($pdo);
+        $rr = $schema['rule_runs'];
+        if (!$rr['rule_key'] || !$rr['user_id'] || !$rr['run_date'] || !$rr['status']) {
+            throw new RuntimeException('notification_rule_runs tablosu zorunlu kolonları eksik.');
+        }
+
+        $payload = [
+            $rr['status'] => $status,
+        ];
+        if ($rr['notification_id'] && $notificationId !== null) {
+            $payload[$rr['notification_id']] = $notificationId;
+        }
+
+        notification_update_row(
+            $pdo,
+            $rr['table'],
+            $payload,
+            notification_q($rr['rule_key']) . ' = ? AND ' . notification_q($rr['user_id']) . ' = ? AND ' . notification_q($rr['run_date']) . ' = ?',
+            [$ruleKey, $userId, $runDate]
+        );
+    }
+}
+
+if (!function_exists('notification_get_candidate_users_for_rule')) {
+    function notification_get_candidate_users_for_rule(PDO $pdo, string $ruleKey, array $config): array
+    {
+        $schema = notification_schema($pdo);
+        $u = $schema['users'];
+        $a = $schema['api_tokens'];
+        $m = $schema['mock_exam_attempts'];
+        $s = $schema['subscription'];
+
+        $baseWhere = '1=1';
+        if ($u['is_deleted']) {
+            $baseWhere .= ' AND u.' . notification_q($u['is_deleted']) . ' = 0';
+        }
+
+        $ruleKey = notification_rule_canonical_key($ruleKey);
+
+        if ($ruleKey === 'daily_reset') {
+            $sql = 'SELECT u.' . notification_q($u['id']) . ' AS user_id'
+                . ' FROM ' . notification_q($u['table']) . ' u'
+                . ' WHERE ' . $baseWhere;
+            return $pdo->query($sql)->fetchAll(PDO::FETCH_COLUMN, 0) ?: [];
+        }
+
+        if ($ruleKey === 'inactive_3_days') {
+            $days = max(1, (int)($config['days_threshold'] ?? 3));
+            $activityExpr = $u['last_sign_in_at']
+                ? ('COALESCE(u.' . notification_q($u['last_sign_in_at']) . ', NOW())')
+                : 'NOW()';
+
+            $join = '';
+            if ($a['user_id'] && $a['last_used_at']) {
+                $join = ' LEFT JOIN ('
+                    . 'SELECT ' . notification_q($a['user_id']) . ' AS user_id, MAX(' . notification_q($a['last_used_at']) . ') AS api_last_used_at'
+                    . ' FROM ' . notification_q($a['table'])
+                    . ' WHERE ' . ($a['revoked_at'] ? (notification_q($a['revoked_at']) . ' IS NULL') : '1=1')
+                    . ' AND ' . ($a['expires_at'] ? ('(' . notification_q($a['expires_at']) . ' IS NULL OR ' . notification_q($a['expires_at']) . ' > NOW())') : '1=1')
+                    . ' GROUP BY ' . notification_q($a['user_id'])
+                    . ') atok ON atok.user_id = u.' . notification_q($u['id']);
+                if ($u['last_sign_in_at']) {
+                    $activityExpr = 'GREATEST(COALESCE(u.' . notification_q($u['last_sign_in_at']) . ', \'1970-01-01 00:00:00\'), COALESCE(atok.api_last_used_at, \'1970-01-01 00:00:00\'))';
+                } else {
+                    $activityExpr = 'COALESCE(atok.api_last_used_at, \'1970-01-01 00:00:00\')';
+                }
+            } elseif ($u['last_sign_in_at']) {
+                $activityExpr = 'COALESCE(u.' . notification_q($u['last_sign_in_at']) . ', \'1970-01-01 00:00:00\')';
+            } elseif ($u['created_at']) {
+                $activityExpr = 'COALESCE(u.' . notification_q($u['created_at']) . ', \'1970-01-01 00:00:00\')';
+            }
+
+            $sql = 'SELECT u.' . notification_q($u['id']) . ' AS user_id'
+                . ' FROM ' . notification_q($u['table']) . ' u'
+                . $join
+                . ' WHERE ' . $baseWhere
+                . ' AND ' . $activityExpr . ' < DATE_SUB(NOW(), INTERVAL ' . (int)$days . ' DAY)';
+
+            return $pdo->query($sql)->fetchAll(PDO::FETCH_COLUMN, 0) ?: [];
+        }
+
+        if ($ruleKey === 'inactive_7_days_exam') {
+            $days = max(1, (int)($config['days_threshold'] ?? 7));
+            if (!$m['user_id']) {
+                return [];
+            }
+
+            $attemptTime = $m['submitted_at'] ?: $m['created_at'];
+            if (!$attemptTime) {
+                return [];
+            }
+
+            $statusCond = '1=1';
+            if ($m['status']) {
+                $statusCond = 'ma.' . notification_q($m['status']) . " = 'completed'";
+            }
+
+            $sql = 'SELECT u.' . notification_q($u['id']) . ' AS user_id'
+                . ' FROM ' . notification_q($u['table']) . ' u'
+                . ' LEFT JOIN ('
+                . '   SELECT ma.' . notification_q($m['user_id']) . ' AS user_id, MAX(ma.' . notification_q($attemptTime) . ') AS last_exam_at'
+                . '   FROM ' . notification_q($m['table']) . ' ma'
+                . '   WHERE ' . $statusCond
+                . '   GROUP BY ma.' . notification_q($m['user_id'])
+                . ' ) mex ON mex.user_id = u.' . notification_q($u['id'])
+                . ' WHERE ' . $baseWhere
+                . ' AND (mex.last_exam_at IS NULL OR mex.last_exam_at < DATE_SUB(NOW(), INTERVAL ' . (int)$days . ' DAY))';
+
+            return $pdo->query($sql)->fetchAll(PDO::FETCH_COLUMN, 0) ?: [];
+        }
+
+        if ($ruleKey === 'premium_expiring') {
+            $days = max(0, (int)($config['days_before_expiry'] ?? 2));
+            if (!$s['user_id'] || !$s['is_pro'] || !$s['expires_at']) {
+                return [];
+            }
+
+            $subOrder = $s['updated_at'] ?: ($s['created_at'] ?: $s['user_id']);
+            $sql = 'SELECT u.' . notification_q($u['id']) . ' AS user_id'
+                . ' FROM ' . notification_q($u['table']) . ' u'
+                . ' INNER JOIN ('
+                . '   SELECT s1.' . notification_q($s['user_id']) . ' AS user_id, s1.' . notification_q($s['is_pro']) . ' AS is_pro, s1.' . notification_q($s['expires_at']) . ' AS expires_at'
+                . '   FROM ' . notification_q($s['table']) . ' s1'
+                . '   INNER JOIN ('
+                . '      SELECT ' . notification_q($s['user_id']) . ' AS user_id, MAX(' . notification_q($subOrder) . ') AS max_order'
+                . '      FROM ' . notification_q($s['table'])
+                . '      GROUP BY ' . notification_q($s['user_id'])
+                . '   ) sm ON sm.user_id = s1.' . notification_q($s['user_id']) . ' AND sm.max_order = s1.' . notification_q($subOrder)
+                . ' ) sub ON sub.user_id = u.' . notification_q($u['id'])
+                . ' WHERE ' . $baseWhere
+                . ' AND COALESCE(sub.is_pro, 0) = 1'
+                . ' AND sub.expires_at IS NOT NULL'
+                . ' AND DATE(sub.expires_at) = DATE(DATE_ADD(CURDATE(), INTERVAL ' . (int)$days . ' DAY))';
+
+            return $pdo->query($sql)->fetchAll(PDO::FETCH_COLUMN, 0) ?: [];
+        }
+
+        return [];
+    }
+}
+
+if (!function_exists('notification_create_automated_notification')) {
+    function notification_create_automated_notification(PDO $pdo, string $ruleKey, string $userId): string
+    {
+        $key = notification_rule_canonical_key($ruleKey);
+        $defs = notification_rule_definitions();
+        if (!isset($defs[$key])) {
+            throw new RuntimeException('Desteklenmeyen kural: ' . $ruleKey);
+        }
+
+        $def = $defs[$key];
+        $payload = [
+            'title' => (string)$def['title'],
+            'message' => (string)$def['message'],
+            'channel' => (string)$def['channel'],
+            'deep_link' => (string)$def['deep_link'],
+            'target_type' => 'single_user',
+            'target_value' => json_encode([
+                'user_id' => $userId,
+                'rule_key' => $key,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'payload_json' => json_encode([
+                'source' => 'rule_engine',
+                'rule_key' => $key,
+                'user_id' => $userId,
+                'screen' => (string)$def['deep_link'],
+                'type' => (string)$def['channel'],
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'status' => 'queued',
+            'schedule_type' => 'now',
+            'scheduled_at' => null,
+            'created_by' => null,
+        ];
+
+        return notification_create_or_update($pdo, $payload);
+    }
+}
+
+if (!function_exists('notification_mark_automation_notification_status')) {
+    function notification_mark_automation_notification_status(PDO $pdo, string $notificationId, array $sendResult): string
+    {
+        $schema = notification_schema($pdo);
+        $n = $schema['notifications'];
+
+        $success = (int)($sendResult['success'] ?? 0);
+        $failed = (int)($sendResult['failed'] ?? 0);
+        $tokenTargets = (int)($sendResult['token_target_count'] ?? 0);
+
+        $status = 'failed';
+        if ($success > 0 && $failed > 0) {
+            $status = 'partial';
+        } elseif ($success > 0 && $failed === 0) {
+            $status = 'sent';
+        } elseif ($tokenTargets === 0) {
+            $status = 'failed';
+        }
+
+        $update = [];
+        if ($n['status']) {
+            $update[$n['status']] = $status;
+        }
+        if ($n['updated_at']) {
+            $update[$n['updated_at']] = date('Y-m-d H:i:s');
+        }
+        if (!empty($update)) {
+            notification_update_row($pdo, $n['table'], $update, notification_q($n['id']) . ' = ?', [$notificationId]);
+        }
+
+        return $status;
+    }
+}
+
+if (!function_exists('notification_run_rules_engine')) {
+    function notification_run_rules_engine(PDO $pdo, array $options = []): array
+    {
+        date_default_timezone_set('Europe/Istanbul');
+
+        $force = !empty($options['force']);
+        $windowMinutes = max(1, (int)($options['window_minutes'] ?? 5));
+
+        $stats = [
+            'processed_rules' => 0,
+            'due_rules' => 0,
+            'candidate_users' => 0,
+            'created_notifications' => 0,
+            'sent' => 0,
+            'skipped' => 0,
+            'failed' => 0,
+            'details' => [],
+        ];
+
+        $today = (new DateTimeImmutable('now', new DateTimeZone('Europe/Istanbul')))->format('Y-m-d');
+        $now = new DateTimeImmutable('now', new DateTimeZone('Europe/Istanbul'));
+
+        $rules = notification_fetch_active_rules($pdo);
+        foreach ($rules as $rule) {
+            $stats['processed_rules']++;
+
+            $ruleKey = (string)$rule['rule_key'];
+            $config = (array)($rule['config'] ?? []);
+            $isDue = $force ? true : notification_rule_is_due_now($config, $now, $windowMinutes);
+            if (!$isDue) {
+                continue;
+            }
+            $stats['due_rules']++;
+
+            $users = notification_get_candidate_users_for_rule($pdo, $ruleKey, $config);
+            $users = array_values(array_unique(array_filter(array_map(static fn($v) => trim((string)$v), $users))));
+            $stats['candidate_users'] += count($users);
+
+            foreach ($users as $userId) {
+                try {
+                    if (notification_rule_run_exists($pdo, $ruleKey, $userId, $today)) {
+                        $stats['skipped']++;
+                        continue;
+                    }
+
+                    notification_rule_run_insert($pdo, $ruleKey, $userId, $today, 'created', null);
+                    $notificationId = notification_create_automated_notification($pdo, $ruleKey, $userId);
+                    $stats['created_notifications']++;
+
+                    $sendResult = send_push_notification($pdo, $notificationId);
+                    $notificationStatus = notification_mark_automation_notification_status($pdo, $notificationId, $sendResult);
+                    $runStatus = ($notificationStatus === 'failed') ? 'failed' : 'sent';
+                    notification_rule_run_update($pdo, $ruleKey, $userId, $today, $runStatus, $notificationId);
+
+                    if ($runStatus === 'sent') {
+                        $stats['sent']++;
+                    } else {
+                        $stats['failed']++;
+                    }
+                } catch (Throwable $e) {
+                    $stats['failed']++;
+                    try {
+                        if (!notification_rule_run_exists($pdo, $ruleKey, $userId, $today)) {
+                            notification_rule_run_insert($pdo, $ruleKey, $userId, $today, 'failed', null);
+                        } else {
+                            notification_rule_run_update($pdo, $ruleKey, $userId, $today, 'failed', null);
+                        }
+                    } catch (Throwable $inner) {
+                        // no-op
+                    }
+
+                    $stats['details'][] = [
+                        'rule_key' => $ruleKey,
+                        'user_id' => $userId,
+                        'error' => $e->getMessage(),
+                    ];
+                }
+            }
+        }
+
+        return $stats;
     }
 }
