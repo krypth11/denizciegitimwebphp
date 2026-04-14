@@ -191,6 +191,33 @@ small,
     font-weight: 600;
 }
 
+.sidebar .submenu-toggle,
+.offcanvas .submenu-toggle {
+    cursor: pointer;
+}
+
+.sidebar .submenu-chevron,
+.offcanvas .submenu-chevron {
+    transition: transform .2s ease;
+    font-size: 12px;
+}
+
+.sidebar .submenu-toggle.collapsed .submenu-chevron,
+.offcanvas .submenu-toggle.collapsed .submenu-chevron {
+    transform: rotate(-90deg);
+}
+
+.sidebar .submenu-container,
+.offcanvas .submenu-container {
+    margin-left: 8px;
+}
+
+.sidebar .submenu-item,
+.offcanvas .submenu-item {
+    padding-left: 34px;
+    font-size: 12.5px;
+}
+
 .sidebar-footer {
     margin-top: auto;
     border-top: 1px solid var(--border);

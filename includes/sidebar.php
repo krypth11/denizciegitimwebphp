@@ -9,6 +9,7 @@ $menuGroups = [
         ['slug' => 'courses', 'url' => '/pages/courses.php', 'icon' => 'bi-book', 'label' => 'Dersler'],
         ['slug' => 'topics', 'url' => '/pages/topics.php', 'icon' => 'bi-diagram-3', 'label' => 'Konular'],
         ['slug' => 'questions', 'url' => '/pages/questions.php', 'icon' => 'bi-question-circle', 'label' => 'Sorular'],
+        ['slug' => 'questions-export', 'url' => '/pages/questions-export.php', 'icon' => 'bi-file-earmark-arrow-down', 'label' => 'Soru Dışa Aktar'],
         ['slug' => 'word-game-questions', 'url' => '/pages/word-game-questions.php', 'icon' => 'bi-controller', 'label' => 'Kelime Oyunu'],
         ['slug' => 'ai-question-review', 'url' => '/pages/ai-question-review.php', 'icon' => 'bi-robot', 'label' => 'AI Soru Kontrol'],
     ],
@@ -33,25 +34,60 @@ $menuGroups = [
     ],
 ];
 
-function render_sidebar_menu($menuGroups, $current_page)
+function is_notification_menu_item(array $item): bool
+{
+    return str_starts_with((string)($item['slug'] ?? ''), 'notifications-');
+}
+
+function render_sidebar_link(array $item, string $current_page, string $extraClass = ''): void
+{
+    $isActive = $current_page === (string)$item['slug'] ? 'active' : '';
+    echo '<a class="nav-link ' . $isActive . $extraClass . '" href="' . $item['url'] . '">';
+    echo '<i class="bi ' . $item['icon'] . '"></i><span>' . htmlspecialchars($item['label']) . '</span>';
+    echo '</a>';
+}
+
+function render_notification_submenu(array $notificationItems, string $current_page, string $instanceKey): void
+{
+    if (empty($notificationItems)) {
+        return;
+    }
+
+    $submenuId = 'notificationsSubmenu-' . $instanceKey;
+    $isOpen = str_starts_with($current_page, 'notifications-');
+    $toggleClass = $isOpen ? '' : ' collapsed';
+    $showClass = $isOpen ? ' show' : '';
+    $parentActiveClass = $isOpen ? ' active' : '';
+
+    echo '<a class="nav-link submenu-toggle' . $toggleClass . $parentActiveClass . '" data-bs-toggle="collapse" href="#' . $submenuId . '" role="button" aria-expanded="' . ($isOpen ? 'true' : 'false') . '" aria-controls="' . $submenuId . '">';
+    echo '<i class="bi bi-bell"></i><span>Bildirim Yönetimi</span><i class="bi bi-chevron-down submenu-chevron ms-auto"></i>';
+    echo '</a>';
+
+    echo '<div class="collapse submenu-container' . $showClass . '" id="' . $submenuId . '">';
+    foreach ($notificationItems as $item) {
+        render_sidebar_link($item, $current_page, ' submenu-item');
+    }
+    echo '</div>';
+}
+
+function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default')
 {
     foreach ($menuGroups as $groupIndex => $group) {
-        $notificationsHeaderPrinted = false;
+        $notificationItems = array_values(array_filter($group, 'is_notification_menu_item'));
+        $notificationRendered = false;
+
         foreach ($group as $item) {
-            if (str_starts_with($item['slug'], 'notifications-') && !$notificationsHeaderPrinted) {
-                echo '<div class="nav-link disabled text-uppercase small fw-semibold opacity-75" style="pointer-events:none;">';
-                echo '<i class="bi bi-bell"></i><span>Bildirim Yönetimi</span>';
-                echo '</div>';
-                $notificationsHeaderPrinted = true;
+            if (is_notification_menu_item($item)) {
+                if (!$notificationRendered) {
+                    render_notification_submenu($notificationItems, (string)$current_page, (string)$instanceKey . '-' . $groupIndex);
+                    $notificationRendered = true;
+                }
+                continue;
             }
 
-            $isActive = ($current_page ?? '') === $item['slug'] ? 'active' : '';
-            $isNotificationItem = str_starts_with($item['slug'], 'notifications-');
-            $extraClass = $isNotificationItem ? ' ps-4' : '';
-            echo '<a class="nav-link ' . $isActive . $extraClass . '" href="' . $item['url'] . '">';
-            echo '<i class="bi ' . $item['icon'] . '"></i><span>' . htmlspecialchars($item['label']) . '</span>';
-            echo '</a>';
+            render_sidebar_link($item, (string)$current_page);
         }
+
         if ($groupIndex < count($menuGroups) - 1) {
             echo '<hr class="my-2 mx-2">';
         }
@@ -64,7 +100,7 @@ function render_sidebar_menu($menuGroups, $current_page)
         <h4><i class="bi bi-mortarboard-fill"></i> Denizci Eğitim</h4>
     </div>
     <nav class="nav flex-column">
-        <?php render_sidebar_menu($menuGroups, $current_page ?? ''); ?>
+        <?php render_sidebar_menu($menuGroups, $current_page ?? '', 'desktop'); ?>
     </nav>
     <div class="sidebar-footer">
         <div class="user-info">
@@ -87,7 +123,7 @@ function render_sidebar_menu($menuGroups, $current_page)
             <h4><i class="bi bi-mortarboard-fill"></i> Menü</h4>
         </div>
         <nav class="nav flex-column">
-            <?php render_sidebar_menu($menuGroups, $current_page ?? ''); ?>
+            <?php render_sidebar_menu($menuGroups, $current_page ?? '', 'mobile'); ?>
         </nav>
         <div class="sidebar-footer">
             <a href="/logout.php" class="btn btn-danger w-100 btn-sm">
@@ -103,6 +139,7 @@ function render_sidebar_menu($menuGroups, $current_page)
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
 
 
 
