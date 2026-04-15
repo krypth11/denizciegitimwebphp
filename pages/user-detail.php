@@ -95,6 +95,15 @@ $(function () {
     const appAlert = (title, message, type = 'info') => window.showAppAlert ? window.showAppAlert({ title, message, type }) : Promise.resolve();
     const appConfirm = (title, message, options = {}) => window.showAppConfirm ? window.showAppConfirm({ title, message, ...options }) : Promise.resolve(false);
     const fmtDate = (value) => !value ? '-' : (typeof window.formatDate === 'function' ? window.formatDate(value) : value);
+    const fmtInt = (value) => Number(value || 0).toLocaleString('tr-TR');
+    const boolBadge = (value) => value ? '<span class="badge text-bg-success">Evet</span>' : '<span class="badge text-bg-secondary">Hayır</span>';
+    const examStatusLabel = (status) => {
+        const s = String(status || '').toLowerCase();
+        if (['completed', 'submitted', 'finished'].includes(s)) return '<span class="badge text-bg-success">Tamamlandı</span>';
+        if (['in_progress', 'active', 'started'].includes(s)) return '<span class="badge text-bg-warning">Devam Ediyor</span>';
+        if (['abandoned', 'cancelled', 'expired'].includes(s)) return '<span class="badge text-bg-danger">Terk Edildi</span>';
+        return `<span class="badge text-bg-secondary">${esc(status || '-')}</span>`;
+    };
 
     const api = async (action, method = 'GET', data = {}) => {
         if (typeof window.appAjax === 'function') {
@@ -108,9 +117,9 @@ $(function () {
     };
 
     const statusBadge = (status) => {
-        if (status === 'guest') return '<span class="badge text-bg-warning">Guest</span>';
+        if (status === 'guest') return '<span class="badge text-bg-warning">Misafir</span>';
         if (status === 'premium_active') return '<span class="badge text-bg-success">Premium Aktif</span>';
-        return '<span class="badge text-bg-primary">Registered Free</span>';
+        return '<span class="badge text-bg-primary">Kayıtlı (Free)</span>';
     };
 
     function setLoading(tabId, text = 'Yükleniyor...') {
@@ -123,9 +132,9 @@ $(function () {
 
         const badges = [];
         badges.push(statusBadge(user.status));
-        badges.push(user.email_verified === 1 ? '<span class="badge text-bg-success">Email Verified</span>' : '<span class="badge text-bg-secondary">Email Unverified</span>');
+        badges.push(user.email_verified === 1 ? '<span class="badge text-bg-success">E-posta Doğrulandı</span>' : '<span class="badge text-bg-secondary">E-posta Doğrulanmadı</span>');
         badges.push(user.onboarding_completed === 1 ? '<span class="badge text-bg-success">Onboarding Tamam</span>' : '<span class="badge text-bg-secondary">Onboarding Bekliyor</span>');
-        badges.push(user.premium?.is_active ? '<span class="badge text-bg-success">Premium</span>' : '<span class="badge text-bg-secondary">Free</span>');
+        badges.push(user.premium?.is_active ? '<span class="badge text-bg-success">Premium</span>' : '<span class="badge text-bg-secondary">Ücretsiz</span>');
         $('#sumBadges').html(badges.join(' '));
 
         $('#sumMetaRow').html(`
@@ -134,7 +143,7 @@ $(function () {
             <div class="col-12 col-lg-4">Premium Bitiş: <strong>${esc(fmtDate(user.premium?.expires_at || null))}</strong></div>
             <div class="col-12 col-lg-4">Kayıt: <strong>${esc(fmtDate(user.created_at))}</strong></div>
             <div class="col-12 col-lg-4">Son Giriş: <strong>${esc(fmtDate(user.last_sign_in_at))}</strong></div>
-            <div class="col-12 col-lg-4">Toplam Çözülen Soru: <strong>${esc(kpi.total_solved || 0)}</strong></div>
+            <div class="col-12 col-lg-4">Toplam Çözülen Soru: <strong>${esc(fmtInt(kpi.total_solved || 0))}</strong></div>
         `);
     }
 
@@ -143,33 +152,33 @@ $(function () {
         const k = detailData.kpi || {};
         $('#tab-general').html(`
             <div class="row g-3 mb-3">
-                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam Çözülen</div><div class="h4 mb-0">${esc(k.total_solved || 0)}</div></div></div></div>
-                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Doğru</div><div class="h4 mb-0">${esc(k.correct || 0)}</div></div></div></div>
-                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Yanlış</div><div class="h4 mb-0">${esc(k.wrong || 0)}</div></div></div></div>
+                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam Çözülen</div><div class="h4 mb-0">${esc(fmtInt(k.total_solved || 0))}</div></div></div></div>
+                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Doğru</div><div class="h4 mb-0">${esc(fmtInt(k.correct || 0))}</div></div></div></div>
+                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Yanlış</div><div class="h4 mb-0">${esc(fmtInt(k.wrong || 0))}</div></div></div></div>
                 <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Başarı Oranı</div><div class="h4 mb-0">%${esc(k.success_rate || 0)}</div></div></div></div>
-                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam Deneme</div><div class="h4 mb-0">${esc(k.total_exams || 0)}</div></div></div></div>
-                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Tamamlanan Deneme</div><div class="h4 mb-0">${esc(k.completed_exams || 0)}</div></div></div></div>
-                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Premium</div><div class="h6 mb-0">${k.premium_active ? 'Aktif' : 'Free'}</div></div></div></div>
+                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam Deneme</div><div class="h4 mb-0">${esc(fmtInt(k.total_exams || 0))}</div></div></div></div>
+                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Tamamlanan Deneme</div><div class="h4 mb-0">${esc(fmtInt(k.completed_exams || 0))}</div></div></div></div>
+                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Premium</div><div class="h6 mb-0">${k.premium_active ? 'Aktif' : 'Ücretsiz'}</div></div></div></div>
             </div>
             <div class="card user-soft-card">
                 <div class="card-body table-responsive">
                     <table class="table table-sm align-middle mb-0">
                         <tbody>
-                            <tr><th width="240">User ID</th><td>${esc(u.id)}</td></tr>
-                            <tr><th>full_name</th><td>${esc(u.full_name || '-')}</td></tr>
-                            <tr><th>email</th><td>${esc(u.email || '-')}</td></tr>
-                            <tr><th>pending_email</th><td>${esc(u.pending_email || '-')}</td></tr>
-                            <tr><th>is_guest</th><td>${u.is_guest ? '1' : '0'}</td></tr>
-                            <tr><th>is_admin</th><td>${u.is_admin ? '1' : '0'}</td></tr>
-                            <tr><th>email_verified</th><td>${u.email_verified ? '1' : '0'}</td></tr>
-                            <tr><th>email_verified_at</th><td>${esc(fmtDate(u.email_verified_at))}</td></tr>
-                            <tr><th>onboarding_completed</th><td>${u.onboarding_completed ? '1' : '0'}</td></tr>
-                            <tr><th>current qualification</th><td>${esc(u.current_qualification_name || '-')} (${esc(u.current_qualification_id || '-')})</td></tr>
-                            <tr><th>target qualification</th><td>${esc(u.target_qualification_name || '-')} (${esc(u.target_qualification_id || '-')})</td></tr>
-                            <tr><th>created_at</th><td>${esc(fmtDate(u.created_at))}</td></tr>
-                            <tr><th>updated_at</th><td>${esc(fmtDate(u.updated_at))}</td></tr>
-                            <tr><th>last_sign_in_at</th><td>${esc(fmtDate(u.last_sign_in_at))}</td></tr>
-                            <tr><th>is_deleted</th><td>${u.is_deleted ? '1' : '0'}</td></tr>
+                            <tr><th width="240">Kullanıcı ID</th><td>${esc(u.id)}</td></tr>
+                            <tr><th>Ad Soyad</th><td>${esc(u.full_name || '-')}</td></tr>
+                            <tr><th>E-posta</th><td>${esc(u.email || '-')}</td></tr>
+                            <tr><th>Bekleyen E-posta</th><td>${esc(u.pending_email || '-')}</td></tr>
+                            <tr><th>Misafir Hesap</th><td>${boolBadge(u.is_guest)}</td></tr>
+                            <tr><th>Admin</th><td>${boolBadge(u.is_admin)}</td></tr>
+                            <tr><th>E-posta Doğrulandı</th><td>${boolBadge(u.email_verified)}</td></tr>
+                            <tr><th>E-posta Doğrulama Tarihi</th><td>${esc(fmtDate(u.email_verified_at))}</td></tr>
+                            <tr><th>Onboarding Tamamlandı</th><td>${boolBadge(u.onboarding_completed)}</td></tr>
+                            <tr><th>Mevcut Yeterlilik</th><td>${esc(u.current_qualification_name || '-')} ${u.current_qualification_id ? `<small class="text-muted">(${esc(u.current_qualification_id)})</small>` : ''}</td></tr>
+                            <tr><th>Hedef Yeterlilik</th><td>${esc(u.target_qualification_name || '-')} ${u.target_qualification_id ? `<small class="text-muted">(${esc(u.target_qualification_id)})</small>` : ''}</td></tr>
+                            <tr><th>Kayıt Tarihi</th><td>${esc(fmtDate(u.created_at))}</td></tr>
+                            <tr><th>Güncellenme Tarihi</th><td>${esc(fmtDate(u.updated_at))}</td></tr>
+                            <tr><th>Son Giriş</th><td>${esc(fmtDate(u.last_sign_in_at))}</td></tr>
+                            <tr><th>Silinmiş mi</th><td>${boolBadge(u.is_deleted)}</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -209,16 +218,16 @@ $(function () {
                 <div class="card-body table-responsive">
                     <table class="table table-sm align-middle mb-0">
                         <tbody>
-                            <tr><th width="220">is_pro</th><td>${s.is_pro ? '1' : '0'}</td></tr>
-                            <tr><th>premium aktif mi</th><td>${s.premium_active ? '<span class="badge text-bg-success">Aktif</span>' : '<span class="badge text-bg-secondary">Free</span>'}</td></tr>
-                            <tr><th>plan_code</th><td>${esc(s.plan_code || '-')}</td></tr>
-                            <tr><th>provider</th><td>${esc(s.provider || '-')}</td></tr>
-                            <tr><th>entitlement_id</th><td>${esc(s.entitlement_id || '-')}</td></tr>
-                            <tr><th>rc_app_user_id</th><td>${esc(s.rc_app_user_id || '-')}</td></tr>
-                            <tr><th>expires_at</th><td>${esc(fmtDate(s.expires_at))}</td></tr>
-                            <tr><th>last_synced_at</th><td>${esc(fmtDate(s.last_synced_at))}</td></tr>
-                            <tr><th>created_at</th><td>${esc(fmtDate(s.created_at))}</td></tr>
-                            <tr><th>updated_at</th><td>${esc(fmtDate(s.updated_at))}</td></tr>
+                            <tr><th width="220">Pro Üyelik</th><td>${boolBadge(s.is_pro)}</td></tr>
+                            <tr><th>Premium Aktif mi?</th><td>${s.premium_active ? '<span class="badge text-bg-success">Aktif</span>' : '<span class="badge text-bg-secondary">Ücretsiz</span>'}</td></tr>
+                            <tr><th>Paket Kodu</th><td>${esc(s.plan_code || '-')}</td></tr>
+                            <tr><th>Sağlayıcı</th><td>${esc(s.provider || '-')}</td></tr>
+                            <tr><th>Entitlement ID</th><td>${esc(s.entitlement_id || '-')}</td></tr>
+                            <tr><th>RC App User ID</th><td>${esc(s.rc_app_user_id || '-')}</td></tr>
+                            <tr><th>Bitiş Tarihi</th><td>${esc(fmtDate(s.expires_at))}</td></tr>
+                            <tr><th>Son Senkron</th><td>${esc(fmtDate(s.last_synced_at))}</td></tr>
+                            <tr><th>Oluşturulma</th><td>${esc(fmtDate(s.created_at))}</td></tr>
+                            <tr><th>Güncelleme</th><td>${esc(fmtDate(s.updated_at))}</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -232,34 +241,34 @@ $(function () {
         const recent = data.recent_events || [];
         const breakdowns = data.breakdowns || {};
 
-        const distRows = dist.length ? dist.map(x => `<tr><td>${esc(x.source || '-')}</td><td>${esc(x.total || 0)}</td></tr>`).join('') : '<tr><td colspan="2" class="text-muted">Kayıt yok</td></tr>';
-        const recentRows = recent.length ? recent.map(x => `<tr><td>${esc(fmtDate(x.created_at))}</td><td>${esc(x.source || '-')}</td><td>${esc(x.question_id || '-')}</td><td>${x.is_correct == 1 ? '<span class="badge text-bg-success">Doğru</span>' : '<span class="badge text-bg-danger">Yanlış</span>'}</td></tr>`).join('') : '<tr><td colspan="4" class="text-muted">Kayıt yok</td></tr>';
+        const distRows = dist.length ? dist.map(x => `<tr><td>${esc(x.source || '-')}</td><td>${esc(fmtInt(x.total || 0))}</td></tr>`).join('') : '<tr><td colspan="2" class="text-muted">Kayıt yok</td></tr>';
+        const recentRows = recent.length ? recent.map(x => `<tr><td>${esc(fmtDate(x.event_at || x.created_at || null))}</td><td>${esc(x.source || '-')}</td><td>${esc(x.question_id || '-')}</td><td>${x.is_correct == 1 ? '<span class="badge text-bg-success">Doğru</span>' : '<span class="badge text-bg-danger">Yanlış</span>'}</td></tr>`).join('') : '<tr><td colspan="4" class="text-muted">Kayıt yok</td></tr>';
 
         const renderBreak = (title, rows) => {
-            const body = (rows || []).length ? rows.map(r => `<tr><td>${esc(r.name || r.id || '-')}</td><td>${esc(r.total || 0)}</td></tr>`).join('') : '<tr><td colspan="2" class="text-muted">Kayıt yok</td></tr>';
+            const body = (rows || []).length ? rows.map(r => `<tr><td>${esc(r.name || r.id || '-')}</td><td>${esc(fmtInt(r.total || 0))}</td></tr>`).join('') : '<tr><td colspan="2" class="text-muted">Kayıt yok</td></tr>';
             return `<div class="col-12 col-lg-4"><div class="card user-soft-card"><div class="card-body table-responsive"><h6>${title}</h6><table class="table table-sm mb-0"><thead><tr><th>Ad</th><th>Toplam</th></tr></thead><tbody>${body}</tbody></table></div></div></div>`;
         };
 
         $('#tab-study').html(`
             <div class="row g-3 mb-3">
-                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam</div><div class="h5 mb-0">${esc(totals.total_solved || 0)}</div></div></div></div>
-                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Doğru</div><div class="h5 mb-0">${esc(totals.correct || 0)}</div></div></div></div>
-                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Yanlış</div><div class="h5 mb-0">${esc(totals.wrong || 0)}</div></div></div></div>
+                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam Çözülen</div><div class="h5 mb-0">${esc(fmtInt(totals.total_solved || 0))}</div></div></div></div>
+                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Doğru</div><div class="h5 mb-0">${esc(fmtInt(totals.correct || 0))}</div></div></div></div>
+                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Yanlış</div><div class="h5 mb-0">${esc(fmtInt(totals.wrong || 0))}</div></div></div></div>
                 <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Başarı</div><div class="h5 mb-0">%${esc(totals.success_rate || 0)}</div></div></div></div>
                 <div class="col-12 col-lg-4"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Son Çalışma</div><div class="h6 mb-0">${esc(fmtDate(totals.last_study_at))}</div></div></div></div>
             </div>
             <div class="row g-3 mb-3">
                 <div class="col-12 col-lg-4">
-                    <div class="card user-soft-card"><div class="card-body table-responsive"><h6>Source Dağılımı</h6><table class="table table-sm mb-0"><thead><tr><th>Source</th><th>Toplam</th></tr></thead><tbody>${distRows}</tbody></table></div></div>
+                    <div class="card user-soft-card"><div class="card-body table-responsive"><h6>Kaynak Dağılımı</h6><table class="table table-sm mb-0"><thead><tr><th>Kaynak</th><th>Toplam</th></tr></thead><tbody>${distRows}</tbody></table></div></div>
                 </div>
                 <div class="col-12 col-lg-8">
-                    <div class="card user-soft-card"><div class="card-body table-responsive"><h6>Son 20 Cevap Eventi</h6><table class="table table-sm mb-0"><thead><tr><th>Tarih</th><th>Source</th><th>Soru</th><th>Sonuç</th></tr></thead><tbody>${recentRows}</tbody></table></div></div>
+                    <div class="card user-soft-card"><div class="card-body table-responsive"><h6>Son 20 Cevap Olayı</h6><table class="table table-sm mb-0"><thead><tr><th>Tarih</th><th>Kaynak</th><th>Soru</th><th>Sonuç</th></tr></thead><tbody>${recentRows}</tbody></table></div></div>
                 </div>
             </div>
             <div class="row g-3">
-                ${renderBreak('Qualification Kırılımı', breakdowns.qualification)}
-                ${renderBreak('Course Kırılımı', breakdowns.course)}
-                ${renderBreak('Topic Kırılımı', breakdowns.topic)}
+                ${renderBreak('Yeterlilik Dağılımı', breakdowns.qualification)}
+                ${renderBreak('Ders Dağılımı', breakdowns.course)}
+                ${renderBreak('Konu Dağılımı', breakdowns.topic)}
             </div>
         `);
     }
@@ -267,30 +276,47 @@ $(function () {
     function renderExams(data) {
         const s = data.summary || {};
         const attempts = data.attempts || [];
-        const rows = attempts.length ? attempts.map(a => `<tr><td>${esc(a.id || '-')}</td><td>${esc(a.status || '-')}</td><td>${esc(a.score || '-')}</td><td>${esc(a.qualification_id || '-')}</td><td>${esc(fmtDate(a.created_at))}</td><td>${esc(fmtDate(a.updated_at))}</td></tr>`).join('') : '<tr><td colspan="6" class="text-muted">Deneme kaydı yok.</td></tr>';
+        const rows = attempts.length ? attempts.map(a => `
+            <tr>
+                <td>${esc(a.qualification_name || '-')}</td>
+                <td>${esc(fmtDate(a.started_at))}</td>
+                <td>${esc(fmtDate(a.submitted_at))}</td>
+                <td>${esc(fmtDate(a.abandoned_at))}</td>
+                <td>${esc(a.elapsed_seconds ?? '-')}</td>
+                <td>${esc((a.actual_question_count ?? '-') + ' / ' + (a.requested_question_count ?? '-'))}</td>
+                <td>${esc(a.mode || '-')}</td>
+                <td>${esc(a.pool_type || '-')}</td>
+                <td>${examStatusLabel(a.status)}</td>
+                <td>${esc(a.warning_message || '-')}</td>
+            </tr>
+        `).join('') : '<tr><td colspan="10" class="text-muted">Deneme kaydı yok.</td></tr>';
 
         $('#tab-exams').html(`
             <div class="row g-3 mb-3">
-                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam</div><div class="h5 mb-0">${esc(s.total || 0)}</div></div></div></div>
-                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Tamamlanan</div><div class="h5 mb-0">${esc(s.completed || 0)}</div></div></div></div>
-                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">In Progress</div><div class="h5 mb-0">${esc(s.in_progress || 0)}</div></div></div></div>
-                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Abandoned</div><div class="h5 mb-0">${esc(s.abandoned || 0)}</div></div></div></div>
+                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam Deneme</div><div class="h5 mb-0">${esc(fmtInt(s.total || 0))}</div></div></div></div>
+                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Tamamlanan</div><div class="h5 mb-0">${esc(fmtInt(s.completed || 0))}</div></div></div></div>
+                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Devam Ediyor</div><div class="h5 mb-0">${esc(fmtInt(s.in_progress || 0))}</div></div></div></div>
+                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Terk Edildi</div><div class="h5 mb-0">${esc(fmtInt(s.abandoned || 0))}</div></div></div></div>
                 <div class="col-12 col-lg-4"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Son Deneme</div><div class="h6 mb-0">${esc(fmtDate(s.last_exam_at))}</div></div></div></div>
             </div>
-            <div class="card user-soft-card"><div class="card-body table-responsive"><table class="table table-sm mb-0"><thead><tr><th>ID</th><th>Status</th><th>Skor</th><th>Qualification</th><th>Başlangıç</th><th>Güncelleme</th></tr></thead><tbody>${rows}</tbody></table></div></div>
+            <div class="card user-soft-card"><div class="card-body table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Yeterlilik</th><th>Başlangıç</th><th>Gönderim</th><th>Terk</th><th>Süre (sn)</th><th>Soru (Gerçek/İstenen)</th><th>Mod</th><th>Havuz Tipi</th><th>Durum</th><th>Uyarı</th></tr></thead><tbody>${rows}</tbody></table></div></div>
         `);
     }
 
     function renderUsage(data) {
         const summary = data.summary || {};
         const rows = data.rows || [];
-        const sumRows = Object.keys(summary).length ? Object.keys(summary).map(k => `<tr><td>${esc(k)}</td><td>${esc(summary[k])}</td></tr>`).join('') : '<tr><td colspan="2" class="text-muted">Özet veri yok.</td></tr>';
-        const listRows = rows.length ? rows.map(r => `<tr><td>${esc(r.usage_date || '-')}</td><td>${esc(r.feature_key || '-')}</td><td>${esc(r.used_count || 0)}</td><td>${esc(r.qualification_id || '-')}</td><td>${esc(fmtDate(r.updated_at || r.created_at))}</td></tr>`).join('') : '<tr><td colspan="5" class="text-muted">Kayıt yok.</td></tr>';
+        const sumRows = Object.keys(summary).length
+            ? Object.keys(summary).map(k => `<tr><td>${esc(k)}</td><td>${esc(fmtInt(summary[k]?.total_used || 0))}</td><td>${esc(summary[k]?.daily_limit ?? '-')}</td></tr>`).join('')
+            : '<tr><td colspan="3" class="text-muted">Özet veri yok.</td></tr>';
+        const listRows = rows.length
+            ? rows.map(r => `<tr><td>${esc(r.usage_date || '-')}</td><td>${esc(r.feature_key || '-')}</td><td>${esc(fmtInt(r.used_count || 0))}</td><td>${esc(r.daily_limit ?? '-')}</td><td>${esc(r.qualification_name || '-')}</td><td>${esc(fmtDate(r.updated_at || r.created_at))}</td></tr>`).join('')
+            : '<tr><td colspan="6" class="text-muted">Kayıt yok.</td></tr>';
 
         $('#tab-usage').html(`
             <div class="row g-3">
-                <div class="col-12 col-lg-4"><div class="card user-soft-card"><div class="card-body table-responsive"><h6>Günlük Hak Özetleri</h6><table class="table table-sm mb-0"><thead><tr><th>Feature</th><th>Toplam Kullanım</th></tr></thead><tbody>${sumRows}</tbody></table></div></div></div>
-                <div class="col-12 col-lg-8"><div class="card user-soft-card"><div class="card-body table-responsive"><h6>Kullanım Kayıtları</h6><table class="table table-sm mb-0"><thead><tr><th>Tarih</th><th>Feature</th><th>Kullanım</th><th>Qualification</th><th>Güncelleme</th></tr></thead><tbody>${listRows}</tbody></table></div></div></div>
+                <div class="col-12 col-lg-4"><div class="card user-soft-card"><div class="card-body table-responsive"><h6>Özellik Bazlı Özet</h6><table class="table table-sm mb-0"><thead><tr><th>Özellik</th><th>Toplam Kullanım</th><th>Günlük Limit</th></tr></thead><tbody>${sumRows}</tbody></table></div></div></div>
+                <div class="col-12 col-lg-8"><div class="card user-soft-card"><div class="card-body table-responsive"><h6>Kullanım Kayıtları</h6><table class="table table-sm mb-0"><thead><tr><th>Tarih</th><th>Özellik</th><th>Kullanım</th><th>Günlük Limit</th><th>Yeterlilik</th><th>Güncelleme</th></tr></thead><tbody>${listRows}</tbody></table></div></div></div>
             </div>
         `);
     }
@@ -305,16 +331,16 @@ $(function () {
     function renderDevices(data) {
         const apiTokens = data.api_tokens || [];
         const pushTokens = data.push_tokens || [];
-        const apiRows = apiTokens.length ? apiTokens.map(r => `<tr><td>${esc(r.id || '-')}</td><td>${esc(r.name || '-')}</td><td>${esc(fmtDate(r.last_used_at))}</td><td>${esc(fmtDate(r.expires_at))}</td><td>${r.revoked_at ? '<span class="badge text-bg-danger">Revoked</span>' : '<span class="badge text-bg-success">Active</span>'}</td></tr>`).join('') : '<tr><td colspan="5" class="text-muted">API token yok.</td></tr>';
-        const pushRows = pushTokens.length ? pushTokens.map(r => `<tr><td>${esc(r.id || '-')}</td><td>${esc(maskToken(r.token))}</td><td>${esc(r.platform || '-')}</td><td>${esc(r.device_id || '-')}</td><td>${esc(fmtDate(r.last_seen_at))}</td><td>${r.revoked_at ? '<span class="badge text-bg-danger">Revoked</span>' : '<span class="badge text-bg-success">Active</span>'}</td></tr>`).join('') : '<tr><td colspan="6" class="text-muted">Push token yok.</td></tr>';
+        const apiRows = apiTokens.length ? apiTokens.map(r => `<tr><td>${esc(r.id || '-')}</td><td>${esc(r.name || '-')}</td><td>${esc(fmtDate(r.last_used_at))}</td><td>${esc(fmtDate(r.expires_at))}</td><td>${r.revoked_at ? '<span class="badge text-bg-danger">Pasif</span>' : '<span class="badge text-bg-success">Aktif</span>'}</td></tr>`).join('') : '<tr><td colspan="5" class="text-muted">API token yok.</td></tr>';
+        const pushRows = pushTokens.length ? pushTokens.map(r => `<tr><td>${esc(r.id || '-')}</td><td>${esc(maskToken(r.token))}</td><td>${esc(r.installation_id || '-')}</td><td>${esc(r.device_name || '-')}</td><td>${esc(r.app_version || '-')}</td><td>${esc(r.permission_status || '-')}</td><td>${esc(r.platform || '-')}</td><td>${esc(fmtDate(r.last_seen_at))}</td><td>${esc(fmtDate(r.updated_at || r.created_at))}</td><td>${r.is_active == 1 ? '<span class="badge text-bg-success">Aktif</span>' : '<span class="badge text-bg-secondary">Pasif</span>'}</td></tr>`).join('') : '<tr><td colspan="10" class="text-muted">Push token yok.</td></tr>';
 
         $('#tab-devices').html(`
             <div class="row g-3">
                 <div class="col-12">
-                    <div class="card user-soft-card"><div class="card-body table-responsive"><h6>API Tokens</h6><table class="table table-sm mb-0"><thead><tr><th>ID</th><th>Ad</th><th>Son Kullanım</th><th>Expires</th><th>Durum</th></tr></thead><tbody>${apiRows}</tbody></table></div></div>
+                    <div class="card user-soft-card"><div class="card-body table-responsive"><h6>API Tokenları</h6><table class="table table-sm mb-0"><thead><tr><th>ID</th><th>Ad</th><th>Son Kullanım</th><th>Bitiş</th><th>Durum</th></tr></thead><tbody>${apiRows}</tbody></table></div></div>
                 </div>
                 <div class="col-12">
-                    <div class="card user-soft-card"><div class="card-body table-responsive"><h6>Push Tokens / Cihazlar</h6><table class="table table-sm mb-0"><thead><tr><th>ID</th><th>Token</th><th>Platform</th><th>Cihaz</th><th>Son Görülme</th><th>Durum</th></tr></thead><tbody>${pushRows}</tbody></table></div></div>
+                    <div class="card user-soft-card"><div class="card-body table-responsive"><h6>Push Tokenları / Cihazlar</h6><table class="table table-sm mb-0"><thead><tr><th>ID</th><th>Token</th><th>Installation ID</th><th>Cihaz Adı</th><th>Uygulama Sürümü</th><th>İzin Durumu</th><th>Platform</th><th>Son Görülme</th><th>Güncelleme</th><th>Durum</th></tr></thead><tbody>${pushRows}</tbody></table></div></div>
                 </div>
             </div>
         `);

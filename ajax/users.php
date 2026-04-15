@@ -270,6 +270,37 @@ function users_get_qualification_map(PDO $pdo): array
     return $map;
 }
 
+function users_feature_daily_limit(string $featureKey): ?int
+{
+    $key = strtolower(trim($featureKey));
+    return match ($key) {
+        'study_question_open' => 60,
+        'mock_exam_start' => 3,
+        default => null,
+    };
+}
+
+function users_pick_latest_datetime(?string ...$values): ?string
+{
+    $latest = null;
+    $latestTs = null;
+    foreach ($values as $value) {
+        $v = trim((string)($value ?? ''));
+        if ($v === '') {
+            continue;
+        }
+        $ts = strtotime($v);
+        if ($ts === false) {
+            continue;
+        }
+        if ($latestTs === null || $ts > $latestTs) {
+            $latestTs = $ts;
+            $latest = $v;
+        }
+    }
+    return $latest;
+}
+
 function users_get_admin_notes(PDO $pdo, string $userId): array
 {
     $schema = users_admin_notes_schema($pdo);
@@ -304,130 +335,173 @@ function users_get_admin_notes(PDO $pdo, string $userId): array
 
 function users_get_user_study_stats(PDO $pdo, string $userId): array
 {
-    if (!users_has_table($pdo, 'question_attempt_events')) {
-        return [
-            'totals' => [
-                'total_solved' => 0,
-                'correct' => 0,
-                'wrong' => 0,
-                'success_rate' => 0,
-                'last_study_at' => null,
-            ],
-            'source_distribution' => [],
-            'recent_events' => [],
-            'breakdowns' => [
-                'qualification' => [],
-                'course' => [],
-                'topic' => [],
-            ],
-        ];
-    }
+    $zero = [
+        'totals' => [
+            'total_solved' => 0,
+            'correct' => 0,
+            'wrong' => 0,
+            'success_rate' => 0,
+            'last_study_at' => null,
+        ],
+        'source_distribution' => [],
+        'recent_events' => [],
+        'breakdowns' => [
+            'qualification' => [],
+            'course' => [],
+            'topic' => [],
+        ],
+    ];
 
-    $cols = get_table_columns($pdo, 'question_attempt_events');
-    $uid = users_pick_column($cols, ['user_id'], false);
-    if (!$uid) {
-        return [
-            'totals' => [
-                'total_solved' => 0,
-                'correct' => 0,
-                'wrong' => 0,
-                'success_rate' => 0,
-                'last_study_at' => null,
-            ],
-            'source_distribution' => [],
-            'recent_events' => [],
-            'breakdowns' => [
-                'qualification' => [],
-                'course' => [],
-                'topic' => [],
-            ],
-        ];
-    }
-
-    $isCorrectCol = users_pick_column($cols, ['is_correct', 'correct', 'is_correct_answer'], false);
-    $sourceCol = users_pick_column($cols, ['source'], false);
-    $createdCol = users_pick_column($cols, ['created_at', 'answered_at', 'event_at'], false);
-    $qidCol = users_pick_column($cols, ['question_id'], false);
-    $qualCol = users_pick_column($cols, ['qualification_id'], false);
-    $courseCol = users_pick_column($cols, ['course_id'], false);
-    $topicCol = users_pick_column($cols, ['topic_id'], false);
-
-    $correctExpr = $isCorrectCol ? "SUM(CASE WHEN `{$isCorrectCol}` = 1 THEN 1 ELSE 0 END)" : '0';
-    $wrongExpr = $isCorrectCol ? "SUM(CASE WHEN `{$isCorrectCol}` = 0 THEN 1 ELSE 0 END)" : '0';
-    $lastExpr = $createdCol ? "MAX(`{$createdCol}`)" : 'NULL';
-
-    $totSql = "SELECT COUNT(*) AS total_solved, {$correctExpr} AS correct, {$wrongExpr} AS wrong, {$lastExpr} AS last_study_at FROM question_attempt_events WHERE `{$uid}` = ?";
-    $totStmt = $pdo->prepare($totSql);
-    $totStmt->execute([$userId]);
-    $tot = $totStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-
-    $totalSolved = (int)($tot['total_solved'] ?? 0);
-    $correct = (int)($tot['correct'] ?? 0);
-    $wrong = (int)($tot['wrong'] ?? 0);
-    $successRate = $totalSolved > 0 ? round(($correct / $totalSolved) * 100, 2) : 0;
-
+    $eventTotal = 0;
+    $eventCorrect = 0;
+    $eventWrong = 0;
+    $eventLastAt = null;
     $distribution = [];
-    if ($sourceCol) {
-        $dSql = "SELECT `{$sourceCol}` AS source, COUNT(*) AS total FROM question_attempt_events WHERE `{$uid}` = ? GROUP BY `{$sourceCol}` ORDER BY total DESC";
-        $dStmt = $pdo->prepare($dSql);
-        $dStmt->execute([$userId]);
-        $distribution = $dStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    }
-
-    $selectRecent = [];
-    $selectRecent[] = $createdCol ? "`{$createdCol}` AS created_at" : 'NULL AS created_at';
-    $selectRecent[] = $sourceCol ? "`{$sourceCol}` AS source" : 'NULL AS source';
-    $selectRecent[] = $isCorrectCol ? "`{$isCorrectCol}` AS is_correct" : 'NULL AS is_correct';
-    $selectRecent[] = $qidCol ? "`{$qidCol}` AS question_id" : 'NULL AS question_id';
-    $selectRecent[] = $qualCol ? "`{$qualCol}` AS qualification_id" : 'NULL AS qualification_id';
-    $selectRecent[] = $courseCol ? "`{$courseCol}` AS course_id" : 'NULL AS course_id';
-    $selectRecent[] = $topicCol ? "`{$topicCol}` AS topic_id" : 'NULL AS topic_id';
-    $orderCol = $createdCol ?: ($qidCol ?: $uid);
-    $rSql = 'SELECT ' . implode(', ', $selectRecent) . " FROM question_attempt_events WHERE `{$uid}` = ? ORDER BY `{$orderCol}` DESC LIMIT 20";
-    $rStmt = $pdo->prepare($rSql);
-    $rStmt->execute([$userId]);
-    $recent = $rStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
+    $recent = [];
     $breakdown = ['qualification' => [], 'course' => [], 'topic' => []];
-    try {
-        if ($qualCol && users_has_table($pdo, 'qualifications')) {
-            $sql = "SELECT q.id, q.name, COUNT(*) AS total
-                    FROM question_attempt_events e
-                    LEFT JOIN qualifications q ON q.id = e.`{$qualCol}`
-                    WHERE e.`{$uid}` = ?
-                    GROUP BY q.id, q.name
-                    ORDER BY total DESC
-                    LIMIT 15";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$userId]);
-            $breakdown['qualification'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    if (users_has_table($pdo, 'question_attempt_events')) {
+        $cols = get_table_columns($pdo, 'question_attempt_events');
+        $uid = users_pick_column($cols, ['user_id'], false);
+        if ($uid) {
+            $isCorrectCol = users_pick_column($cols, ['is_correct', 'correct', 'is_correct_answer'], false);
+            $sourceCol = users_pick_column($cols, ['source'], false);
+            $eventAtCol = users_pick_column($cols, ['attempted_at', 'answered_at', 'created_at', 'event_at'], false);
+            $qidCol = users_pick_column($cols, ['question_id'], false);
+            $qualCol = users_pick_column($cols, ['qualification_id'], false);
+            $courseCol = users_pick_column($cols, ['course_id'], false);
+            $topicCol = users_pick_column($cols, ['topic_id'], false);
+
+            $correctExpr = $isCorrectCol ? "SUM(CASE WHEN `{$isCorrectCol}` = 1 THEN 1 ELSE 0 END)" : '0';
+            $wrongExpr = $isCorrectCol ? "SUM(CASE WHEN `{$isCorrectCol}` = 0 THEN 1 ELSE 0 END)" : '0';
+            $lastExpr = $eventAtCol ? "MAX(`{$eventAtCol}`)" : 'NULL';
+
+            $totSql = "SELECT COUNT(*) AS total_solved, {$correctExpr} AS correct, {$wrongExpr} AS wrong, {$lastExpr} AS last_study_at FROM question_attempt_events WHERE `{$uid}` = ?";
+            $totStmt = $pdo->prepare($totSql);
+            $totStmt->execute([$userId]);
+            $tot = $totStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            $eventTotal = (int)($tot['total_solved'] ?? 0);
+            $eventCorrect = (int)($tot['correct'] ?? 0);
+            $eventWrong = (int)($tot['wrong'] ?? 0);
+            $eventLastAt = $tot['last_study_at'] ?? null;
+
+            if ($sourceCol) {
+                $dSql = "SELECT `{$sourceCol}` AS source, COUNT(*) AS total FROM question_attempt_events WHERE `{$uid}` = ? GROUP BY `{$sourceCol}` ORDER BY total DESC";
+                $dStmt = $pdo->prepare($dSql);
+                $dStmt->execute([$userId]);
+                $distribution = $dStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            }
+
+            $selectRecent = [];
+            $selectRecent[] = $eventAtCol ? "`{$eventAtCol}` AS event_at" : 'NULL AS event_at';
+            $selectRecent[] = $sourceCol ? "`{$sourceCol}` AS source" : 'NULL AS source';
+            $selectRecent[] = $isCorrectCol ? "`{$isCorrectCol}` AS is_correct" : 'NULL AS is_correct';
+            $selectRecent[] = $qidCol ? "`{$qidCol}` AS question_id" : 'NULL AS question_id';
+            $selectRecent[] = $qualCol ? "`{$qualCol}` AS qualification_id" : 'NULL AS qualification_id';
+            $selectRecent[] = $courseCol ? "`{$courseCol}` AS course_id" : 'NULL AS course_id';
+            $selectRecent[] = $topicCol ? "`{$topicCol}` AS topic_id" : 'NULL AS topic_id';
+            $orderCol = $eventAtCol ?: ($qidCol ?: $uid);
+            $rSql = 'SELECT ' . implode(', ', $selectRecent) . " FROM question_attempt_events WHERE `{$uid}` = ? ORDER BY `{$orderCol}` DESC LIMIT 20";
+            $rStmt = $pdo->prepare($rSql);
+            $rStmt->execute([$userId]);
+            $recent = $rStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            try {
+                if ($qualCol && users_has_table($pdo, 'qualifications')) {
+                    $sql = "SELECT q.id, q.name, COUNT(*) AS total
+                            FROM question_attempt_events e
+                            LEFT JOIN qualifications q ON q.id = e.`{$qualCol}`
+                            WHERE e.`{$uid}` = ?
+                            GROUP BY q.id, q.name
+                            ORDER BY total DESC
+                            LIMIT 15";
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute([$userId]);
+                    $breakdown['qualification'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                }
+                if ($courseCol && users_has_table($pdo, 'courses')) {
+                    $sql = "SELECT c.id, c.name, COUNT(*) AS total
+                            FROM question_attempt_events e
+                            LEFT JOIN courses c ON c.id = e.`{$courseCol}`
+                            WHERE e.`{$uid}` = ?
+                            GROUP BY c.id, c.name
+                            ORDER BY total DESC
+                            LIMIT 15";
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute([$userId]);
+                    $breakdown['course'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                }
+                if ($topicCol && users_has_table($pdo, 'topics')) {
+                    $sql = "SELECT t.id, t.name, COUNT(*) AS total
+                            FROM question_attempt_events e
+                            LEFT JOIN topics t ON t.id = e.`{$topicCol}`
+                            WHERE e.`{$uid}` = ?
+                            GROUP BY t.id, t.name
+                            ORDER BY total DESC
+                            LIMIT 15";
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute([$userId]);
+                    $breakdown['topic'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                }
+            } catch (Throwable $e) {
+            }
         }
-        if ($courseCol && users_has_table($pdo, 'courses')) {
-            $sql = "SELECT c.id, c.name, COUNT(*) AS total
-                    FROM question_attempt_events e
-                    LEFT JOIN courses c ON c.id = e.`{$courseCol}`
-                    WHERE e.`{$uid}` = ?
-                    GROUP BY c.id, c.name
-                    ORDER BY total DESC
-                    LIMIT 15";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$userId]);
-            $breakdown['course'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        }
-        if ($topicCol && users_has_table($pdo, 'topics')) {
-            $sql = "SELECT t.id, t.name, COUNT(*) AS total
-                    FROM question_attempt_events e
-                    LEFT JOIN topics t ON t.id = e.`{$topicCol}`
-                    WHERE e.`{$uid}` = ?
-                    GROUP BY t.id, t.name
-                    ORDER BY total DESC
-                    LIMIT 15";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$userId]);
-            $breakdown['topic'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        }
-    } catch (Throwable $e) {
     }
+
+    $progressTotal = 0;
+    $progressCorrect = 0;
+    $progressWrong = 0;
+    $progressLastAt = null;
+    if (users_has_table($pdo, 'user_progress')) {
+        $cols = get_table_columns($pdo, 'user_progress');
+        $uid = users_pick_column($cols, ['user_id'], false);
+        if ($uid) {
+            $totalAnswerCol = users_pick_column($cols, ['total_answer_count', 'answer_count', 'total_answers'], false);
+            $correctAnswerCol = users_pick_column($cols, ['correct_answer_count', 'correct_count'], false);
+            $wrongAnswerCol = users_pick_column($cols, ['wrong_answer_count', 'wrong_count', 'incorrect_count'], false);
+            $isAnsweredCol = users_pick_column($cols, ['is_answered'], false);
+            $lastProgressAtCol = users_pick_column($cols, ['last_answered_at', 'answered_at', 'updated_at', 'created_at'], false);
+
+            $pTotalExpr = $totalAnswerCol
+                ? "SUM(COALESCE(`{$totalAnswerCol}`, 0))"
+                : ($isAnsweredCol ? "SUM(CASE WHEN `{$isAnsweredCol}` = 1 THEN 1 ELSE 0 END)" : 'COUNT(*)');
+            $pCorrectExpr = $correctAnswerCol ? "SUM(COALESCE(`{$correctAnswerCol}`, 0))" : '0';
+            $pWrongExpr = $wrongAnswerCol ? "SUM(COALESCE(`{$wrongAnswerCol}`, 0))" : '0';
+            $pLastExpr = $lastProgressAtCol ? "MAX(`{$lastProgressAtCol}`)" : 'NULL';
+
+            $sql = "SELECT {$pTotalExpr} AS total_solved, {$pCorrectExpr} AS correct, {$pWrongExpr} AS wrong, {$pLastExpr} AS last_study_at FROM user_progress WHERE `{$uid}` = ?";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$userId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            $progressTotal = (int)($row['total_solved'] ?? 0);
+            $progressCorrect = (int)($row['correct'] ?? 0);
+            $progressWrong = (int)($row['wrong'] ?? 0);
+            $progressLastAt = $row['last_study_at'] ?? null;
+        }
+    }
+
+    $sessionLastAt = null;
+    if (users_has_table($pdo, 'study_sessions')) {
+        $cols = get_table_columns($pdo, 'study_sessions');
+        $uid = users_pick_column($cols, ['user_id'], false);
+        if ($uid) {
+            $sessionDateCol = users_pick_column($cols, ['completed_at', 'ended_at', 'updated_at', 'created_at'], false);
+            if ($sessionDateCol) {
+                $sql = "SELECT MAX(`{$sessionDateCol}`) AS last_study_at FROM study_sessions WHERE `{$uid}` = ?";
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([$userId]);
+                $sessionLastAt = $stmt->fetchColumn() ?: null;
+            }
+        }
+    }
+
+    $totalSolved = max($progressTotal, $eventTotal);
+    $correct = max($progressCorrect, $eventCorrect);
+    $wrong = max($progressWrong, $eventWrong);
+    if ($totalSolved < ($correct + $wrong)) {
+        $totalSolved = $correct + $wrong;
+    }
+    $successRate = $totalSolved > 0 ? round(($correct / $totalSolved) * 100, 2) : 0;
 
     return [
         'totals' => [
@@ -435,12 +509,12 @@ function users_get_user_study_stats(PDO $pdo, string $userId): array
             'correct' => $correct,
             'wrong' => $wrong,
             'success_rate' => $successRate,
-            'last_study_at' => $tot['last_study_at'] ?? null,
+            'last_study_at' => users_pick_latest_datetime($eventLastAt, $progressLastAt, $sessionLastAt),
         ],
         'source_distribution' => $distribution,
         'recent_events' => $recent,
         'breakdowns' => $breakdown,
-    ];
+    ] + $zero;
 }
 
 function users_get_user_exam_stats(PDO $pdo, string $userId): array
@@ -474,16 +548,25 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     }
 
     $statusCol = users_pick_column($cols, ['status', 'attempt_status', 'state'], false);
-    $createdCol = users_pick_column($cols, ['created_at', 'started_at'], false);
-    $updatedCol = users_pick_column($cols, ['updated_at', 'ended_at', 'submitted_at'], false);
-    $scoreCol = users_pick_column($cols, ['score', 'score_percent', 'success_rate'], false);
+    $startedCol = users_pick_column($cols, ['started_at', 'created_at'], false);
+    $submittedCol = users_pick_column($cols, ['submitted_at'], false);
+    $abandonedAtCol = users_pick_column($cols, ['abandoned_at'], false);
+    $requestedQuestionCountCol = users_pick_column($cols, ['requested_question_count'], false);
+    $actualQuestionCountCol = users_pick_column($cols, ['actual_question_count'], false);
+    $elapsedSecondsCol = users_pick_column($cols, ['elapsed_seconds'], false);
     $qualCol = users_pick_column($cols, ['qualification_id'], false);
+    $modeCol = users_pick_column($cols, ['mode'], false);
+    $poolTypeCol = users_pick_column($cols, ['pool_type'], false);
+    $warningCol = users_pick_column($cols, ['warning_message'], false);
 
     $completedExpr = $statusCol ? "SUM(CASE WHEN `{$statusCol}` IN ('completed', 'submitted', 'finished') THEN 1 ELSE 0 END)" : '0';
     $progressExpr = $statusCol ? "SUM(CASE WHEN `{$statusCol}` IN ('in_progress', 'active', 'started') THEN 1 ELSE 0 END)" : '0';
     $abandonedExpr = $statusCol ? "SUM(CASE WHEN `{$statusCol}` IN ('abandoned', 'cancelled', 'expired') THEN 1 ELSE 0 END)" : '0';
-    $lastCol = $updatedCol ?: $createdCol;
-    $lastExpr = $lastCol ? "MAX(`{$lastCol}`)" : 'NULL';
+    $lastExpr = 'MAX(COALESCE('
+        . ($submittedCol ? "`{$submittedCol}`" : 'NULL') . ', '
+        . ($abandonedAtCol ? "`{$abandonedAtCol}`" : 'NULL') . ', '
+        . ($startedCol ? "`{$startedCol}`" : 'NULL')
+        . '))';
 
     $sql = "SELECT COUNT(*) AS total, {$completedExpr} AS completed, {$progressExpr} AS in_progress, {$abandonedExpr} AS abandoned, {$lastExpr} AS last_exam_at FROM mock_exam_attempts WHERE `{$uid}` = ?";
     $stmt = $pdo->prepare($sql);
@@ -493,14 +576,28 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     $select = [];
     $select[] = users_pick_column($cols, ['id'], false) ? '`' . users_pick_column($cols, ['id'], false) . '` AS id' : 'NULL AS id';
     $select[] = $statusCol ? "`{$statusCol}` AS status" : 'NULL AS status';
-    $select[] = $scoreCol ? "`{$scoreCol}` AS score" : 'NULL AS score';
+    $select[] = $startedCol ? "`{$startedCol}` AS started_at" : 'NULL AS started_at';
+    $select[] = $submittedCol ? "`{$submittedCol}` AS submitted_at" : 'NULL AS submitted_at';
+    $select[] = $abandonedAtCol ? "`{$abandonedAtCol}` AS abandoned_at" : 'NULL AS abandoned_at';
+    $select[] = $requestedQuestionCountCol ? "`{$requestedQuestionCountCol}` AS requested_question_count" : 'NULL AS requested_question_count';
+    $select[] = $actualQuestionCountCol ? "`{$actualQuestionCountCol}` AS actual_question_count" : 'NULL AS actual_question_count';
+    $select[] = $elapsedSecondsCol ? "`{$elapsedSecondsCol}` AS elapsed_seconds" : 'NULL AS elapsed_seconds';
     $select[] = $qualCol ? "`{$qualCol}` AS qualification_id" : 'NULL AS qualification_id';
-    $select[] = $createdCol ? "`{$createdCol}` AS created_at" : 'NULL AS created_at';
-    $select[] = $updatedCol ? "`{$updatedCol}` AS updated_at" : 'NULL AS updated_at';
-    $orderCol = $updatedCol ?: ($createdCol ?: $uid);
+    $select[] = $modeCol ? "`{$modeCol}` AS mode" : 'NULL AS mode';
+    $select[] = $poolTypeCol ? "`{$poolTypeCol}` AS pool_type" : 'NULL AS pool_type';
+    $select[] = $warningCol ? "`{$warningCol}` AS warning_message" : 'NULL AS warning_message';
+    $orderCol = $submittedCol ?: ($abandonedAtCol ?: ($startedCol ?: $uid));
     $listSql = 'SELECT ' . implode(', ', $select) . " FROM mock_exam_attempts WHERE `{$uid}` = ? ORDER BY `{$orderCol}` DESC LIMIT 100";
     $listStmt = $pdo->prepare($listSql);
     $listStmt->execute([$userId]);
+    $attempts = $listStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $qMap = users_get_qualification_map($pdo);
+    foreach ($attempts as &$attempt) {
+        $qid = (string)($attempt['qualification_id'] ?? '');
+        $attempt['qualification_name'] = $qid !== '' ? ($qMap[$qid] ?? '-') : '-';
+    }
+    unset($attempt);
 
     return [
         'summary' => [
@@ -510,7 +607,7 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
             'abandoned' => (int)($summary['abandoned'] ?? 0),
             'last_exam_at' => $summary['last_exam_at'] ?? null,
         ],
-        'attempts' => $listStmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+        'attempts' => $attempts,
     ];
 }
 
@@ -533,6 +630,7 @@ function users_get_user_usage_limits(PDO $pdo, string $userId): array
     $usedCol = users_pick_column($cols, ['used_count'], false);
     $dateCol = users_pick_column($cols, ['usage_date_tr', 'usage_date'], false);
     $qualCol = users_pick_column($cols, ['qualification_id'], false);
+    $dailyLimitCol = users_pick_column($cols, ['daily_limit'], false);
     $createdCol = users_pick_column($cols, ['created_at'], false);
     $updatedCol = users_pick_column($cols, ['updated_at'], false);
 
@@ -540,6 +638,7 @@ function users_get_user_usage_limits(PDO $pdo, string $userId): array
     $select[] = $dateCol ? "`{$dateCol}` AS usage_date" : 'NULL AS usage_date';
     $select[] = $featureCol ? "`{$featureCol}` AS feature_key" : 'NULL AS feature_key';
     $select[] = $usedCol ? "`{$usedCol}` AS used_count" : '0 AS used_count';
+    $select[] = $dailyLimitCol ? "`{$dailyLimitCol}` AS daily_limit" : 'NULL AS daily_limit';
     $select[] = $qualCol ? "`{$qualCol}` AS qualification_id" : 'NULL AS qualification_id';
     $select[] = $createdCol ? "`{$createdCol}` AS created_at" : 'NULL AS created_at';
     $select[] = $updatedCol ? "`{$updatedCol}` AS updated_at" : 'NULL AS updated_at';
@@ -551,14 +650,26 @@ function users_get_user_usage_limits(PDO $pdo, string $userId): array
     $stmt->execute([$userId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
+    $qMap = users_get_qualification_map($pdo);
+
     $summary = [];
-    foreach ($rows as $row) {
+    foreach ($rows as &$row) {
         $key = (string)($row['feature_key'] ?? 'unknown');
         if (!isset($summary[$key])) {
-            $summary[$key] = 0;
+            $summary[$key] = ['total_used' => 0, 'daily_limit' => null];
         }
-        $summary[$key] += (int)($row['used_count'] ?? 0);
+        $summary[$key]['total_used'] += (int)($row['used_count'] ?? 0);
+
+        $detectedDailyLimit = $row['daily_limit'] !== null ? (int)$row['daily_limit'] : users_feature_daily_limit($key);
+        if ($summary[$key]['daily_limit'] === null && $detectedDailyLimit !== null) {
+            $summary[$key]['daily_limit'] = $detectedDailyLimit;
+        }
+
+        $qid = (string)($row['qualification_id'] ?? '');
+        $row['qualification_name'] = $qid !== '' ? ($qMap[$qid] ?? '-') : '-';
+        $row['daily_limit'] = $detectedDailyLimit;
     }
+    unset($row);
 
     return [
         'summary' => $summary,
@@ -600,23 +711,31 @@ function users_get_user_devices(PDO $pdo, string $userId): array
         $cols = get_table_columns($pdo, 'user_push_tokens');
         $uid = users_pick_column($cols, ['user_id'], false);
         if ($uid) {
-            $tokenCol = users_pick_column($cols, ['push_token', 'token'], false);
+            $tokenCol = users_pick_column($cols, ['fcm_token', 'push_token', 'token'], false);
             $platformCol = users_pick_column($cols, ['platform'], false);
-            $deviceCol = users_pick_column($cols, ['device_id', 'device_name'], false);
+            $installationIdCol = users_pick_column($cols, ['installation_id'], false);
+            $deviceNameCol = users_pick_column($cols, ['device_name', 'device_id'], false);
+            $appVersionCol = users_pick_column($cols, ['app_version'], false);
+            $permissionStatusCol = users_pick_column($cols, ['permission_status'], false);
+            $isActiveCol = users_pick_column($cols, ['is_active'], false);
             $lastSeenCol = users_pick_column($cols, ['last_seen_at', 'last_used_at'], false);
             $createdCol = users_pick_column($cols, ['created_at'], false);
-            $revokedCol = users_pick_column($cols, ['revoked_at', 'deleted_at'], false);
+            $updatedCol = users_pick_column($cols, ['updated_at'], false);
 
             $select = [];
             $select[] = users_pick_column($cols, ['id'], false) ? '`' . users_pick_column($cols, ['id'], false) . '` AS id' : 'NULL AS id';
             $select[] = $tokenCol ? "`{$tokenCol}` AS token" : 'NULL AS token';
             $select[] = $platformCol ? "`{$platformCol}` AS platform" : 'NULL AS platform';
-            $select[] = $deviceCol ? "`{$deviceCol}` AS device_id" : 'NULL AS device_id';
+            $select[] = $installationIdCol ? "`{$installationIdCol}` AS installation_id" : 'NULL AS installation_id';
+            $select[] = $deviceNameCol ? "`{$deviceNameCol}` AS device_name" : 'NULL AS device_name';
+            $select[] = $appVersionCol ? "`{$appVersionCol}` AS app_version" : 'NULL AS app_version';
+            $select[] = $permissionStatusCol ? "`{$permissionStatusCol}` AS permission_status" : 'NULL AS permission_status';
+            $select[] = $isActiveCol ? "`{$isActiveCol}` AS is_active" : '1 AS is_active';
             $select[] = $lastSeenCol ? "`{$lastSeenCol}` AS last_seen_at" : 'NULL AS last_seen_at';
             $select[] = $createdCol ? "`{$createdCol}` AS created_at" : 'NULL AS created_at';
-            $select[] = $revokedCol ? "`{$revokedCol}` AS revoked_at" : 'NULL AS revoked_at';
+            $select[] = $updatedCol ? "`{$updatedCol}` AS updated_at" : 'NULL AS updated_at';
 
-            $orderCol = $lastSeenCol ?: ($createdCol ?: $uid);
+            $orderCol = $lastSeenCol ?: ($updatedCol ?: ($createdCol ?: $uid));
             $sql = 'SELECT ' . implode(', ', $select)
                 . " FROM user_push_tokens WHERE `{$uid}` = ? ORDER BY `{$orderCol}` DESC LIMIT 100";
             $stmt = $pdo->prepare($sql);
