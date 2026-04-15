@@ -19,17 +19,34 @@ try {
         'repaired' => false,
         'verified_active' => false,
         'rc_app_user_id' => usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeRow),
+        'rc_app_user_id_candidates' => [],
     ];
     $computedIsPro = usage_limits_is_subscription_active($subscriptionStatus);
 
     if (!$computedIsPro) {
-        $repair = usage_limits_try_repair_subscription_status($pdo, $userId);
+        $repair = usage_limits_try_repair_subscription_status($pdo, $userId, [
+            'preferred_rc_app_user_id' => $repair['rc_app_user_id'] ?? null,
+        ]);
         $subscriptionStatus = is_array($repair['after'] ?? null) ? $repair['after'] : $subscriptionStatus;
         $afterRow = $subscriptionStatus;
         $computedIsPro = usage_limits_is_subscription_active($subscriptionStatus);
 
         if (!$computedIsPro && (!empty($repair['verified_active']) || !empty($repair['repaired']))) {
             $computedIsPro = true;
+        }
+
+        if ($computedIsPro) {
+            usage_limits_subscription_debug_log('offline_premium_access_granted_after_repair', [
+                'endpoint' => 'api/v1/offline/package.php',
+                'user_id' => $userId,
+                'before_row' => usage_limits_normalize_subscription_row(($repair['before'] ?? $beforeRow), $userId),
+                'after_row' => usage_limits_normalize_subscription_row(($repair['after'] ?? $afterRow), $userId),
+                'computed_is_pro' => $computedIsPro,
+                'repaired' => !empty($repair['repaired']),
+                'verified_active' => !empty($repair['verified_active']),
+                'rc_app_user_id' => $repair['rc_app_user_id'] ?? null,
+                'rc_app_user_id_candidates' => $repair['rc_app_user_id_candidates'] ?? [],
+            ]);
         }
     }
 
@@ -45,6 +62,7 @@ try {
             'repaired' => !empty($repair['repaired']),
             'verified_active' => !empty($repair['verified_active']),
             'rc_app_user_id' => $repair['rc_app_user_id'] ?? ($afterNormalized['rc_app_user_id'] ?? null),
+            'rc_app_user_id_candidates' => $repair['rc_app_user_id_candidates'] ?? [],
         ]);
 
         usage_limits_business_error(

@@ -1623,6 +1623,12 @@ try {
                     'premium_expires_at' => $sub['expires_at'] ?? null,
                     'premium_is_active' => $isPremium ? 1 : 0,
                     'premium_plan_code' => $sub['plan_code'] ?? null,
+                    'premium_debug' => [
+                        'is_pro_field' => users_fmt_bool($sub['is_pro'] ?? 0),
+                        'expires_at' => $sub['expires_at'] ?? null,
+                        'rc_app_user_id' => $sub['rc_app_user_id'] ?? null,
+                        'computed_active' => $isPremium ? 1 : 0,
+                    ],
                 ];
             }
 
@@ -1764,6 +1770,12 @@ try {
                         'status' => $isPremium ? 'active' : 'inactive',
                         'expires_at' => $subData['expires_at'] ?? null,
                     ],
+                    'premium_debug' => [
+                        'is_pro_field' => users_fmt_bool($subData['is_pro'] ?? 0),
+                        'expires_at' => $subData['expires_at'] ?? null,
+                        'rc_app_user_id' => $subData['rc_app_user_id'] ?? null,
+                        'computed_active' => $isPremium ? 1 : 0,
+                    ],
                 ],
                 'kpi' => [
                     'total_solved' => (int)($studyStats['total_solved'] ?? 0),
@@ -1799,6 +1811,12 @@ try {
             $sub = users_get_subscription_map($pdo, [$id]);
             $row = $sub[$id] ?? [];
             $row['premium_active'] = users_is_premium_active($row) ? 1 : 0;
+            $row['premium_debug'] = [
+                'is_pro_field' => users_fmt_bool($row['is_pro'] ?? 0),
+                'expires_at' => $row['expires_at'] ?? null,
+                'rc_app_user_id' => $row['rc_app_user_id'] ?? null,
+                'computed_active' => users_is_premium_active($row) ? 1 : 0,
+            ];
             users_response(true, '', ['subscription' => $row]);
             break;
         }
