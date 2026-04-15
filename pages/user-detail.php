@@ -127,10 +127,17 @@ $(function () {
     const boolBadge = (value) => normalizeBool(value)
         ? '<span class="badge text-bg-success">Evet</span>'
         : '<span class="badge text-bg-secondary">Hayır</span>';
-    const resolveQualificationName = (...values) => {
-        for (const value of values) {
-            if (isFilledString(value)) return value.trim();
+    const resolveQualificationName = (nameValue, idValue) => {
+        const name = isFilledString(nameValue) ? nameValue.trim() : '';
+        if (name !== '') {
+            return name;
         }
+
+        const id = isFilledString(idValue) ? idValue.trim() : '';
+        if (id !== '') {
+            return 'Tanımsız Yeterlilik';
+        }
+
         return EMPTY_TEXT;
     };
     const getQualificationName = (row, prefix = '') => {
@@ -219,8 +226,8 @@ $(function () {
         const totals = data.totals || {};
         const mergedTotals = {
             total_solved: Number(data.total_solved ?? totals.total_solved ?? 0),
-            total_correct: Number(data.total_correct ?? totals.total_correct ?? totals.correct ?? 0),
-            total_wrong: Number(data.total_wrong ?? totals.total_wrong ?? totals.wrong ?? 0),
+            total_correct: Number(data.total_correct ?? totals.total_correct ?? 0),
+            total_wrong: Number(data.total_wrong ?? totals.total_wrong ?? 0),
             success_rate: Number(data.success_rate ?? totals.success_rate ?? 0),
             last_study_at: data.last_study_at ?? totals.last_study_at ?? null
         };
@@ -238,10 +245,10 @@ $(function () {
         const summary = data.summary || {};
         return {
             summary: {
-                total_exams: Number(data.total_exams ?? summary.total_exams ?? summary.total ?? 0),
-                completed_exams: Number(data.completed_exams ?? summary.completed_exams ?? summary.completed ?? 0),
-                in_progress_exams: Number(data.in_progress_exams ?? summary.in_progress_exams ?? summary.in_progress ?? 0),
-                abandoned_exams: Number(data.abandoned_exams ?? summary.abandoned_exams ?? summary.abandoned ?? 0),
+                total_exams: Number(data.total_exams ?? summary.total ?? summary.total_exams ?? 0),
+                completed_exams: Number(data.completed_exams ?? summary.completed ?? summary.completed_exams ?? 0),
+                in_progress_exams: Number(data.in_progress_exams ?? summary.in_progress ?? summary.in_progress_exams ?? 0),
+                abandoned_exams: Number(data.abandoned_exams ?? summary.abandoned ?? summary.abandoned_exams ?? 0),
                 last_exam_at: data.last_exam_at ?? summary.last_exam_at ?? null
             },
             rows: Array.isArray(data.exam_rows) ? data.exam_rows : (Array.isArray(data.attempts) ? data.attempts : [])
@@ -249,8 +256,8 @@ $(function () {
     };
 
     const normalizeUsageData = (data) => ({
-        summary: data.summary_by_feature ?? data.summary ?? {},
-        rows: Array.isArray(data.usage_rows) ? data.usage_rows : (Array.isArray(data.rows) ? data.rows : [])
+        summary: toPlainObject(data.summary_by_feature),
+        rows: toArray(data.usage_rows)
     });
 
     function setLoading(tabId, text = 'Yükleniyor...') {
@@ -262,14 +269,8 @@ $(function () {
         const userInfo = toPlainObject(user);
         const fullName = safeText(userInfo.full_name);
         const email = safeText(userInfo.email);
-        const currentQualification = resolveQualificationName(
-            userInfo.current_qualification_name,
-            toPlainObject(userInfo.current_qualification).name
-        );
-        const targetQualification = resolveQualificationName(
-            userInfo.target_qualification_name,
-            toPlainObject(userInfo.target_qualification).name
-        );
+        const currentQualification = resolveQualificationName(userInfo.current_qualification_name, userInfo.current_qualification_id);
+        const targetQualification = resolveQualificationName(userInfo.target_qualification_name, userInfo.target_qualification_id);
         const premiumSummary = safeDateText(userInfo.premium_expires_at ?? toPlainObject(userInfo.premium).expires_at);
         const lastSignIn = safeDateText(userInfo.last_sign_in_at);
         const totalSolved = fmtInt(summary.total_solved ?? 0);
@@ -311,8 +312,8 @@ $(function () {
         const email = safeText(u.email);
         const pendingEmail = safeText(u.pending_email);
         const emailVerifiedAt = safeDateText(u.email_verified_at);
-        const currentQualification = resolveQualificationName(u.current_qualification_name, toPlainObject(u.current_qualification).name);
-        const targetQualification = resolveQualificationName(u.target_qualification_name, toPlainObject(u.target_qualification).name);
+        const currentQualification = resolveQualificationName(u.current_qualification_name, u.current_qualification_id);
+        const targetQualification = resolveQualificationName(u.target_qualification_name, u.target_qualification_id);
         const createdAt = safeDateText(u.created_at);
         const updatedAt = safeDateText(u.updated_at);
         const lastSignIn = safeDateText(u.last_sign_in_at);
@@ -540,9 +541,7 @@ $(function () {
         const normalized = normalizeUsageData(data || {});
         const summary = normalized.summary;
         const rows = normalized.rows;
-        const summaryRows = Array.isArray(summary)
-            ? summary
-            : Object.keys(toPlainObject(summary)).map((key) => ({ feature_key: key, ...toPlainObject(summary[key]) }));
+        const summaryRows = Object.keys(summary).map((key) => ({ feature_key: key, ...toPlainObject(summary[key]) }));
         const sumRows = hasItems(summaryRows)
             ? summaryRows.map((row) => {
                 const featureName = getDisplayName(row, ['feature_label', 'feature_name', 'feature_key']);
@@ -553,12 +552,12 @@ $(function () {
             : '<tr><td colspan="3" class="text-muted">Özet veri yok.</td></tr>';
         const listRows = hasItems(rows)
             ? rows.map(r => {
-                const usageDate = safeText(r?.usage_date_tr ?? r?.usage_date);
+                const usageDate = safeText(r?.usage_date_tr);
                 const featureKey = getDisplayName(r, ['feature_label', 'feature_name', 'feature_key']);
                 const usedCount = fmtInt(safeNumber(r?.used_count ?? 0));
                 const dailyLimit = safeText(r?.daily_limit);
-                const qualificationName = resolveQualificationName(r?.qualification_name, toPlainObject(r?.qualification).name);
-                const updatedAt = safeDateText(r?.updated_at ?? r?.created_at);
+                const qualificationName = safeText(r?.qualification_name);
+                const updatedAt = safeDateText(r?.updated_at);
                 return `<tr><td>${esc(usageDate)}</td><td>${esc(featureKey)}</td><td>${esc(usedCount)}</td><td>${esc(dailyLimit)}</td><td>${esc(qualificationName)}</td><td>${esc(updatedAt)}</td></tr>`;
             }).join('')
             : '<tr><td colspan="6" class="text-muted">Kayıt yok.</td></tr>';
@@ -583,9 +582,7 @@ $(function () {
         const pushTokens = toArray(data.push_tokens);
         const apiRows = hasItems(apiTokens)
             ? apiTokens.map(r => {
-                const statusLabel = isFilledString(r.status_label)
-                    ? `<span class="badge text-bg-secondary">${esc(r.status_label.trim())}</span>`
-                    : (r.revoked_at ? '<span class="badge text-bg-danger">Pasif</span>' : '<span class="badge text-bg-success">Aktif</span>');
+                const statusLabel = r.revoked_at ? '<span class="badge text-bg-danger">Pasif</span>' : '<span class="badge text-bg-success">Aktif</span>';
                 const createdAt = safeDateText(r.created_at);
                 const expiresAt = safeDateText(r.expires_at);
                 const lastUsedAt = safeDateText(r.last_used_at);
@@ -595,6 +592,8 @@ $(function () {
             : '<tr><td colspan="7" class="text-muted">API token yok.</td></tr>';
         const pushRows = hasItems(pushTokens)
             ? pushTokens.map(r => {
+                const idText = safeText(r.id);
+                const fcmToken = safeText(r.fcm_token);
                 const installationId = safeText(r.installation_id);
                 const deviceName = safeText(r.device_name);
                 const appVersion = safeText(r.app_version);
@@ -602,13 +601,12 @@ $(function () {
                 const platform = safeText(r.platform);
                 const isActive = normalizeBool(r.is_active);
                 const lastSeenAt = safeDateText(r.last_seen_at);
-                const tokenPreview = safeText(r.token_preview, maskToken(r.fcm_token || r.token));
-                const statusLabel = isFilledString(r.status_label)
-                    ? `<span class="badge text-bg-secondary">${esc(r.status_label.trim())}</span>`
-                    : (isActive ? '<span class="badge text-bg-success">Aktif</span>' : '<span class="badge text-bg-secondary">Pasif</span>');
-                return `<tr><td>${esc(installationId)}</td><td>${esc(deviceName)}</td><td>${esc(appVersion)}</td><td>${esc(permissionStatus)}</td><td>${esc(platform)}</td><td>${isActive ? '<span class="badge text-bg-success">Evet</span>' : '<span class="badge text-bg-secondary">Hayır</span>'}</td><td>${esc(lastSeenAt)}</td><td>${esc(tokenPreview)}</td><td>${statusLabel}</td></tr>`;
+                const createdAt = safeDateText(r.created_at);
+                const updatedAt = safeDateText(r.updated_at);
+                const statusLabel = isActive ? '<span class="badge text-bg-success">Aktif</span>' : '<span class="badge text-bg-secondary">Pasif</span>';
+                return `<tr><td>${esc(idText)}</td><td>${esc(maskToken(fcmToken))}</td><td>${esc(installationId)}</td><td>${esc(deviceName)}</td><td>${esc(appVersion)}</td><td>${esc(permissionStatus)}</td><td>${esc(platform)}</td><td>${isActive ? '<span class="badge text-bg-success">Evet</span>' : '<span class="badge text-bg-secondary">Hayır</span>'}</td><td>${esc(lastSeenAt)}</td><td>${esc(createdAt)}</td><td>${esc(updatedAt)}</td><td>${statusLabel}</td></tr>`;
             }).join('')
-            : '<tr><td colspan="9" class="text-muted">Push token yok.</td></tr>';
+            : '<tr><td colspan="12" class="text-muted">Push token yok.</td></tr>';
 
         $('#tab-devices').html(`
             <div class="row g-3">
@@ -616,7 +614,7 @@ $(function () {
                     <div class="card user-soft-card"><div class="card-body table-responsive"><h6>API Tokenları</h6><table class="table table-sm mb-0"><thead><tr><th>ID</th><th>Ad</th><th>Oluşturulma</th><th>Bitiş</th><th>Son Kullanım</th><th>Revoked</th><th>Durum</th></tr></thead><tbody>${apiRows}</tbody></table></div></div>
                 </div>
                 <div class="col-12">
-                    <div class="card user-soft-card"><div class="card-body table-responsive"><h6>Push Tokenları / Cihazlar</h6><table class="table table-sm mb-0"><thead><tr><th>Installation ID</th><th>Cihaz Adı</th><th>Uygulama Sürümü</th><th>İzin Durumu</th><th>Platform</th><th>Aktif</th><th>Son Görülme</th><th>Token Preview</th><th>Durum</th></tr></thead><tbody>${pushRows}</tbody></table></div></div>
+                    <div class="card user-soft-card"><div class="card-body table-responsive"><h6>Push Tokenları / Cihazlar</h6><table class="table table-sm mb-0"><thead><tr><th>ID</th><th>FCM Token</th><th>Installation ID</th><th>Cihaz Adı</th><th>Uygulama Sürümü</th><th>İzin Durumu</th><th>Platform</th><th>Aktif</th><th>Son Görülme</th><th>Oluşturulma</th><th>Güncelleme</th><th>Durum</th></tr></thead><tbody>${pushRows}</tbody></table></div></div>
                 </div>
             </div>
         `);

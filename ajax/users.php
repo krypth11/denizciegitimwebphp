@@ -255,19 +255,63 @@ function users_find_by_id(PDO $pdo, array $schema, $id): ?array
 function users_get_qualification_map(PDO $pdo): array
 {
     if (!users_has_table($pdo, 'qualifications')) {
+        users_debug_log('qualification map skipped: qualifications table not found');
         return [];
     }
 
     $map = [];
     try {
-        $rows = $pdo->query('SELECT id, name FROM qualifications')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $stmt = $pdo->query('SELECT id, name FROM qualifications');
+        if (!$stmt) {
+            users_debug_log('qualification map query returned no statement');
+            return [];
+        }
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if (empty($rows)) {
+            users_debug_log('qualification map query returned empty rows');
+        }
+
         foreach ($rows as $row) {
-            $map[(string)$row['id']] = (string)($row['name'] ?? '-');
+            $id = trim((string)($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+
+            $name = trim((string)($row['name'] ?? ''));
+            $map[$id] = $name;
         }
     } catch (Throwable $e) {
+        users_debug_log('qualification map query failed', [
+            'error' => $e->getMessage(),
+        ]);
+    }
+
+    if (empty($map)) {
+        users_debug_log('qualification map is empty after build');
     }
 
     return $map;
+}
+
+function users_resolve_qualification_label(array $qualificationMap, ?string $qualificationId): string
+{
+    $qid = trim((string)($qualificationId ?? ''));
+    if ($qid === '') {
+        return '-';
+    }
+
+    $name = trim((string)($qualificationMap[$qid] ?? ''));
+    if ($name !== '') {
+        return $name;
+    }
+
+    users_debug_log('qualification name missing in map', [
+        'qualification_id' => $qid,
+        'map_size' => count($qualificationMap),
+    ]);
+
+    return 'Tanımsız Yeterlilik';
 }
 
 function users_feature_daily_limit(string $featureKey): ?int
@@ -502,17 +546,7 @@ function users_log_raw_user_counts(PDO $pdo, string $userId): array
 
 function users_resolve_qualification_name(array $qualificationMap, ?string $qualificationId): string
 {
-    $qid = trim((string)($qualificationId ?? ''));
-    if ($qid === '') {
-        return '';
-    }
-
-    $name = trim((string)($qualificationMap[$qid] ?? ''));
-    if ($name !== '' && $name !== '-') {
-        return $name;
-    }
-
-    return 'Tanımsız Yeterlilik';
+    return users_resolve_qualification_label($qualificationMap, $qualificationId);
 }
 
 function users_q(string $identifier): string
@@ -865,7 +899,11 @@ function users_get_user_study_stats(PDO $pdo, string $userId): array
         }
     }
 
-    $hasEventData = $eventTotal > 0;
+    if ($rawEventRows > 0 && $eventTotal === 0) {
+        $eventTotal = $rawEventRows;
+    }
+
+    $hasEventData = $rawEventRows > 0;
     $totalSolved = $hasEventData ? $eventTotal : $progressTotal;
     $correct = $hasEventData ? $eventCorrect : $progressCorrect;
     $wrong = $hasEventData ? $eventWrong : $progressWrong;
@@ -1056,6 +1094,27 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     }
     unset($attempt);
 
+    if (empty($summaryRows) && !empty($attempts)) {
+        foreach ($attempts as $attempt) {
+            $normalizedStatus = (string)($attempt['status'] ?? 'unknown');
+            $summary['total']++;
+            if ($normalizedStatus === 'completed') {
+                $summary['completed']++;
+            } elseif ($normalizedStatus === 'in_progress') {
+                $summary['in_progress']++;
+            } elseif ($normalizedStatus === 'abandoned') {
+                $summary['abandoned']++;
+            }
+
+            $summary['last_exam_at'] = users_pick_latest_datetime(
+                $summary['last_exam_at'],
+                $attempt['submitted_at'] ?? null,
+                $attempt['abandoned_at'] ?? null,
+                $attempt['started_at'] ?? null
+            );
+        }
+    }
+
     $rawRows = users_count_rows_by_user($pdo, 'mock_exam_attempts', $userId);
     users_debug_log('exam stats computed', [
         'user_id' => $userId,
@@ -1079,9 +1138,13 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
         'exam_rows' => $attempts,
         'summary' => [
             'total' => (int)($summary['total'] ?? 0),
+            'total_exams' => (int)($summary['total'] ?? 0),
             'completed' => (int)($summary['completed'] ?? 0),
+            'completed_exams' => (int)($summary['completed'] ?? 0),
             'in_progress' => (int)($summary['in_progress'] ?? 0),
+            'in_progress_exams' => (int)($summary['in_progress'] ?? 0),
             'abandoned' => (int)($summary['abandoned'] ?? 0),
+            'abandoned_exams' => (int)($summary['abandoned'] ?? 0),
             'last_exam_at' => $summary['last_exam_at'] ?? null,
         ],
         'attempts' => $attempts,
@@ -1092,15 +1155,15 @@ function users_get_user_usage_limits(PDO $pdo, string $userId): array
 {
     if (!users_has_table($pdo, 'user_daily_usage_counters')) {
         return [
-            'summary' => [],
-            'rows' => [],
+            'summary_by_feature' => [],
+            'usage_rows' => [],
         ];
     }
 
     $cols = get_table_columns($pdo, 'user_daily_usage_counters');
     $uid = users_pick_effective_user_fk_column($pdo, 'user_daily_usage_counters', $cols, $userId);
     if (!$uid) {
-        return ['summary' => [], 'rows' => []];
+        return ['summary_by_feature' => [], 'usage_rows' => []];
     }
 
     $featureCol = users_pick_column($cols, ['feature_key'], false);
@@ -1112,7 +1175,7 @@ function users_get_user_usage_limits(PDO $pdo, string $userId): array
     $updatedCol = users_pick_column($cols, ['updated_at'], false);
 
     $select = [];
-    $select[] = $dateCol ? "`{$dateCol}` AS usage_date" : 'NULL AS usage_date';
+    $select[] = $dateCol ? "`{$dateCol}` AS usage_date_tr" : 'NULL AS usage_date_tr';
     $select[] = $featureCol ? "`{$featureCol}` AS feature_key" : 'NULL AS feature_key';
     $select[] = $usedCol ? "`{$usedCol}` AS used_count" : '0 AS used_count';
     $select[] = $dailyLimitCol ? "`{$dailyLimitCol}` AS daily_limit" : 'NULL AS daily_limit';
@@ -1148,7 +1211,7 @@ function users_get_user_usage_limits(PDO $pdo, string $userId): array
 
         $qid = (string)($row['qualification_id'] ?? '');
         $row['qualification_name'] = users_resolve_qualification_name($qMap, $qid);
-        $row['usage_date_tr'] = $row['usage_date'] ?? null;
+        $row['usage_date_tr'] = $row['usage_date_tr'] ?? null;
         $row['daily_limit'] = $detectedDailyLimit;
         $row['used_count'] = (int)($row['used_count'] ?? 0);
     }
@@ -1203,6 +1266,7 @@ function users_get_user_devices(PDO $pdo, string $userId): array
         $cols = get_table_columns($pdo, 'user_push_tokens');
         $uid = users_pick_effective_user_fk_column($pdo, 'user_push_tokens', $cols, $userId);
         if ($uid) {
+            $tokenCol = users_pick_column($cols, ['fcm_token', 'token'], false);
             $platformCol = users_pick_column($cols, ['platform'], false);
             $installationIdCol = users_pick_column($cols, ['installation_id'], false);
             $deviceNameCol = users_pick_column($cols, ['device_name', 'device_id'], false);
@@ -1215,6 +1279,7 @@ function users_get_user_devices(PDO $pdo, string $userId): array
 
             $select = [];
             $select[] = users_pick_column($cols, ['id'], false) ? '`' . users_pick_column($cols, ['id'], false) . '` AS id' : 'NULL AS id';
+            $select[] = $tokenCol ? "`{$tokenCol}` AS fcm_token" : 'NULL AS fcm_token';
             $select[] = $platformCol ? "`{$platformCol}` AS platform" : 'NULL AS platform';
             $select[] = $installationIdCol ? "`{$installationIdCol}` AS installation_id" : 'NULL AS installation_id';
             $select[] = $deviceNameCol ? "`{$deviceNameCol}` AS device_name" : 'NULL AS device_name';
@@ -1512,8 +1577,19 @@ try {
             $status = $isGuest ? 'guest' : ($isPremium ? 'premium_active' : 'registered_free');
 
             $qualificationMap = users_get_qualification_map($pdo);
-            $currentQ = (string)($user['current_qualification_id'] ?? '');
-            $targetQ = (string)($user['target_qualification_id'] ?? '');
+            $currentQ = trim((string)($user['current_qualification_id'] ?? ''));
+            $targetQ = trim((string)($user['target_qualification_id'] ?? ''));
+            $currentQualificationName = users_resolve_qualification_label($qualificationMap, $currentQ);
+            $targetQualificationName = users_resolve_qualification_label($qualificationMap, $targetQ);
+
+            users_debug_log('qualification resolution snapshot', [
+                'user_id' => $id,
+                'current_qualification_id' => $currentQ,
+                'target_qualification_id' => $targetQ,
+                'current_qualification_name' => $currentQualificationName,
+                'target_qualification_name' => $targetQualificationName,
+                'qualification_map_size' => count($qualificationMap),
+            ]);
 
             $studyStats = users_get_user_study_stats($pdo, $id);
             $examStats = users_get_user_exam_stats($pdo, $id);
@@ -1539,9 +1615,9 @@ try {
                     'email_verified_at' => $user['email_verified_at'] ?? null,
                     'onboarding_completed' => users_fmt_bool($user['onboarding_completed'] ?? 0),
                     'current_qualification_id' => $currentQ !== '' ? $currentQ : null,
-                    'current_qualification_name' => users_resolve_qualification_name($qualificationMap, $currentQ),
+                    'current_qualification_name' => $currentQualificationName,
                     'target_qualification_id' => $targetQ !== '' ? $targetQ : null,
-                    'target_qualification_name' => users_resolve_qualification_name($qualificationMap, $targetQ),
+                    'target_qualification_name' => $targetQualificationName,
                     'created_at' => $user['created_at'] ?? null,
                     'updated_at' => $user['updated_at'] ?? null,
                     'last_sign_in_at' => $user['last_sign_in_at'] ?? null,
@@ -1565,14 +1641,14 @@ try {
                     ],
                 ],
                 'kpi' => [
-                    'total_solved' => (int)($studyStats['totals']['total_solved'] ?? 0),
-                    'total_correct' => (int)($studyStats['totals']['total_correct'] ?? $studyStats['totals']['correct'] ?? 0),
-                    'total_wrong' => (int)($studyStats['totals']['total_wrong'] ?? $studyStats['totals']['wrong'] ?? 0),
-                    'correct' => (int)($studyStats['totals']['correct'] ?? 0),
-                    'wrong' => (int)($studyStats['totals']['wrong'] ?? 0),
-                    'success_rate' => (float)($studyStats['totals']['success_rate'] ?? 0),
-                    'total_exams' => (int)($examStats['summary']['total'] ?? 0),
-                    'completed_exams' => (int)($examStats['summary']['completed'] ?? 0),
+                    'total_solved' => (int)($studyStats['total_solved'] ?? 0),
+                    'total_correct' => (int)($studyStats['total_correct'] ?? 0),
+                    'total_wrong' => (int)($studyStats['total_wrong'] ?? 0),
+                    'correct' => (int)($studyStats['total_correct'] ?? 0),
+                    'wrong' => (int)($studyStats['total_wrong'] ?? 0),
+                    'success_rate' => (float)($studyStats['success_rate'] ?? 0),
+                    'total_exams' => (int)($examStats['total_exams'] ?? 0),
+                    'completed_exams' => (int)($examStats['completed_exams'] ?? 0),
                     'premium_active' => $isPremium ? 1 : 0,
                 ],
                 'top_summary' => users_build_top_summary($studyStats, $examStats),
