@@ -129,6 +129,234 @@ function usage_limits_subscription_debug_log(string $message, array $context = [
     error_log($line);
 }
 
+function usage_limits_log_exception(string $message, Throwable $e, array $context = []): void
+{
+    $payload = array_merge($context, [
+        'exception_message' => $e->getMessage(),
+        'exception_file' => $e->getFile(),
+        'exception_line' => $e->getLine(),
+        'exception_trace' => $e->getTraceAsString(),
+    ]);
+
+    error_log('[usage_limits] ' . $message . ' | ' . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+    try {
+        usage_limits_subscription_debug_log($message, $payload);
+    } catch (Throwable $ignored) {
+        // debug logger kendisi başarısız olursa ana akışı bozma
+    }
+}
+
+function usage_limits_revenuecat_verification_enabled(): bool
+{
+    static $enabled = null;
+    if ($enabled !== null) {
+        return $enabled;
+    }
+
+    $apiKey = usage_limits_get_revenuecat_api_key();
+    $enabled = is_string($apiKey) && trim($apiKey) !== '';
+    return $enabled;
+}
+
+function usage_limits_get_revenuecat_api_key(): ?string
+{
+    $constantCandidates = ['REVENUECAT_SECRET_API_KEY', 'RC_SECRET_API_KEY', 'REVENUECAT_API_KEY'];
+    foreach ($constantCandidates as $const) {
+        if (defined($const)) {
+            $value = trim((string)constant($const));
+            if ($value !== '') {
+                return $value;
+            }
+        }
+    }
+
+    $envCandidates = ['REVENUECAT_SECRET_API_KEY', 'RC_SECRET_API_KEY', 'REVENUECAT_API_KEY'];
+    foreach ($envCandidates as $envKey) {
+        $value = trim((string)(getenv($envKey) ?: ''));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    return null;
+}
+
+function usage_limits_http_get_json(string $url, array $headers = [], int $timeoutSeconds = 15): array
+{
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        if ($ch === false) {
+            throw new RuntimeException('HTTP istemcisi başlatılamadı.');
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => min(5, $timeoutSeconds),
+            CURLOPT_TIMEOUT => $timeoutSeconds,
+            CURLOPT_HTTPHEADER => $headers,
+        ]);
+
+        $body = curl_exec($ch);
+        if ($body === false) {
+            $err = curl_error($ch);
+            curl_close($ch);
+            throw new RuntimeException('HTTP isteği başarısız: ' . $err);
+        }
+
+        $statusCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+    } else {
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'header' => implode("\r\n", $headers),
+                'timeout' => $timeoutSeconds,
+                'ignore_errors' => true,
+            ],
+        ]);
+
+        $body = @file_get_contents($url, false, $context);
+        if ($body === false) {
+            throw new RuntimeException('HTTP isteği başarısız (file_get_contents).');
+        }
+
+        $statusCode = 0;
+        if (!empty($http_response_header) && is_array($http_response_header)) {
+            foreach ($http_response_header as $headerLine) {
+                if (preg_match('/^HTTP\/\d+(?:\.\d+)?\s+(\d{3})/i', (string)$headerLine, $m)) {
+                    $statusCode = (int)$m[1];
+                    break;
+                }
+            }
+        }
+    }
+
+    $decoded = json_decode((string)$body, true);
+    if (!is_array($decoded)) {
+        $decoded = [];
+    }
+
+    return [
+        'status_code' => $statusCode,
+        'body' => (string)$body,
+        'json' => $decoded,
+    ];
+}
+
+function usage_limits_extract_revenuecat_truth(array $responseJson, string $rcAppUserId, ?string $preferredEntitlementId = null): array
+{
+    $subscriber = $responseJson['subscriber'] ?? null;
+    if (!is_array($subscriber)) {
+        throw new RuntimeException('RevenueCat yanıtı geçersiz: subscriber alanı yok.');
+    }
+
+    $entitlements = $subscriber['entitlements'] ?? [];
+    if (!is_array($entitlements)) {
+        $entitlements = [];
+    }
+
+    $nowTs = time();
+    $activeEntitlements = [];
+    foreach ($entitlements as $entitlementKey => $entitlementData) {
+        if (!is_array($entitlementData)) {
+            continue;
+        }
+
+        $expiresAt = usage_limits_normalize_datetime_to_mysql($entitlementData['expires_date'] ?? null);
+        $isActive = false;
+        if ($expiresAt === null) {
+            $isActive = true;
+            $expiresAt = '9999-12-31 23:59:59';
+        } else {
+            $expTs = strtotime($expiresAt);
+            $isActive = ($expTs !== false && $expTs > $nowTs);
+        }
+
+        if ($isActive) {
+            $activeEntitlements[] = [
+                'entitlement_id' => (string)$entitlementKey,
+                'expires_at' => $expiresAt,
+                'plan_code' => (($v = trim((string)($entitlementData['product_identifier'] ?? ''))) !== '' ? $v : null),
+            ];
+        }
+    }
+
+    $selected = null;
+    if ($preferredEntitlementId !== null && $preferredEntitlementId !== '') {
+        foreach ($activeEntitlements as $item) {
+            if (($item['entitlement_id'] ?? '') === $preferredEntitlementId) {
+                $selected = $item;
+                break;
+            }
+        }
+    }
+
+    if ($selected === null && !empty($activeEntitlements)) {
+        usort($activeEntitlements, static function (array $a, array $b): int {
+            return strcmp((string)($b['expires_at'] ?? ''), (string)($a['expires_at'] ?? ''));
+        });
+        $selected = $activeEntitlements[0];
+    }
+
+    if ($selected !== null) {
+        return [
+            'source' => 'revenuecat_server',
+            'user_id' => null,
+            'rc_app_user_id' => $rcAppUserId,
+            'is_pro' => true,
+            'is_active' => true,
+            'expires_at' => $selected['expires_at'] ?? null,
+            'plan_code' => $selected['plan_code'] ?? null,
+            'entitlement_id' => $selected['entitlement_id'] ?? $preferredEntitlementId,
+        ];
+    }
+
+    $latestExpiration = usage_limits_normalize_datetime_to_mysql($subscriber['latest_expiration_date'] ?? null);
+
+    return [
+        'source' => 'revenuecat_server',
+        'user_id' => null,
+        'rc_app_user_id' => $rcAppUserId,
+        'is_pro' => false,
+        'is_active' => false,
+        'expires_at' => $latestExpiration,
+        'plan_code' => null,
+        'entitlement_id' => $preferredEntitlementId,
+    ];
+}
+
+function usage_limits_fetch_revenuecat_subscription_truth(string $rcAppUserId, ?string $preferredEntitlementId = null): array
+{
+    $apiKey = usage_limits_get_revenuecat_api_key();
+    if ($apiKey === null || trim($apiKey) === '') {
+        throw new RuntimeException('RevenueCat server verification aktif değil: API key bulunamadı.');
+    }
+
+    $url = 'https://api.revenuecat.com/v1/subscribers/' . rawurlencode($rcAppUserId);
+    $http = usage_limits_http_get_json($url, [
+        'Accept: application/json',
+        'Authorization: Bearer ' . $apiKey,
+    ], 15);
+
+    $statusCode = (int)($http['status_code'] ?? 0);
+    if ($statusCode < 200 || $statusCode >= 300) {
+        throw new RuntimeException('RevenueCat doğrulama isteği başarısız. HTTP=' . $statusCode);
+    }
+
+    $json = is_array($http['json'] ?? null) ? $http['json'] : [];
+    $truth = usage_limits_extract_revenuecat_truth($json, $rcAppUserId, $preferredEntitlementId);
+
+    usage_limits_subscription_debug_log('revenuecat_verified', [
+        'rc_app_user_id' => $rcAppUserId,
+        'preferred_entitlement_id' => $preferredEntitlementId,
+        'status_code' => $statusCode,
+        'truth' => $truth,
+    ]);
+
+    return $truth;
+}
+
 function usage_limits_normalize_datetime_to_mysql($value, bool $allowNull = true): ?string
 {
     if ($value === null) {
