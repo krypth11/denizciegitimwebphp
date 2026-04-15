@@ -271,6 +271,18 @@ try {
         'computed_is_pro' => $computedIsPro,
     ]);
 
+    subscription_sync_debug_log('sync_result_summary', [
+        'authenticated_user_id' => $userId,
+        'request_payload' => $payload,
+        'client_rc_app_user_id' => $clientRcAppUserId,
+        'verification_mode' => $verificationMode,
+        'verification_truth' => $verificationTruth,
+        'before_subscription_row' => usage_limits_normalize_subscription_row($beforeStatus, $userId),
+        'after_subscription_row' => usage_limits_normalize_subscription_row($afterStatus, $userId),
+        'computed_is_pro' => $computedIsPro,
+        'state_changed' => $stateChanged,
+    ]);
+
     subscription_sync_apply_lifecycle($pdo, $userId, $beforeStatus, $afterStatus);
 
     $response = [

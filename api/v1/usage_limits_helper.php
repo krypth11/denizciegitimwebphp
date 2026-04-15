@@ -411,7 +411,12 @@ function usage_limits_fetch_revenuecat_subscription_truth(string $rcAppUserId, ?
     usage_limits_subscription_debug_log('revenuecat_verified', [
         'rc_app_user_id' => $rcAppUserId,
         'preferred_entitlement_id' => $preferredEntitlementId,
-        'status_code' => $statusCode,
+        'response_status' => $statusCode,
+        'response_original_app_user_id' => ($responseOriginalAppUserId !== '' ? $responseOriginalAppUserId : null),
+        'response_app_user_id' => ($responseAppUserId !== '' ? $responseAppUserId : null),
+        'fetched_entitlements' => $fetchedEntitlements,
+        'empty_entitlement' => empty($fetchedEntitlements),
+        'wrong_subscriber_id_suspected' => $wrongSubscriberIdSuspected,
         'truth' => $truth,
     ]);
 
@@ -476,21 +481,55 @@ function usage_limits_normalize_subscription_row(array $row, ?string $fallbackUs
 function usage_limits_is_subscription_active(array $status, ?int $nowTs = null): bool
 {
     $normalized = usage_limits_normalize_subscription_row($status, (string)($status['user_id'] ?? ''));
+    $nowTs = $nowTs ?? time();
+    $expiresAt = $normalized['expires_at'] ?? null;
+    $expiresAtText = trim((string)$expiresAt);
+
     if (empty($normalized['is_pro'])) {
+        usage_limits_subscription_debug_log('is_subscription_active_false', [
+            'user_id' => (string)($normalized['user_id'] ?? ''),
+            'is_pro_field' => false,
+            'expires_at_field' => ($expiresAtText !== '' ? $expiresAtText : null),
+            'expires_at_parse_result' => 'skipped_is_pro_false',
+            'current_utc_time' => gmdate('Y-m-d H:i:s', $nowTs),
+            'final_active_calculation' => false,
+            'reason' => 'is_pro_false',
+        ]);
         return false;
     }
 
-    $expiresAt = $normalized['expires_at'] ?? null;
     if ($expiresAt === null || $expiresAt === '') {
         return true;
     }
 
     $ts = strtotime($expiresAt);
     if ($ts === false) {
+        usage_limits_subscription_debug_log('is_subscription_active_false', [
+            'user_id' => (string)($normalized['user_id'] ?? ''),
+            'is_pro_field' => true,
+            'expires_at_field' => ($expiresAtText !== '' ? $expiresAtText : null),
+            'expires_at_parse_result' => 'invalid_datetime',
+            'current_utc_time' => gmdate('Y-m-d H:i:s', $nowTs),
+            'final_active_calculation' => false,
+            'reason' => 'expires_at_parse_failed',
+        ]);
         return false;
     }
 
-    return $ts > ($nowTs ?? time());
+    $isActive = $ts > $nowTs;
+    if (!$isActive) {
+        usage_limits_subscription_debug_log('is_subscription_active_false', [
+            'user_id' => (string)($normalized['user_id'] ?? ''),
+            'is_pro_field' => true,
+            'expires_at_field' => ($expiresAtText !== '' ? $expiresAtText : null),
+            'expires_at_parse_result' => gmdate('Y-m-d H:i:s', $ts),
+            'current_utc_time' => gmdate('Y-m-d H:i:s', $nowTs),
+            'final_active_calculation' => false,
+            'reason' => 'expired_or_now',
+        ]);
+    }
+
+    return $isActive;
 }
 
 function usage_limits_get_subscription_state_changes(array $before, array $after): array
@@ -586,7 +625,8 @@ function usage_limits_is_user_pro(PDO $pdo, string $userId): bool
             'is_pro_field' => !empty($status['is_pro']),
             'expires_at_field' => ($expiresAtText !== '' ? $expiresAtText : null),
             'expires_at_parse_result' => $expiresAtParseResult,
-            'active_calculation_result' => $isActive,
+            'current_utc_time' => gmdate('Y-m-d H:i:s'),
+            'final_active_calculation' => $isActive,
             'subscription_row' => usage_limits_normalize_subscription_row($status, $userId),
         ]);
     }
