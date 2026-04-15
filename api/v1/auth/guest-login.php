@@ -2,7 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
-require_once dirname(__DIR__, 2) . '/includes/user_lifecycle_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/user_lifecycle_helper.php';
 
 api_require_method('POST');
 

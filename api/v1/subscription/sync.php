@@ -3,7 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/usage_limits_helper.php';
-require_once dirname(__DIR__, 2) . '/includes/user_lifecycle_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/user_lifecycle_helper.php';
 
 api_require_method('POST');
 
@@ -153,11 +153,21 @@ function subscription_sync_apply_lifecycle(PDO $pdo, string $userId, array $befo
 }
 
 try {
+    subscription_sync_debug_log('request_received', [
+        'endpoint' => 'api/v1/subscription/sync.php',
+        'method' => strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')),
+    ]);
+
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
+
+    subscription_sync_debug_log('auth_passed', [
+        'authenticated_user_id' => $userId,
+    ]);
+
     $payload = api_get_request_data();
 
-    subscription_sync_debug_log('request_received', [
+    subscription_sync_debug_log('payload_parsed', [
         'authenticated_user_id' => $userId,
         'payload' => $payload,
         'request_payload' => $payload,
@@ -395,7 +405,7 @@ try {
         }
     }
 
-    subscription_sync_debug_log('computed_effective_state', [
+    subscription_sync_debug_log('effective_state_computed', [
         'authenticated_user_id' => $userId,
         'payload' => $payload,
         'client_rc_app_user_id' => $clientRcAppUserId,
@@ -451,10 +461,63 @@ try {
 
     usage_limits_upsert_subscription_status($pdo, $userId, $effectiveState);
     $afterStatus = usage_limits_get_user_subscription_status($pdo, $userId);
+    $afterRow = usage_limits_normalize_subscription_row($afterStatus, $userId);
+
+    $expectedRow = [
+        'is_pro' => !empty($effectiveState['is_pro']),
+        'entitlement_id' => (($v = trim((string)($effectiveState['entitlement_id'] ?? ''))) !== '' ? $v : null),
+        'rc_app_user_id' => (($v = trim((string)($effectiveState['rc_app_user_id'] ?? ''))) !== '' ? $v : null),
+        'expires_at' => usage_limits_normalize_datetime_to_mysql($effectiveState['expires_at'] ?? null),
+        'last_synced_at' => usage_limits_normalize_datetime_to_mysql($effectiveState['last_synced_at'] ?? null),
+    ];
+
+    $postWriteVerification = [
+        'row_exists' => !empty($afterStatus['exists']),
+        'matched_fields' => [],
+        'mismatched_fields' => [],
+        'expected' => $expectedRow,
+        'actual' => [
+            'is_pro' => !empty($afterRow['is_pro']),
+            'entitlement_id' => $afterRow['entitlement_id'] ?? null,
+            'rc_app_user_id' => $afterRow['rc_app_user_id'] ?? null,
+            'expires_at' => $afterRow['expires_at'] ?? null,
+            'last_synced_at' => $afterRow['last_synced_at'] ?? null,
+        ],
+    ];
+
+    if (!$postWriteVerification['row_exists']) {
+        subscription_sync_debug_log('post_write_verification_missing_row', [
+            'authenticated_user_id' => $userId,
+            'verification_mode' => $verificationMode,
+            'effective_state' => $effectiveState,
+            'expected_row' => $expectedRow,
+        ]);
+
+        throw new RuntimeException('Subscription sync sonrası satır doğrulaması başarısız: kayıt bulunamadı.');
+    }
+
+    foreach (['is_pro', 'entitlement_id', 'rc_app_user_id', 'expires_at', 'last_synced_at'] as $field) {
+        if (($postWriteVerification['expected'][$field] ?? null) === ($postWriteVerification['actual'][$field] ?? null)) {
+            $postWriteVerification['matched_fields'][] = $field;
+        } else {
+            $postWriteVerification['mismatched_fields'][$field] = [
+                'expected' => $postWriteVerification['expected'][$field] ?? null,
+                'actual' => $postWriteVerification['actual'][$field] ?? null,
+            ];
+        }
+    }
+
+    if (!empty($postWriteVerification['mismatched_fields'])) {
+        subscription_sync_debug_log('post_write_verification_field_mismatch', [
+            'authenticated_user_id' => $userId,
+            'verification_mode' => $verificationMode,
+            'post_write_verification' => $postWriteVerification,
+        ]);
+    }
 
     $expectedIsPro = !empty($effectiveState['is_pro']);
     $actualIsPro = ((int)($afterStatus['is_pro'] ?? 0) === 1);
-    $postCheckRow = usage_limits_normalize_subscription_row($afterStatus, $userId);
+    $postCheckRow = $afterRow;
     $postCheckComputedIsPro = usage_limits_is_subscription_active($afterStatus);
 
     subscription_sync_debug_log('subscription_sync_post_check', [
@@ -512,6 +575,7 @@ try {
         'changes' => $changes,
         'computed_is_pro' => $computedIsPro,
         'repaired_or_not' => $repairedOrNot,
+        'post_write_verification' => $postWriteVerification,
     ]);
 
     subscription_sync_debug_log('sync_result_summary', [
@@ -542,11 +606,28 @@ try {
 
     $response = [
         'success' => true,
+        'computed_is_pro' => $computedIsPro,
+        'verification_mode' => $verificationMode,
+        'resolved_rc_app_user_id' => $resolvedRcAppUserId,
+        'after_row' => $afterRow,
+        'state_changed' => $stateChanged,
+        'debug_summary' => [
+            'request_received' => true,
+            'auth_passed' => true,
+            'payload_parsed' => true,
+            'effective_state_computed' => true,
+            'before_upsert' => true,
+            'after_upsert' => true,
+            'post_write_verification' => [
+                'row_exists' => $postWriteVerification['row_exists'],
+                'mismatched_fields' => $postWriteVerification['mismatched_fields'],
+            ],
+        ],
     ];
 
     if (subscription_sync_debug_enabled()) {
         $response['debug'] = [
-            'subscription_row' => usage_limits_normalize_subscription_row($afterStatus, $userId),
+            'subscription_row' => $afterRow,
             'is_active' => (bool)($afterStatus['is_active'] ?? false),
             'expires_at' => $afterStatus['expires_at'] ?? null,
             'rc_app_user_id' => $afterStatus['rc_app_user_id'] ?? ($effectiveState['rc_app_user_id'] ?? null),
@@ -554,8 +635,20 @@ try {
             'computed_is_pro' => $computedIsPro,
             'state_changed' => $stateChanged,
             'verification_mode' => $verificationMode,
+            'post_write_verification' => $postWriteVerification,
         ];
     }
+
+    subscription_sync_debug_log('final_response', [
+        'authenticated_user_id' => $userId,
+        'success' => true,
+        'computed_is_pro' => $computedIsPro,
+        'verification_mode' => $verificationMode,
+        'resolved_rc_app_user_id' => $resolvedRcAppUserId,
+        'state_changed' => $stateChanged,
+        'after_row' => $afterRow,
+        'debug_summary' => $response['debug_summary'],
+    ]);
 
     api_send_json($response, 200);
 } catch (Throwable $e) {
