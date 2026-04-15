@@ -170,16 +170,39 @@ try {
     $clientPlanCode = subscription_sync_parse_optional_string($payload, 'plan_code');
     $clientEntitlementId = subscription_sync_parse_optional_string($payload, 'entitlement_id');
     $clientRcAppUserId = subscription_sync_parse_optional_string($payload, 'rc_app_user_id');
+    $clientCurrentRcAppUserId = subscription_sync_parse_optional_string($payload, 'current_rc_app_user_id');
+    $clientOriginalAppUserId = subscription_sync_parse_optional_string($payload, 'original_app_user_id');
+    $clientLoggedInAppUserId = subscription_sync_parse_optional_string($payload, 'logged_in_app_user_id');
+    $clientProductId = subscription_sync_parse_optional_string($payload, 'product_id');
+    $clientEntitlementActive = subscription_sync_parse_optional_bool($payload, 'entitlement_active');
+    $clientPurchaseSource = subscription_sync_parse_optional_string($payload, 'purchase_source');
     $clientExpiresAt = subscription_sync_parse_expires_at($payload);
-    $clientFallbackEligible = (!empty($clientIsPro));
+    $clientFallbackEligible = (
+        $clientIsPro === true
+        || $clientEntitlementActive === true
+        || !empty($clientProductId)
+    );
     $existingState = usage_limits_normalize_subscription_row($beforeStatus, $userId);
-    $resolvedRcAppUserId = $clientRcAppUserId
-        ?? usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeStatus, [
-            'preferred_rc_app_user_id' => $clientRcAppUserId,
-            'latest_sync_payload' => [
-                'rc_app_user_id' => $clientRcAppUserId,
-            ],
-        ]);
+    $resolverOptions = [
+        'preferred_rc_app_user_id' => $clientCurrentRcAppUserId ?? $clientOriginalAppUserId ?? $clientRcAppUserId ?? $clientLoggedInAppUserId,
+        'current_rc_app_user_id' => $clientCurrentRcAppUserId,
+        'original_app_user_id' => $clientOriginalAppUserId,
+        'rc_app_user_id' => $clientRcAppUserId,
+        'logged_in_app_user_id' => $clientLoggedInAppUserId,
+        'latest_sync_payload' => [
+            'current_rc_app_user_id' => $clientCurrentRcAppUserId,
+            'original_app_user_id' => $clientOriginalAppUserId,
+            'rc_app_user_id' => $clientRcAppUserId,
+            'logged_in_app_user_id' => $clientLoggedInAppUserId,
+        ],
+    ];
+    $rcAppUserIdCandidates = usage_limits_collect_revenuecat_app_user_id_candidates($pdo, $userId, $beforeStatus, $resolverOptions);
+    $resolvedRcAppUserId = $clientCurrentRcAppUserId
+        ?? $clientOriginalAppUserId
+        ?? $clientRcAppUserId
+        ?? $clientLoggedInAppUserId
+        ?? usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeStatus, $resolverOptions);
+    $selectedRcAppUserId = $resolvedRcAppUserId;
 
     $verificationMode = 'client_payload';
     $verificationTruth = null;
@@ -192,6 +215,7 @@ try {
                 $verificationTruth = usage_limits_fetch_revenuecat_subscription_truth($resolvedRcAppUserId, $clientEntitlementId);
                 $verificationMode = 'revenuecat_server';
                 $resolvedRcAppUserId = $verificationTruth['rc_app_user_id'] ?? $resolvedRcAppUserId;
+                $selectedRcAppUserId = $resolvedRcAppUserId;
             } catch (Throwable $verificationError) {
                 $verificationFailed = true;
                 $verificationErrorMessage = $verificationError->getMessage();
@@ -202,10 +226,18 @@ try {
                     'authenticated_user_id' => $userId,
                     'payload' => $payload,
                     'client_rc_app_user_id' => $clientRcAppUserId,
+                    'current_rc_app_user_id' => $clientCurrentRcAppUserId,
+                    'original_app_user_id' => $clientOriginalAppUserId,
+                    'logged_in_app_user_id' => $clientLoggedInAppUserId,
+                    'selected_rc_app_user_id' => $selectedRcAppUserId,
+                    'all_candidate_rc_app_user_ids' => $rcAppUserIdCandidates,
                     'resolved_rc_app_user_id' => $resolvedRcAppUserId,
                     'verification_mode' => $verificationMode,
                     'verification_truth' => null,
                     'client_fallback_eligible' => $clientFallbackEligible,
+                    'product_id' => $clientProductId,
+                    'entitlement_active' => $clientEntitlementActive,
+                    'purchase_source' => $clientPurchaseSource,
                     'error_message' => $verificationError->getMessage(),
                 ]);
             }
@@ -215,7 +247,15 @@ try {
                 'payload' => $payload,
                 'verification_mode' => 'client_payload',
                 'client_rc_app_user_id' => $clientRcAppUserId,
+                'current_rc_app_user_id' => $clientCurrentRcAppUserId,
+                'original_app_user_id' => $clientOriginalAppUserId,
+                'logged_in_app_user_id' => $clientLoggedInAppUserId,
+                'selected_rc_app_user_id' => $selectedRcAppUserId,
+                'all_candidate_rc_app_user_ids' => $rcAppUserIdCandidates,
                 'resolved_rc_app_user_id' => $resolvedRcAppUserId,
+                'product_id' => $clientProductId,
+                'entitlement_active' => $clientEntitlementActive,
+                'purchase_source' => $clientPurchaseSource,
             ]);
         }
     }
@@ -224,17 +264,34 @@ try {
         subscription_sync_validation_error('is_pro zorunludur (RevenueCat doğrulaması yoksa).');
     }
 
+    $clientExpiresAtTs = ($clientExpiresAt !== null ? strtotime($clientExpiresAt) : false);
+    $clientHasFutureExpiry = ($clientExpiresAtTs !== false && $clientExpiresAtTs > time());
+    $clientDerivedPremium = (
+        $clientIsPro === true
+        || $clientEntitlementActive === true
+        || !empty($clientProductId)
+        || $clientHasFutureExpiry
+    );
+
     $effectiveState = [
         'is_pro' => $verificationTruth['is_pro']
-            ?? ($clientIsPro !== null ? (bool)$clientIsPro : (bool)($existingState['is_pro'] ?? false)),
+            ?? ($clientIsPro !== null
+                ? (bool)$clientIsPro
+                : ($clientDerivedPremium
+                    ? true
+                    : (bool)($existingState['is_pro'] ?? false))),
         'plan_code' => $verificationTruth['plan_code']
             ?? $clientPlanCode
+            ?? $clientProductId
             ?? ($existingState['plan_code'] ?? null),
         'entitlement_id' => $verificationTruth['entitlement_id']
             ?? $clientEntitlementId
             ?? ($existingState['entitlement_id'] ?? null),
         'rc_app_user_id' => $verificationTruth['rc_app_user_id']
+            ?? $clientCurrentRcAppUserId
+            ?? $clientOriginalAppUserId
             ?? $clientRcAppUserId
+            ?? $clientLoggedInAppUserId
             ?? ($existingState['rc_app_user_id'] ?? null)
             ?? $resolvedRcAppUserId,
         'expires_at' => $verificationTruth['expires_at']
@@ -257,12 +314,21 @@ try {
         'authenticated_user_id' => $userId,
         'payload' => $payload,
         'client_rc_app_user_id' => $clientRcAppUserId,
+        'current_rc_app_user_id' => $clientCurrentRcAppUserId,
+        'original_app_user_id' => $clientOriginalAppUserId,
+        'logged_in_app_user_id' => $clientLoggedInAppUserId,
+        'selected_rc_app_user_id' => $selectedRcAppUserId,
+        'all_candidate_rc_app_user_ids' => $rcAppUserIdCandidates,
         'resolved_rc_app_user_id' => $resolvedRcAppUserId,
         'verification_mode' => $verificationMode,
         'verification_truth' => $verificationTruth,
         'verification_failed' => $verificationFailed,
         'verification_error_message' => $verificationErrorMessage,
         'client_fallback_eligible' => $clientFallbackEligible,
+        'product_id' => $clientProductId,
+        'entitlement_active' => $clientEntitlementActive,
+        'purchase_source' => $clientPurchaseSource,
+        'client_derived_premium' => $clientDerivedPremium,
         'computed_is_pro' => !empty($effectiveState['is_pro']),
     ]);
 
@@ -270,6 +336,8 @@ try {
         'authenticated_user_id' => $userId,
         'payload' => $payload,
         'verification_mode' => $verificationMode,
+        'selected_rc_app_user_id' => $selectedRcAppUserId,
+        'all_candidate_rc_app_user_ids' => $rcAppUserIdCandidates,
         'resolved_rc_app_user_id' => $resolvedRcAppUserId,
         'before_subscription_row' => usage_limits_normalize_subscription_row($beforeStatus, $userId),
         'client_state' => [
@@ -277,6 +345,12 @@ try {
             'plan_code' => $clientPlanCode,
             'entitlement_id' => $clientEntitlementId,
             'rc_app_user_id' => $clientRcAppUserId,
+            'current_rc_app_user_id' => $clientCurrentRcAppUserId,
+            'original_app_user_id' => $clientOriginalAppUserId,
+            'logged_in_app_user_id' => $clientLoggedInAppUserId,
+            'product_id' => $clientProductId,
+            'entitlement_active' => $clientEntitlementActive,
+            'purchase_source' => $clientPurchaseSource,
             'expires_at' => $clientExpiresAt,
         ],
         'verification_truth' => $verificationTruth,
@@ -294,6 +368,8 @@ try {
     subscription_sync_debug_log('subscription_sync_post_check', [
         'authenticated_user_id' => $userId,
         'verification_mode' => $verificationMode,
+        'selected_rc_app_user_id' => $selectedRcAppUserId,
+        'all_candidate_rc_app_user_ids' => $rcAppUserIdCandidates,
         'effective_state' => $effectiveState,
         'is_pro' => !empty($postCheckRow['is_pro']),
         'entitlement_id' => $postCheckRow['entitlement_id'] ?? null,
@@ -308,6 +384,10 @@ try {
             'verification_mode' => $verificationMode,
             'verification_failed' => $verificationFailed,
             'verification_error_message' => $verificationErrorMessage,
+            'selected_rc_app_user_id' => $selectedRcAppUserId,
+            'all_candidate_rc_app_user_ids' => $rcAppUserIdCandidates,
+            'verification_truth' => $verificationTruth,
+            'effective_state' => $effectiveState,
             'expected_is_pro' => true,
             'actual_is_pro' => false,
             'after_subscription_row' => $postCheckRow,
@@ -323,6 +403,14 @@ try {
     subscription_sync_debug_log('after_upsert', [
         'authenticated_user_id' => $userId,
         'payload' => $payload,
+        'current_rc_app_user_id' => $clientCurrentRcAppUserId,
+        'original_app_user_id' => $clientOriginalAppUserId,
+        'logged_in_app_user_id' => $clientLoggedInAppUserId,
+        'selected_rc_app_user_id' => $selectedRcAppUserId,
+        'all_candidate_rc_app_user_ids' => $rcAppUserIdCandidates,
+        'product_id' => $clientProductId,
+        'entitlement_active' => $clientEntitlementActive,
+        'purchase_source' => $clientPurchaseSource,
         'resolved_rc_app_user_id' => $resolvedRcAppUserId,
         'verification_truth' => $verificationTruth,
         'before_subscription_row' => usage_limits_normalize_subscription_row($beforeStatus, $userId),
@@ -338,6 +426,14 @@ try {
         'payload' => $payload,
         'request_payload' => $payload,
         'client_rc_app_user_id' => $clientRcAppUserId,
+        'current_rc_app_user_id' => $clientCurrentRcAppUserId,
+        'original_app_user_id' => $clientOriginalAppUserId,
+        'logged_in_app_user_id' => $clientLoggedInAppUserId,
+        'selected_rc_app_user_id' => $selectedRcAppUserId,
+        'all_candidate_rc_app_user_ids' => $rcAppUserIdCandidates,
+        'product_id' => $clientProductId,
+        'entitlement_active' => $clientEntitlementActive,
+        'purchase_source' => $clientPurchaseSource,
         'resolved_rc_app_user_id' => $resolvedRcAppUserId,
         'verification_mode' => $verificationMode,
         'verification_truth' => $verificationTruth,

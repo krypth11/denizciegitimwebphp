@@ -663,17 +663,30 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
     $profileMetaCandidates = [];
     $subscriptionCandidates = [];
 
+    $appendCandidate = static function (array &$target, $value): void {
+        $normalized = trim((string)$value);
+        if ($normalized === '' || in_array($normalized, $target, true)) {
+            return;
+        }
+        $target[] = $normalized;
+    };
+
     $preferredRequestRcId = trim((string)($options['preferred_rc_app_user_id'] ?? ''));
     if ($preferredRequestRcId !== '') {
-        $requestCandidates[] = $preferredRequestRcId;
+        $appendCandidate($requestCandidates, $preferredRequestRcId);
     }
+
+    $appendCandidate($requestCandidates, $options['current_rc_app_user_id'] ?? null);
+    $appendCandidate($requestCandidates, $options['original_app_user_id'] ?? null);
+    $appendCandidate($requestCandidates, $options['rc_app_user_id'] ?? null);
+    $appendCandidate($requestCandidates, $options['logged_in_app_user_id'] ?? null);
 
     $latestSyncPayload = $options['latest_sync_payload'] ?? null;
     if (is_array($latestSyncPayload)) {
-        $latestPayloadRcId = trim((string)($latestSyncPayload['rc_app_user_id'] ?? ''));
-        if ($latestPayloadRcId !== '') {
-            $requestCandidates[] = $latestPayloadRcId;
-        }
+        $appendCandidate($requestCandidates, $latestSyncPayload['current_rc_app_user_id'] ?? null);
+        $appendCandidate($requestCandidates, $latestSyncPayload['original_app_user_id'] ?? null);
+        $appendCandidate($requestCandidates, $latestSyncPayload['rc_app_user_id'] ?? null);
+        $appendCandidate($requestCandidates, $latestSyncPayload['logged_in_app_user_id'] ?? null);
     }
 
     $beforeNormalized = usage_limits_normalize_subscription_row($beforeRow, $userId);
@@ -817,7 +830,10 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
         }
     }
 
-    $finalCandidates = array_merge($nonAnonymous, $anonymous);
+    $anonymousSkippedDueToNonAnonymous = !empty($nonAnonymous);
+    $finalCandidates = $anonymousSkippedDueToNonAnonymous
+        ? $nonAnonymous
+        : $anonymous;
 
     usage_limits_subscription_debug_log('resolve_rc_app_user_id_candidates', [
         'user_id' => $userId,
@@ -826,7 +842,7 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
         'subscription_row_candidates' => $subscriptionCandidates,
         'non_anonymous_candidates' => $nonAnonymous,
         'anonymous_candidates' => $anonymous,
-        'anonymous_skipped_due_to_non_anonymous' => false,
+        'anonymous_skipped_due_to_non_anonymous' => $anonymousSkippedDueToNonAnonymous,
         'final_candidates' => $finalCandidates,
     ]);
 
@@ -860,10 +876,34 @@ function usage_limits_try_repair_subscription_status(PDO $pdo, string $userId, a
 {
     $beforeRow = usage_limits_get_user_subscription_status($pdo, $userId);
     $beforeActive = usage_limits_is_subscription_active($beforeRow);
-    $preferredRcAppUserId = trim((string)($context['rc_app_user_id'] ?? ($context['preferred_rc_app_user_id'] ?? '')));
+    $contextCurrentRcAppUserId = trim((string)($context['current_rc_app_user_id'] ?? ''));
+    $contextOriginalAppUserId = trim((string)($context['original_app_user_id'] ?? ''));
+    $contextRcAppUserId = trim((string)($context['rc_app_user_id'] ?? ''));
+    $contextLoggedInAppUserId = trim((string)($context['logged_in_app_user_id'] ?? ''));
+    $preferredRcAppUserId = trim((string)($context['preferred_rc_app_user_id'] ?? ''));
+    if ($preferredRcAppUserId === '') {
+        $preferredRcAppUserId = $contextCurrentRcAppUserId
+            ?: ($contextOriginalAppUserId
+                ?: ($contextRcAppUserId
+                    ?: $contextLoggedInAppUserId));
+    }
     $latestSyncPayload = is_array($context['latest_sync_payload'] ?? null) ? $context['latest_sync_payload'] : null;
+    if (!is_array($latestSyncPayload)) {
+        $latestSyncPayload = [];
+    }
+    $latestSyncPayload = array_merge($latestSyncPayload, [
+        'current_rc_app_user_id' => $latestSyncPayload['current_rc_app_user_id'] ?? ($contextCurrentRcAppUserId !== '' ? $contextCurrentRcAppUserId : null),
+        'original_app_user_id' => $latestSyncPayload['original_app_user_id'] ?? ($contextOriginalAppUserId !== '' ? $contextOriginalAppUserId : null),
+        'rc_app_user_id' => $latestSyncPayload['rc_app_user_id'] ?? ($contextRcAppUserId !== '' ? $contextRcAppUserId : null),
+        'logged_in_app_user_id' => $latestSyncPayload['logged_in_app_user_id'] ?? ($contextLoggedInAppUserId !== '' ? $contextLoggedInAppUserId : null),
+    ]);
+
     $resolvedCandidates = usage_limits_collect_revenuecat_app_user_id_candidates($pdo, $userId, $beforeRow, [
         'preferred_rc_app_user_id' => $preferredRcAppUserId,
+        'current_rc_app_user_id' => ($contextCurrentRcAppUserId !== '' ? $contextCurrentRcAppUserId : null),
+        'original_app_user_id' => ($contextOriginalAppUserId !== '' ? $contextOriginalAppUserId : null),
+        'rc_app_user_id' => ($contextRcAppUserId !== '' ? $contextRcAppUserId : null),
+        'logged_in_app_user_id' => ($contextLoggedInAppUserId !== '' ? $contextLoggedInAppUserId : null),
         'latest_sync_payload' => $latestSyncPayload,
     ]);
 
@@ -874,6 +914,10 @@ function usage_limits_try_repair_subscription_status(PDO $pdo, string $userId, a
         'verified_active' => $beforeActive,
         'rc_app_user_id' => usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeRow, [
             'preferred_rc_app_user_id' => $preferredRcAppUserId,
+            'current_rc_app_user_id' => ($contextCurrentRcAppUserId !== '' ? $contextCurrentRcAppUserId : null),
+            'original_app_user_id' => ($contextOriginalAppUserId !== '' ? $contextOriginalAppUserId : null),
+            'rc_app_user_id' => ($contextRcAppUserId !== '' ? $contextRcAppUserId : null),
+            'logged_in_app_user_id' => ($contextLoggedInAppUserId !== '' ? $contextLoggedInAppUserId : null),
             'latest_sync_payload' => $latestSyncPayload,
         ]),
         'rc_app_user_id_candidates' => $resolvedCandidates,
