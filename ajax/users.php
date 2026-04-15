@@ -37,11 +37,74 @@ function users_pick_column(array $columns, array $candidates, bool $required = t
 
 function users_has_table(PDO $pdo, string $table): bool
 {
+    static $currentDatabase = null;
+    static $tableExistsCache = [];
+    static $loggedTables = [];
+
+    $table = trim($table);
+    if ($table === '') {
+        return false;
+    }
+
+    if (array_key_exists($table, $tableExistsCache)) {
+        return $tableExistsCache[$table];
+    }
+
     try {
-        $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
-        $stmt->execute([$table]);
-        return (bool)$stmt->fetchColumn();
+        if ($currentDatabase === null) {
+            $dbStmt = $pdo->query('SELECT DATABASE()');
+            $currentDatabase = $dbStmt ? trim((string)$dbStmt->fetchColumn()) : '';
+        }
+
+        if ($currentDatabase === '') {
+            $tableExistsCache[$table] = false;
+            return false;
+        }
+
+        $stmt = $pdo->prepare(
+            'SELECT 1
+             FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+             LIMIT 1'
+        );
+        $stmt->execute([$currentDatabase, $table]);
+        $exists = (bool)$stmt->fetchColumn();
+        $tableExistsCache[$table] = $exists;
+
+        $watchedTables = [
+            'qualifications',
+            'question_attempt_events',
+            'mock_exam_attempts',
+            'api_tokens',
+            'user_push_tokens',
+        ];
+        if (in_array($table, $watchedTables, true) && !isset($loggedTables[$table])) {
+            $loggedTables[$table] = true;
+            users_debug_log('users_has_table result', [
+                'table' => $table,
+                'exists' => $exists,
+                'database' => $currentDatabase,
+            ]);
+        }
+
+        return $exists;
     } catch (Throwable $e) {
+        $tableExistsCache[$table] = false;
+        $watchedTables = [
+            'qualifications',
+            'question_attempt_events',
+            'mock_exam_attempts',
+            'api_tokens',
+            'user_push_tokens',
+        ];
+        if (in_array($table, $watchedTables, true) && !isset($loggedTables[$table])) {
+            $loggedTables[$table] = true;
+            users_debug_log('users_has_table failed', [
+                'table' => $table,
+                'database' => $currentDatabase,
+                'error' => $e->getMessage(),
+            ]);
+        }
         return false;
     }
 }
