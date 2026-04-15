@@ -5,6 +5,7 @@ require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/user_lifecycle_helper.php';
+require_once '../api/v1/usage_limits_helper.php';
 
 $authUser = require_admin();
 
@@ -198,22 +199,18 @@ function users_fmt_bool($value): int
 
 function users_is_premium_active(array $subscription): bool
 {
-    $isPro = !empty($subscription['is_pro']) && (int)$subscription['is_pro'] === 1;
-    if (!$isPro) {
-        return false;
-    }
+    return usage_limits_is_subscription_active($subscription);
+}
 
-    $expiresAt = trim((string)($subscription['expires_at'] ?? ''));
-    if ($expiresAt === '') {
-        return true;
-    }
-
-    $ts = strtotime($expiresAt);
-    if ($ts === false) {
-        return false;
-    }
-
-    return $ts > time();
+function users_normalize_subscription_row(array $subscription, ?string $userId = null): array
+{
+    $normalized = usage_limits_normalize_subscription_row($subscription, $userId);
+    $normalized['provider'] = (($v = trim((string)($subscription['provider'] ?? ''))) !== '' ? $v : null);
+    $normalized['last_synced_at'] = usage_limits_normalize_datetime_to_mysql($subscription['last_synced_at'] ?? null);
+    $normalized['created_at'] = usage_limits_normalize_datetime_to_mysql($subscription['created_at'] ?? null);
+    $normalized['updated_at'] = usage_limits_normalize_datetime_to_mysql($subscription['updated_at'] ?? null);
+    $normalized['is_active'] = usage_limits_is_subscription_active($normalized);
+    return $normalized;
 }
 
 function users_detect_guest(array $user, array $schema): bool
@@ -294,7 +291,7 @@ function users_get_subscription_map(PDO $pdo, array $userIds): array
         if ($uid === '' || isset($map[$uid])) {
             continue;
         }
-        $map[$uid] = $row;
+        $map[$uid] = users_normalize_subscription_row($row, $uid);
     }
 
     return $map;

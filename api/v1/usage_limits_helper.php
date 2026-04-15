@@ -2,6 +2,10 @@
 
 require_once __DIR__ . '/auth_helper.php';
 
+if (!defined('USAGE_LIMITS_SUBSCRIPTION_DEBUG_PARAM')) {
+    define('USAGE_LIMITS_SUBSCRIPTION_DEBUG_PARAM', 'debug_subscription_sync');
+}
+
 if (!defined('USAGE_LIMIT_FEATURE_STUDY_QUESTION_OPEN')) {
     define('USAGE_LIMIT_FEATURE_STUDY_QUESTION_OPEN', 'study_question_open');
 }
@@ -94,6 +98,140 @@ function usage_limits_get_daily_limit(string $featureKey): int
     throw new RuntimeException('Geçersiz feature_key: ' . $featureKey);
 }
 
+function usage_limits_subscription_debug_enabled(): bool
+{
+    static $enabled = null;
+    if ($enabled !== null) {
+        return $enabled;
+    }
+
+    $flag = $_GET[USAGE_LIMITS_SUBSCRIPTION_DEBUG_PARAM]
+        ?? $_POST[USAGE_LIMITS_SUBSCRIPTION_DEBUG_PARAM]
+        ?? $_SERVER['HTTP_X_DEBUG_SUBSCRIPTION_SYNC']
+        ?? null;
+
+    $enabled = in_array(strtolower(trim((string)$flag)), ['1', 'true', 'on', 'yes'], true);
+    return $enabled;
+}
+
+function usage_limits_subscription_debug_log(string $message, array $context = []): void
+{
+    if (!usage_limits_subscription_debug_enabled()) {
+        return;
+    }
+
+    $line = '[subscription_sync] ' . $message;
+    if (!empty($context)) {
+        $json = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $line .= ' | ' . ($json !== false ? $json : '{}');
+    }
+
+    error_log($line);
+}
+
+function usage_limits_normalize_datetime_to_mysql($value, bool $allowNull = true): ?string
+{
+    if ($value === null) {
+        return $allowNull ? null : '';
+    }
+
+    if ($value instanceof DateTimeInterface) {
+        $dt = DateTimeImmutable::createFromInterface($value)
+            ->setTimezone(new DateTimeZone('UTC'));
+        return $dt->format('Y-m-d H:i:s');
+    }
+
+    if (is_int($value) || (is_string($value) && preg_match('/^\d{10}(?:\d{3})?$/', trim($value)))) {
+        $raw = (string)$value;
+        $seconds = strlen($raw) > 10 ? ((int)$raw / 1000) : (int)$raw;
+        try {
+            $dt = (new DateTimeImmutable('@' . (string)$seconds))->setTimezone(new DateTimeZone('UTC'));
+            return $dt->format('Y-m-d H:i:s');
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+
+    $text = trim((string)$value);
+    if ($text === '' || $text === '0000-00-00' || $text === '0000-00-00 00:00:00') {
+        return $allowNull ? null : '';
+    }
+
+    try {
+        $dt = new DateTimeImmutable($text);
+        return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+    } catch (Throwable $e) {
+        $ts = strtotime($text);
+        if ($ts === false) {
+            return null;
+        }
+
+        return gmdate('Y-m-d H:i:s', $ts);
+    }
+}
+
+function usage_limits_normalize_subscription_row(array $row, ?string $fallbackUserId = null): array
+{
+    return [
+        'exists' => !empty($row['exists']),
+        'id' => $row['id'] ?? null,
+        'user_id' => (string)($row['user_id'] ?? $fallbackUserId ?? ''),
+        'is_pro' => ((int)($row['is_pro'] ?? 0) === 1),
+        'plan_code' => (($v = trim((string)($row['plan_code'] ?? ''))) !== '' ? $v : null),
+        'entitlement_id' => (($v = trim((string)($row['entitlement_id'] ?? ''))) !== '' ? $v : null),
+        'rc_app_user_id' => (($v = trim((string)($row['rc_app_user_id'] ?? ''))) !== '' ? $v : null),
+        'expires_at' => usage_limits_normalize_datetime_to_mysql($row['expires_at'] ?? null),
+    ];
+}
+
+function usage_limits_is_subscription_active(array $status, ?int $nowTs = null): bool
+{
+    $normalized = usage_limits_normalize_subscription_row($status, (string)($status['user_id'] ?? ''));
+    if (empty($normalized['is_pro'])) {
+        return false;
+    }
+
+    $expiresAt = $normalized['expires_at'] ?? null;
+    if ($expiresAt === null || $expiresAt === '') {
+        return true;
+    }
+
+    $ts = strtotime($expiresAt);
+    if ($ts === false) {
+        return false;
+    }
+
+    return $ts > ($nowTs ?? time());
+}
+
+function usage_limits_get_subscription_state_changes(array $before, array $after): array
+{
+    $normalizedBefore = usage_limits_normalize_subscription_row($before, (string)($before['user_id'] ?? ''));
+    $normalizedAfter = usage_limits_normalize_subscription_row($after, (string)($after['user_id'] ?? ''));
+    $fields = ['is_pro', 'plan_code', 'entitlement_id', 'rc_app_user_id', 'expires_at'];
+    $changes = [];
+
+    foreach ($fields as $field) {
+        if (($normalizedBefore[$field] ?? null) !== ($normalizedAfter[$field] ?? null)) {
+            $changes[$field] = [
+                'before' => $normalizedBefore[$field] ?? null,
+                'after' => $normalizedAfter[$field] ?? null,
+            ];
+        }
+    }
+
+    $beforeActive = usage_limits_is_subscription_active($normalizedBefore);
+    $afterActive = usage_limits_is_subscription_active($normalizedAfter);
+    if ($beforeActive !== $afterActive) {
+        $changes['is_active'] = [
+            'before' => $beforeActive,
+            'after' => $afterActive,
+        ];
+    }
+
+    return $changes;
+}
+
 function usage_limits_get_user_subscription_status(PDO $pdo, string $userId): array
 {
     $s = usage_limits_get_subscription_schema($pdo);
@@ -117,31 +255,26 @@ function usage_limits_get_user_subscription_status(PDO $pdo, string $userId): ar
     $exists = is_array($row) && !empty($row);
     $row = $exists ? $row : [];
 
-    $isPro = ((int)($row['is_pro'] ?? 0) === 1);
-    $expiresAt = $row['expires_at'] ?? null;
-    if ($isPro && is_string($expiresAt) && trim($expiresAt) !== '') {
-        $expiresTs = strtotime($expiresAt);
-        if ($expiresTs !== false && $expiresTs <= time()) {
-            $isPro = false;
-        }
-    }
+    $normalized = usage_limits_normalize_subscription_row($row, $userId);
+    $isActive = usage_limits_is_subscription_active($normalized);
 
     return [
         'exists' => $exists,
         'id' => $row['id'] ?? null,
-        'user_id' => (string)($row['user_id'] ?? $userId),
-        'is_pro' => $isPro,
-        'plan_code' => $row['plan_code'] ?? null,
-        'entitlement_id' => $row['entitlement_id'] ?? null,
-        'rc_app_user_id' => $row['rc_app_user_id'] ?? null,
-        'expires_at' => $row['expires_at'] ?? null,
+        'user_id' => $normalized['user_id'],
+        'is_pro' => $normalized['is_pro'],
+        'plan_code' => $normalized['plan_code'],
+        'entitlement_id' => $normalized['entitlement_id'],
+        'rc_app_user_id' => $normalized['rc_app_user_id'],
+        'expires_at' => $normalized['expires_at'],
+        'is_active' => $isActive,
     ];
 }
 
 function usage_limits_is_user_pro(PDO $pdo, string $userId): bool
 {
     $status = usage_limits_get_user_subscription_status($pdo, $userId);
-    return (bool)($status['is_pro'] ?? false);
+    return usage_limits_is_subscription_active($status);
 }
 
 function usage_limits_upsert_subscription_status(PDO $pdo, string $userId, array $payload): array
@@ -151,11 +284,26 @@ function usage_limits_upsert_subscription_status(PDO $pdo, string $userId, array
     $existing = usage_limits_get_user_subscription_status($pdo, $userId);
     $exists = !empty($existing['exists']);
 
-    $isPro = !empty($payload['is_pro']) ? 1 : 0;
-    $planCode = $payload['plan_code'] ?? null;
-    $entitlementId = $payload['entitlement_id'] ?? null;
-    $rcAppUserId = $payload['rc_app_user_id'] ?? null;
-    $expiresAt = $payload['expires_at'] ?? null;
+    $normalizedPayload = usage_limits_normalize_subscription_row([
+        'exists' => $exists,
+        'user_id' => $userId,
+        'is_pro' => !empty($payload['is_pro']) ? 1 : 0,
+        'plan_code' => $payload['plan_code'] ?? null,
+        'entitlement_id' => $payload['entitlement_id'] ?? null,
+        'rc_app_user_id' => $payload['rc_app_user_id'] ?? null,
+        'expires_at' => $payload['expires_at'] ?? null,
+    ], $userId);
+
+    $changes = usage_limits_get_subscription_state_changes($existing, $normalizedPayload);
+    if ($exists && empty($changes)) {
+        return $existing;
+    }
+
+    $isPro = $normalizedPayload['is_pro'] ? 1 : 0;
+    $planCode = $normalizedPayload['plan_code'];
+    $entitlementId = $normalizedPayload['entitlement_id'];
+    $rcAppUserId = $normalizedPayload['rc_app_user_id'];
+    $expiresAt = $normalizedPayload['expires_at'];
 
     if ($exists) {
         $set = [usage_limits_q($s['is_pro']) . ' = ?'];
@@ -388,10 +536,12 @@ function usage_limits_build_feature_summary(
 function usage_limits_get_summary(PDO $pdo, string $userId, string $qualificationId): array
 {
     $usageDateTr = usage_limits_tr_date();
-    $isPro = usage_limits_is_user_pro($pdo, $userId);
+    $subscription = usage_limits_get_user_subscription_status($pdo, $userId);
+    $isPro = usage_limits_is_subscription_active($subscription);
 
     return [
         'is_pro' => $isPro,
+        'state' => $isPro ? 'premium' : 'free',
         'qualification_id' => $qualificationId,
         'usage_date_tr' => $usageDateTr,
         'study' => usage_limits_build_feature_summary(
