@@ -61,6 +61,7 @@ function usage_limits_get_subscription_schema(PDO $pdo): array
         'entitlement_id' => usage_limits_pick_column($cols, ['entitlement_id'], false),
         'rc_app_user_id' => usage_limits_pick_column($cols, ['rc_app_user_id'], false),
         'expires_at' => usage_limits_pick_column($cols, ['expires_at'], false),
+        'last_synced_at' => usage_limits_pick_column($cols, ['last_synced_at'], false),
         'created_at' => usage_limits_pick_column($cols, ['created_at'], false),
         'updated_at' => usage_limits_pick_column($cols, ['updated_at'], false),
     ];
@@ -521,6 +522,7 @@ function usage_limits_normalize_subscription_row(array $row, ?string $fallbackUs
         'entitlement_id' => (($v = trim((string)($row['entitlement_id'] ?? ''))) !== '' ? $v : null),
         'rc_app_user_id' => (($v = trim((string)($row['rc_app_user_id'] ?? ''))) !== '' ? $v : null),
         'expires_at' => usage_limits_normalize_datetime_to_mysql($row['expires_at'] ?? null),
+        'last_synced_at' => usage_limits_normalize_datetime_to_mysql($row['last_synced_at'] ?? null),
     ];
 }
 
@@ -618,7 +620,8 @@ function usage_limits_get_user_subscription_status(PDO $pdo, string $userId): ar
         . ($s['plan_code'] ? usage_limits_q($s['plan_code']) : 'NULL') . ' AS plan_code, '
         . ($s['entitlement_id'] ? usage_limits_q($s['entitlement_id']) : 'NULL') . ' AS entitlement_id, '
         . ($s['rc_app_user_id'] ? usage_limits_q($s['rc_app_user_id']) : 'NULL') . ' AS rc_app_user_id, '
-        . ($s['expires_at'] ? usage_limits_q($s['expires_at']) : 'NULL') . ' AS expires_at '
+        . ($s['expires_at'] ? usage_limits_q($s['expires_at']) : 'NULL') . ' AS expires_at, '
+        . ($s['last_synced_at'] ? usage_limits_q($s['last_synced_at']) : 'NULL') . ' AS last_synced_at '
         . 'FROM ' . usage_limits_q($s['table'])
         . ' WHERE ' . usage_limits_q($s['user_id']) . ' = ?'
         . ' ORDER BY ' . usage_limits_q($orderCol) . ' DESC LIMIT 1';
@@ -641,6 +644,7 @@ function usage_limits_get_user_subscription_status(PDO $pdo, string $userId): ar
         'entitlement_id' => $normalized['entitlement_id'],
         'rc_app_user_id' => $normalized['rc_app_user_id'],
         'expires_at' => $normalized['expires_at'],
+        'last_synced_at' => $normalized['last_synced_at'],
         'is_active' => $isActive,
     ];
 }
@@ -659,6 +663,12 @@ function usage_limits_is_revenuecat_anonymous_app_user_id(?string $value): bool
 
 function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string $userId, array $beforeRow = [], array $options = []): array
 {
+    $authenticatedAppUserId = trim((string)($options['authenticated_app_user_id'] ?? ''));
+    $loggedInAppUserId = trim((string)($options['logged_in_app_user_id'] ?? ''));
+    $includeAnonymousFallback = !array_key_exists('include_anonymous_fallback', $options)
+        ? true
+        : !empty($options['include_anonymous_fallback']);
+
     $requestCandidates = [];
     $profileMetaCandidates = [];
     $subscriptionCandidates = [];
@@ -674,10 +684,10 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
     $latestSyncPayload = $options['latest_sync_payload'] ?? null;
     if (is_array($latestSyncPayload)) {
         foreach ([
+            'logged_in_app_user_id',
             'current_rc_app_user_id',
             'original_app_user_id',
             'rc_app_user_id',
-            'logged_in_app_user_id',
         ] as $key) {
             $v = trim((string)($latestSyncPayload[$key] ?? ''));
             if ($v !== '') {
@@ -686,15 +696,23 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
         }
     }
 
+    if ($loggedInAppUserId !== '') {
+        $appendCandidate($requestCandidates, $loggedInAppUserId);
+    }
+    if ($authenticatedAppUserId !== '') {
+        $appendCandidate($requestCandidates, $authenticatedAppUserId);
+    }
+
     $preferredRequestRcId = trim((string)($options['preferred_rc_app_user_id'] ?? ''));
     if ($preferredRequestRcId !== '') {
         $appendCandidate($requestCandidates, $preferredRequestRcId);
     }
 
+    $appendCandidate($requestCandidates, $options['logged_in_app_user_id'] ?? null);
+    $appendCandidate($requestCandidates, $options['authenticated_app_user_id'] ?? null);
     $appendCandidate($requestCandidates, $options['current_rc_app_user_id'] ?? null);
     $appendCandidate($requestCandidates, $options['original_app_user_id'] ?? null);
     $appendCandidate($requestCandidates, $options['rc_app_user_id'] ?? null);
-    $appendCandidate($requestCandidates, $options['logged_in_app_user_id'] ?? null);
 
     $beforeNormalized = usage_limits_normalize_subscription_row($beforeRow, $userId);
     if (!empty($beforeNormalized['rc_app_user_id'])) {
@@ -837,16 +855,21 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
         }
     }
 
-    $anonymousSkippedDueToNonAnonymous = false;
-    $finalCandidates = array_merge($nonAnonymous, $anonymous);
+    $anonymousSkippedDueToNonAnonymous = (!empty($nonAnonymous) && !empty($anonymous));
+    $finalCandidates = $includeAnonymousFallback
+        ? array_merge($nonAnonymous, $anonymous)
+        : $nonAnonymous;
 
     usage_limits_subscription_debug_log('resolve_rc_app_user_id_candidates', [
         'user_id' => $userId,
+        'authenticated_app_user_id' => ($authenticatedAppUserId !== '' ? $authenticatedAppUserId : null),
+        'logged_in_app_user_id' => ($loggedInAppUserId !== '' ? $loggedInAppUserId : null),
         'request_or_latest_sync_candidates' => $requestCandidates,
         'profile_meta_candidates' => $profileMetaCandidates,
         'subscription_row_candidates' => $subscriptionCandidates,
         'non_anonymous_candidates' => $nonAnonymous,
         'anonymous_candidates' => $anonymous,
+        'include_anonymous_fallback' => $includeAnonymousFallback,
         'anonymous_skipped_due_to_non_anonymous' => $anonymousSkippedDueToNonAnonymous,
         'final_candidates' => $finalCandidates,
     ]);
@@ -857,6 +880,10 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
 function usage_limits_resolve_revenuecat_app_user_id(PDO $pdo, string $userId, array $beforeRow = [], array $options = []): ?string
 {
     $candidates = usage_limits_collect_revenuecat_app_user_id_candidates($pdo, $userId, $beforeRow, $options);
+    $authenticatedAppUserId = trim((string)($options['authenticated_app_user_id'] ?? ''));
+    $loggedInAppUserId = trim((string)($options['logged_in_app_user_id'] ?? ''));
+    $enforceNonAnonymousForAuthenticated = !empty($options['enforce_non_anonymous_for_authenticated']);
+    $hasAuthenticatedIdentity = ($authenticatedAppUserId !== '' || $loggedInAppUserId !== '');
 
     $firstAnonymous = null;
     foreach ($candidates as $candidate) {
@@ -874,6 +901,10 @@ function usage_limits_resolve_revenuecat_app_user_id(PDO $pdo, string $userId, a
         }
     }
 
+    if ($enforceNonAnonymousForAuthenticated && $hasAuthenticatedIdentity) {
+        return null;
+    }
+
     return $firstAnonymous;
 }
 
@@ -885,12 +916,14 @@ function usage_limits_try_repair_subscription_status(PDO $pdo, string $userId, a
     $contextOriginalAppUserId = trim((string)($context['original_app_user_id'] ?? ''));
     $contextRcAppUserId = trim((string)($context['rc_app_user_id'] ?? ''));
     $contextLoggedInAppUserId = trim((string)($context['logged_in_app_user_id'] ?? ''));
+    $contextAuthenticatedAppUserId = trim((string)($context['authenticated_app_user_id'] ?? $userId));
     $preferredRcAppUserId = trim((string)($context['preferred_rc_app_user_id'] ?? ''));
     if ($preferredRcAppUserId === '') {
-        $preferredRcAppUserId = $contextCurrentRcAppUserId
+        $preferredRcAppUserId = $contextLoggedInAppUserId
+            ?: ($contextAuthenticatedAppUserId
+                ?: ($contextCurrentRcAppUserId
             ?: ($contextOriginalAppUserId
-                ?: ($contextRcAppUserId
-                    ?: $contextLoggedInAppUserId));
+                ?: $contextRcAppUserId)));
     }
     $latestSyncPayload = is_array($context['latest_sync_payload'] ?? null) ? $context['latest_sync_payload'] : null;
     if (!is_array($latestSyncPayload)) {
@@ -904,6 +937,7 @@ function usage_limits_try_repair_subscription_status(PDO $pdo, string $userId, a
     ]);
 
     $resolvedCandidates = usage_limits_collect_revenuecat_app_user_id_candidates($pdo, $userId, $beforeRow, [
+        'authenticated_app_user_id' => ($contextAuthenticatedAppUserId !== '' ? $contextAuthenticatedAppUserId : null),
         'preferred_rc_app_user_id' => $preferredRcAppUserId,
         'current_rc_app_user_id' => ($contextCurrentRcAppUserId !== '' ? $contextCurrentRcAppUserId : null),
         'original_app_user_id' => ($contextOriginalAppUserId !== '' ? $contextOriginalAppUserId : null),
@@ -918,11 +952,13 @@ function usage_limits_try_repair_subscription_status(PDO $pdo, string $userId, a
         'repaired' => false,
         'verified_active' => $beforeActive,
         'rc_app_user_id' => usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeRow, [
+            'authenticated_app_user_id' => ($contextAuthenticatedAppUserId !== '' ? $contextAuthenticatedAppUserId : null),
             'preferred_rc_app_user_id' => $preferredRcAppUserId,
             'current_rc_app_user_id' => ($contextCurrentRcAppUserId !== '' ? $contextCurrentRcAppUserId : null),
             'original_app_user_id' => ($contextOriginalAppUserId !== '' ? $contextOriginalAppUserId : null),
             'rc_app_user_id' => ($contextRcAppUserId !== '' ? $contextRcAppUserId : null),
             'logged_in_app_user_id' => ($contextLoggedInAppUserId !== '' ? $contextLoggedInAppUserId : null),
+            'enforce_non_anonymous_for_authenticated' => true,
             'latest_sync_payload' => $latestSyncPayload,
         ]),
         'rc_app_user_id_candidates' => $resolvedCandidates,
@@ -1083,10 +1119,12 @@ function usage_limits_upsert_subscription_status(PDO $pdo, string $userId, array
         'entitlement_id' => $payload['entitlement_id'] ?? null,
         'rc_app_user_id' => $payload['rc_app_user_id'] ?? null,
         'expires_at' => $payload['expires_at'] ?? null,
+        'last_synced_at' => usage_limits_normalize_datetime_to_mysql($payload['last_synced_at'] ?? null) ?? gmdate('Y-m-d H:i:s'),
     ], $userId);
 
     $changes = usage_limits_get_subscription_state_changes($existing, $normalizedPayload);
-    if ($exists && empty($changes)) {
+    $shouldTouchLastSyncedAt = (!empty($s['last_synced_at']) && array_key_exists('last_synced_at', $payload));
+    if ($exists && empty($changes) && !$shouldTouchLastSyncedAt) {
         return $existing;
     }
 
@@ -1115,6 +1153,9 @@ function usage_limits_upsert_subscription_status(PDO $pdo, string $userId, array
         if ($s['expires_at']) {
             $set[] = usage_limits_q($s['expires_at']) . ' = ?';
             $params[] = $expiresAt;
+        }
+        if ($s['last_synced_at']) {
+            $set[] = usage_limits_q($s['last_synced_at']) . ' = NOW()';
         }
         if ($s['updated_at']) {
             $set[] = usage_limits_q($s['updated_at']) . ' = NOW()';
@@ -1159,6 +1200,10 @@ function usage_limits_upsert_subscription_status(PDO $pdo, string $userId, array
             $vals[] = '?';
             $params[] = $expiresAt;
         }
+        if ($s['last_synced_at']) {
+            $cols[] = usage_limits_q($s['last_synced_at']);
+            $vals[] = 'NOW()';
+        }
         if ($s['created_at']) {
             $cols[] = usage_limits_q($s['created_at']);
             $vals[] = 'NOW()';
@@ -1174,7 +1219,37 @@ function usage_limits_upsert_subscription_status(PDO $pdo, string $userId, array
         $stmt->execute($params);
     }
 
-    return usage_limits_get_user_subscription_status($pdo, $userId);
+    $after = usage_limits_get_user_subscription_status($pdo, $userId);
+    $expected = usage_limits_normalize_subscription_row($normalizedPayload, $userId);
+    $actual = usage_limits_normalize_subscription_row($after, $userId);
+
+    $postWriteMismatches = [];
+    foreach (['is_pro', 'entitlement_id', 'expires_at', 'rc_app_user_id'] as $field) {
+        if (($expected[$field] ?? null) !== ($actual[$field] ?? null)) {
+            $postWriteMismatches[$field] = [
+                'expected' => $expected[$field] ?? null,
+                'actual' => $actual[$field] ?? null,
+            ];
+        }
+    }
+
+    if (!empty($postWriteMismatches)) {
+        usage_limits_subscription_debug_log('subscription_status_post_write_mismatch', [
+            'user_id' => $userId,
+            'payload' => [
+                'is_pro' => !empty($payload['is_pro']),
+                'plan_code' => $payload['plan_code'] ?? null,
+                'entitlement_id' => $payload['entitlement_id'] ?? null,
+                'rc_app_user_id' => $payload['rc_app_user_id'] ?? null,
+                'expires_at' => $payload['expires_at'] ?? null,
+            ],
+            'expected_row' => $expected,
+            'after_row' => $actual,
+            'mismatches' => $postWriteMismatches,
+        ]);
+    }
+
+    return $after;
 }
 
 function usage_limits_get_or_create_counter(

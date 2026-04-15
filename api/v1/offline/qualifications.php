@@ -18,13 +18,19 @@ try {
         'after' => $afterRow,
         'repaired' => false,
         'verified_active' => false,
-        'rc_app_user_id' => usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeRow),
+        'rc_app_user_id' => usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeRow, [
+            'authenticated_app_user_id' => $userId,
+            'logged_in_app_user_id' => $userId,
+            'enforce_non_anonymous_for_authenticated' => true,
+        ]),
         'rc_app_user_id_candidates' => [],
     ];
     $computedIsPro = usage_limits_is_subscription_active($subscriptionStatus);
 
     if (!$computedIsPro) {
         $repair = usage_limits_try_repair_subscription_status($pdo, $userId, [
+            'authenticated_app_user_id' => $userId,
+            'logged_in_app_user_id' => $userId,
             'preferred_rc_app_user_id' => $repair['rc_app_user_id'] ?? null,
         ]);
         $subscriptionStatus = is_array($repair['after'] ?? null) ? $repair['after'] : $subscriptionStatus;
