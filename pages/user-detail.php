@@ -378,10 +378,23 @@ $(function () {
         const summary = normalized.summary;
         const rows = normalized.rows;
         const sumRows = Object.keys(summary).length
-            ? Object.keys(summary).map(k => `<tr><td>${esc(k)}</td><td>${esc(fmtInt(summary[k]?.used_count ?? summary[k]?.total_used || 0))}</td><td>${esc(summary[k]?.daily_limit ?? '-')}</td></tr>`).join('')
+            ? Object.keys(summary).map(k => {
+                const item = summary[k] || {};
+                const usedValue = item?.used_count ?? item?.total_used ?? 0;
+                const dailyLimit = item?.daily_limit ?? '-';
+                return `<tr><td>${esc(k)}</td><td>${esc(fmtInt(usedValue))}</td><td>${esc(dailyLimit)}</td></tr>`;
+            }).join('')
             : '<tr><td colspan="3" class="text-muted">Özet veri yok.</td></tr>';
         const listRows = rows.length
-            ? rows.map(r => `<tr><td>${esc(r.usage_date_tr || r.usage_date || '-')}</td><td>${esc(r.feature_key || '-')}</td><td>${esc(fmtInt(r.used_count || 0))}</td><td>${esc(r.daily_limit ?? '-')}</td><td>${esc(r.qualification_name || '-')}</td><td>${esc(fmtDate(r.updated_at || r.created_at))}</td></tr>`).join('')
+            ? rows.map(r => {
+                const usageDate = r?.usage_date_tr || r?.usage_date || '-';
+                const featureKey = r?.feature_key || '-';
+                const usedCount = r?.used_count || 0;
+                const dailyLimit = r?.daily_limit ?? '-';
+                const qualificationName = r?.qualification_name || '-';
+                const updatedAt = r?.updated_at || r?.created_at || null;
+                return `<tr><td>${esc(usageDate)}</td><td>${esc(featureKey)}</td><td>${esc(fmtInt(usedCount))}</td><td>${esc(dailyLimit)}</td><td>${esc(qualificationName)}</td><td>${esc(fmtDate(updatedAt))}</td></tr>`;
+            }).join('')
             : '<tr><td colspan="6" class="text-muted">Kayıt yok.</td></tr>';
 
         $('#tab-usage').html(`
@@ -506,30 +519,34 @@ $(function () {
     }
 
     async function loadDetail() {
-        if (!userId) {
-            await appAlert('Hata', 'Geçersiz kullanıcı id.', 'error');
-            window.location.href = 'users.php';
-            return;
-        }
+        try {
+            if (!userId) {
+                await appAlert('Hata', 'Geçersiz kullanıcı id.', 'error');
+                window.location.href = 'users.php';
+                return;
+            }
 
-        setLoading('#tab-general', 'Kullanıcı detayı yükleniyor...');
-        const res = await api('get_user_detail', 'GET', { user_id: userId });
-        if (!res.success) {
-            await appAlert('Hata', res.message || 'Kullanıcı detayı alınamadı.', 'error');
-            window.location.href = 'users.php';
-            return;
-        }
+            setLoading('#tab-general', 'Kullanıcı detayı yükleniyor...');
+            const res = await api('get_user_detail', 'GET', { user_id: userId });
+            if (!res.success) {
+                await appAlert('Hata', res.message || 'Kullanıcı detayı alınamadı.', 'error');
+                window.location.href = 'users.php';
+                return;
+            }
 
-        detailData = res.data || {};
-        noteList = detailData.admin_notes || [];
-        renderTopSummary(detailData.user || {}, detailData.kpi || {});
-        renderGeneral();
+            detailData = res.data || {};
+            noteList = detailData.admin_notes || [];
+            renderTopSummary(detailData.user || {}, detailData.kpi || {});
+            renderGeneral();
 
-        if (!loadedTabs.study) {
-            await loadTab('study');
-        }
-        if (!loadedTabs.exams) {
-            await loadTab('exams');
+            if (!loadedTabs.study) {
+                await loadTab('study');
+            }
+            if (!loadedTabs.exams) {
+                await loadTab('exams');
+            }
+        } catch (err) {
+            console.error('[user-detail] loadDetail failed', err);
         }
     }
 
@@ -612,7 +629,9 @@ $(function () {
         await appAlert('Başarılı', res.message || 'Not kaydedildi.', 'success');
     });
 
-    loadDetail();
+    loadDetail().catch(err => {
+        console.error('[user-detail] initial load failed', err);
+    });
 });
 </script>
 
