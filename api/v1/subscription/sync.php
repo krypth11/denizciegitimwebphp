@@ -159,6 +159,7 @@ try {
 
     subscription_sync_debug_log('request_received', [
         'authenticated_user_id' => $userId,
+        'payload' => $payload,
         'request_payload' => $payload,
         'server_side_verification_enabled' => usage_limits_revenuecat_verification_enabled(),
     ]);
@@ -170,19 +171,24 @@ try {
     $clientEntitlementId = subscription_sync_parse_optional_string($payload, 'entitlement_id');
     $clientRcAppUserId = subscription_sync_parse_optional_string($payload, 'rc_app_user_id');
     $clientExpiresAt = subscription_sync_parse_expires_at($payload);
+    $resolvedRcAppUserId = $clientRcAppUserId
+        ?? usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeStatus);
 
     $verificationMode = 'client_payload';
     $verificationTruth = null;
 
     if (usage_limits_revenuecat_verification_enabled()) {
-        if ($clientRcAppUserId !== null) {
+        if ($resolvedRcAppUserId !== null) {
             try {
-                $verificationTruth = usage_limits_fetch_revenuecat_subscription_truth($clientRcAppUserId, $clientEntitlementId);
+                $verificationTruth = usage_limits_fetch_revenuecat_subscription_truth($resolvedRcAppUserId, $clientEntitlementId);
                 $verificationMode = 'revenuecat_server';
+                $resolvedRcAppUserId = $verificationTruth['rc_app_user_id'] ?? $resolvedRcAppUserId;
             } catch (Throwable $verificationError) {
                 subscription_sync_debug_log('revenuecat_verification_unavailable', [
                     'authenticated_user_id' => $userId,
+                    'payload' => $payload,
                     'client_rc_app_user_id' => $clientRcAppUserId,
+                    'resolved_rc_app_user_id' => $resolvedRcAppUserId,
                     'verification_mode' => 'revenuecat_server',
                     'verification_truth' => null,
                     'error_message' => $verificationError->getMessage(),
@@ -192,8 +198,10 @@ try {
         } else {
             subscription_sync_debug_log('revenuecat_verification_skipped_missing_rc_app_user_id', [
                 'authenticated_user_id' => $userId,
+                'payload' => $payload,
                 'verification_mode' => 'client_payload',
                 'client_rc_app_user_id' => $clientRcAppUserId,
+                'resolved_rc_app_user_id' => $resolvedRcAppUserId,
             ]);
         }
     }
@@ -206,7 +214,7 @@ try {
         'is_pro' => $verificationTruth['is_pro'] ?? (bool)$clientIsPro,
         'plan_code' => $verificationTruth['plan_code'] ?? $clientPlanCode,
         'entitlement_id' => $verificationTruth['entitlement_id'] ?? $clientEntitlementId,
-        'rc_app_user_id' => $verificationTruth['rc_app_user_id'] ?? $clientRcAppUserId,
+        'rc_app_user_id' => $verificationTruth['rc_app_user_id'] ?? $resolvedRcAppUserId,
         'expires_at' => $verificationTruth['expires_at'] ?? $clientExpiresAt,
     ];
 
@@ -216,7 +224,9 @@ try {
 
     subscription_sync_debug_log('computed_effective_state', [
         'authenticated_user_id' => $userId,
+        'payload' => $payload,
         'client_rc_app_user_id' => $clientRcAppUserId,
+        'resolved_rc_app_user_id' => $resolvedRcAppUserId,
         'verification_mode' => $verificationMode,
         'verification_truth' => $verificationTruth,
         'computed_is_pro' => !empty($effectiveState['is_pro']),
@@ -224,7 +234,9 @@ try {
 
     subscription_sync_debug_log('before_upsert', [
         'authenticated_user_id' => $userId,
+        'payload' => $payload,
         'verification_mode' => $verificationMode,
+        'resolved_rc_app_user_id' => $resolvedRcAppUserId,
         'before_subscription_row' => usage_limits_normalize_subscription_row($beforeStatus, $userId),
         'client_state' => [
             'is_pro' => $clientIsPro,
@@ -262,24 +274,34 @@ try {
     $changes = usage_limits_get_subscription_state_changes($beforeStatus, $afterStatus);
     $stateChanged = !empty($changes);
     $computedIsPro = usage_limits_is_subscription_active($afterStatus);
+    $beforeComputedIsPro = usage_limits_is_subscription_active($beforeStatus);
+    $repairedOrNot = (!$beforeComputedIsPro && $computedIsPro);
 
     subscription_sync_debug_log('after_upsert', [
         'authenticated_user_id' => $userId,
+        'payload' => $payload,
+        'resolved_rc_app_user_id' => $resolvedRcAppUserId,
+        'verification_truth' => $verificationTruth,
+        'before_subscription_row' => usage_limits_normalize_subscription_row($beforeStatus, $userId),
         'after_subscription_row' => usage_limits_normalize_subscription_row($afterStatus, $userId),
         'state_changed' => $stateChanged,
         'changes' => $changes,
         'computed_is_pro' => $computedIsPro,
+        'repaired_or_not' => $repairedOrNot,
     ]);
 
     subscription_sync_debug_log('sync_result_summary', [
         'authenticated_user_id' => $userId,
+        'payload' => $payload,
         'request_payload' => $payload,
         'client_rc_app_user_id' => $clientRcAppUserId,
+        'resolved_rc_app_user_id' => $resolvedRcAppUserId,
         'verification_mode' => $verificationMode,
         'verification_truth' => $verificationTruth,
         'before_subscription_row' => usage_limits_normalize_subscription_row($beforeStatus, $userId),
         'after_subscription_row' => usage_limits_normalize_subscription_row($afterStatus, $userId),
         'computed_is_pro' => $computedIsPro,
+        'repaired_or_not' => $repairedOrNot,
         'state_changed' => $stateChanged,
     ]);
 

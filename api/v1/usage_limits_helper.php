@@ -335,6 +335,7 @@ function usage_limits_fetch_revenuecat_subscription_truth(string $rcAppUserId, ?
 
     $url = 'https://api.revenuecat.com/v1/subscribers/' . rawurlencode($rcAppUserId);
     usage_limits_subscription_debug_log('revenuecat_verification_request', [
+        'request_app_user_id' => $rcAppUserId,
         'rc_app_user_id' => $rcAppUserId,
         'preferred_entitlement_id' => $preferredEntitlementId,
         'url' => $url,
@@ -376,15 +377,38 @@ function usage_limits_fetch_revenuecat_subscription_truth(string $rcAppUserId, ?
         ];
     }
 
+    $activeEntitlementExists = false;
+    $nowTs = time();
+    foreach ($fetchedEntitlements as $entitlementRow) {
+        $exp = $entitlementRow['expires_date'] ?? null;
+        if ($exp === null || $exp === '') {
+            $activeEntitlementExists = true;
+            break;
+        }
+
+        $expTs = strtotime((string)$exp);
+        if ($expTs !== false && $expTs > $nowTs) {
+            $activeEntitlementExists = true;
+            break;
+        }
+    }
+
     if ($statusCode < 200 || $statusCode >= 300) {
         usage_limits_subscription_debug_log('revenuecat_verification_failed', [
+            'request_app_user_id' => $rcAppUserId,
             'rc_app_user_id' => $rcAppUserId,
             'preferred_entitlement_id' => $preferredEntitlementId,
             'response_status' => $statusCode,
             'wrong_subscriber_id_suspected' => $wrongSubscriberIdSuspected || ($statusCode === 404),
             'response_original_app_user_id' => ($responseOriginalAppUserId !== '' ? $responseOriginalAppUserId : null),
+            'response_subscriber_app_user_id' => ($responseAppUserId !== '' ? $responseAppUserId : null),
             'response_app_user_id' => ($responseAppUserId !== '' ? $responseAppUserId : null),
             'empty_entitlement' => empty($fetchedEntitlements),
+            'entitlements' => $fetchedEntitlements,
+            'expires_dates' => array_values(array_map(static function (array $row) {
+                return $row['expires_date'] ?? null;
+            }, $fetchedEntitlements)),
+            'active_entitlement_exists' => $activeEntitlementExists,
             'fetched_entitlements' => $fetchedEntitlements,
             'response_body_preview' => mb_substr((string)($http['body'] ?? ''), 0, 2000),
         ]);
@@ -396,24 +420,38 @@ function usage_limits_fetch_revenuecat_subscription_truth(string $rcAppUserId, ?
 
     if (empty($truth['is_pro'])) {
         usage_limits_subscription_debug_log('revenuecat_verification_no_active_entitlement', [
+            'request_app_user_id' => $rcAppUserId,
             'rc_app_user_id' => $rcAppUserId,
             'preferred_entitlement_id' => $preferredEntitlementId,
             'response_status' => $statusCode,
             'wrong_subscriber_id_suspected' => $wrongSubscriberIdSuspected,
             'response_original_app_user_id' => ($responseOriginalAppUserId !== '' ? $responseOriginalAppUserId : null),
+            'response_subscriber_app_user_id' => ($responseAppUserId !== '' ? $responseAppUserId : null),
             'response_app_user_id' => ($responseAppUserId !== '' ? $responseAppUserId : null),
             'empty_entitlement' => empty($fetchedEntitlements),
+            'entitlements' => $fetchedEntitlements,
+            'expires_dates' => array_values(array_map(static function (array $row) {
+                return $row['expires_date'] ?? null;
+            }, $fetchedEntitlements)),
+            'active_entitlement_exists' => $activeEntitlementExists,
             'fetched_entitlements' => $fetchedEntitlements,
             'truth' => $truth,
         ]);
     }
 
     usage_limits_subscription_debug_log('revenuecat_verified', [
+        'request_app_user_id' => $rcAppUserId,
         'rc_app_user_id' => $rcAppUserId,
         'preferred_entitlement_id' => $preferredEntitlementId,
         'response_status' => $statusCode,
         'response_original_app_user_id' => ($responseOriginalAppUserId !== '' ? $responseOriginalAppUserId : null),
+        'response_subscriber_app_user_id' => ($responseAppUserId !== '' ? $responseAppUserId : null),
         'response_app_user_id' => ($responseAppUserId !== '' ? $responseAppUserId : null),
+        'entitlements' => $fetchedEntitlements,
+        'expires_dates' => array_values(array_map(static function (array $row) {
+            return $row['expires_date'] ?? null;
+        }, $fetchedEntitlements)),
+        'active_entitlement_exists' => $activeEntitlementExists,
         'fetched_entitlements' => $fetchedEntitlements,
         'empty_entitlement' => empty($fetchedEntitlements),
         'wrong_subscriber_id_suspected' => $wrongSubscriberIdSuspected,
@@ -597,6 +635,231 @@ function usage_limits_get_user_subscription_status(PDO $pdo, string $userId): ar
         'expires_at' => $normalized['expires_at'],
         'is_active' => $isActive,
     ];
+}
+
+function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string $userId, array $beforeRow = []): array
+{
+    $candidates = [];
+
+    $beforeNormalized = usage_limits_normalize_subscription_row($beforeRow, $userId);
+    if (!empty($beforeNormalized['rc_app_user_id'])) {
+        $candidates[] = (string)$beforeNormalized['rc_app_user_id'];
+    }
+
+    try {
+        $s = usage_limits_get_subscription_schema($pdo);
+        if (!empty($s['rc_app_user_id'])) {
+            $orderCol = $s['updated_at'] ?: ($s['created_at'] ?: ($s['id'] ?: $s['user_id']));
+            $sql = 'SELECT ' . usage_limits_q($s['rc_app_user_id']) . ' AS rc_app_user_id '
+                . 'FROM ' . usage_limits_q($s['table'])
+                . ' WHERE ' . usage_limits_q($s['user_id']) . ' = ?'
+                . ' AND ' . usage_limits_q($s['rc_app_user_id']) . ' IS NOT NULL'
+                . " AND TRIM(" . usage_limits_q($s['rc_app_user_id']) . ") <> ''"
+                . ' ORDER BY ' . usage_limits_q($orderCol) . ' DESC LIMIT 5';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$userId]);
+            foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
+                $v = trim((string)($row['rc_app_user_id'] ?? ''));
+                if ($v !== '') {
+                    $candidates[] = $v;
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        usage_limits_log_exception('resolve_rc_app_user_id_from_subscription_rows_failed', $e, [
+            'user_id' => $userId,
+        ]);
+    }
+
+    try {
+        $profileCols = get_table_columns($pdo, 'user_profiles');
+        if (!empty($profileCols)) {
+            $possibleRcCols = [
+                'rc_app_user_id',
+                'revenuecat_app_user_id',
+                'app_user_id',
+                'original_app_user_id',
+            ];
+
+            $presentCols = [];
+            foreach ($possibleRcCols as $col) {
+                if (in_array($col, $profileCols, true)) {
+                    $presentCols[] = $col;
+                }
+            }
+
+            if (!empty($presentCols)) {
+                $select = [];
+                foreach ($presentCols as $col) {
+                    $select[] = usage_limits_q($col) . ' AS ' . usage_limits_q($col);
+                }
+
+                $sql = 'SELECT ' . implode(', ', $select)
+                    . ' FROM `user_profiles` WHERE `id` = ? LIMIT 1';
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([$userId]);
+                $profileRow = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+                foreach ($presentCols as $col) {
+                    $v = trim((string)($profileRow[$col] ?? ''));
+                    if ($v !== '') {
+                        $candidates[] = $v;
+                    }
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        usage_limits_log_exception('resolve_rc_app_user_id_from_user_profiles_failed', $e, [
+            'user_id' => $userId,
+        ]);
+    }
+
+    $metaTables = ['user_metadata', 'user_meta'];
+    foreach ($metaTables as $metaTable) {
+        try {
+            $cols = get_table_columns($pdo, $metaTable);
+            if (empty($cols)) {
+                continue;
+            }
+
+            $colUserId = usage_limits_pick_column($cols, ['user_id'], false);
+            $colMetaKey = usage_limits_pick_column($cols, ['meta_key', 'key', 'name'], false);
+            $colMetaValue = usage_limits_pick_column($cols, ['meta_value', 'value'], false);
+            if (!$colUserId || !$colMetaKey || !$colMetaValue) {
+                continue;
+            }
+
+            $metaKeys = ['rc_app_user_id', 'revenuecat_app_user_id', 'app_user_id', 'original_app_user_id'];
+            $in = implode(', ', array_fill(0, count($metaKeys), '?'));
+            $sql = 'SELECT ' . usage_limits_q($colMetaValue) . ' AS rc_app_user_id '
+                . 'FROM ' . usage_limits_q($metaTable)
+                . ' WHERE ' . usage_limits_q($colUserId) . ' = ?'
+                . ' AND ' . usage_limits_q($colMetaKey) . ' IN (' . $in . ')'
+                . ' LIMIT 10';
+            $params = array_merge([$userId], $metaKeys);
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
+                $v = trim((string)($row['rc_app_user_id'] ?? ''));
+                if ($v !== '') {
+                    $candidates[] = $v;
+                }
+            }
+        } catch (Throwable $e) {
+            usage_limits_log_exception('resolve_rc_app_user_id_from_meta_table_failed', $e, [
+                'user_id' => $userId,
+                'meta_table' => $metaTable,
+            ]);
+        }
+    }
+
+    $deduped = [];
+    foreach ($candidates as $candidate) {
+        $v = trim((string)$candidate);
+        if ($v === '') {
+            continue;
+        }
+        if (!in_array($v, $deduped, true)) {
+            $deduped[] = $v;
+        }
+    }
+
+    return $deduped;
+}
+
+function usage_limits_resolve_revenuecat_app_user_id(PDO $pdo, string $userId, array $beforeRow = []): ?string
+{
+    $candidates = usage_limits_collect_revenuecat_app_user_id_candidates($pdo, $userId, $beforeRow);
+    return !empty($candidates) ? (string)$candidates[0] : null;
+}
+
+function usage_limits_try_repair_subscription_status(PDO $pdo, string $userId): array
+{
+    $beforeRow = usage_limits_get_user_subscription_status($pdo, $userId);
+    $beforeActive = usage_limits_is_subscription_active($beforeRow);
+
+    $result = [
+        'before' => $beforeRow,
+        'after' => $beforeRow,
+        'repaired' => false,
+        'verified_active' => $beforeActive,
+        'rc_app_user_id' => usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeRow),
+    ];
+
+    if ($beforeActive) {
+        usage_limits_subscription_debug_log('subscription_repair_skipped_already_active', [
+            'user_id' => $userId,
+            'before_row' => usage_limits_normalize_subscription_row($beforeRow, $userId),
+            'resolved_rc_app_user_id' => $result['rc_app_user_id'],
+        ]);
+        return $result;
+    }
+
+    if (!usage_limits_revenuecat_verification_enabled()) {
+        usage_limits_subscription_debug_log('subscription_repair_skipped_verification_disabled', [
+            'user_id' => $userId,
+            'before_row' => usage_limits_normalize_subscription_row($beforeRow, $userId),
+            'resolved_rc_app_user_id' => $result['rc_app_user_id'],
+        ]);
+        return $result;
+    }
+
+    $resolvedRcAppUserId = trim((string)($result['rc_app_user_id'] ?? ''));
+    if ($resolvedRcAppUserId === '') {
+        usage_limits_subscription_debug_log('subscription_repair_skipped_missing_rc_app_user_id', [
+            'user_id' => $userId,
+            'before_row' => usage_limits_normalize_subscription_row($beforeRow, $userId),
+        ]);
+        return $result;
+    }
+
+    try {
+        $truth = usage_limits_fetch_revenuecat_subscription_truth($resolvedRcAppUserId, $beforeRow['entitlement_id'] ?? null);
+        $verifiedActive = usage_limits_is_subscription_active($truth);
+        $result['verified_active'] = $verifiedActive;
+
+        usage_limits_subscription_debug_log('subscription_repair_verification_truth', [
+            'user_id' => $userId,
+            'resolved_rc_app_user_id' => $resolvedRcAppUserId,
+            'before_row' => usage_limits_normalize_subscription_row($beforeRow, $userId),
+            'verification_truth' => $truth,
+            'verified_active' => $verifiedActive,
+        ]);
+
+        if ($verifiedActive) {
+            usage_limits_upsert_subscription_status($pdo, $userId, [
+                'is_pro' => true,
+                'plan_code' => $truth['plan_code'] ?? null,
+                'entitlement_id' => $truth['entitlement_id'] ?? ($beforeRow['entitlement_id'] ?? null),
+                'rc_app_user_id' => $truth['rc_app_user_id'] ?? $resolvedRcAppUserId,
+                'expires_at' => $truth['expires_at'] ?? null,
+            ]);
+        }
+
+        $afterRow = usage_limits_get_user_subscription_status($pdo, $userId);
+        $result['after'] = $afterRow;
+
+        $afterActive = usage_limits_is_subscription_active($afterRow);
+        $result['repaired'] = (!$beforeActive && $afterActive);
+
+        usage_limits_subscription_debug_log('subscription_repair_result', [
+            'user_id' => $userId,
+            'resolved_rc_app_user_id' => $resolvedRcAppUserId,
+            'before_row' => usage_limits_normalize_subscription_row($beforeRow, $userId),
+            'after_row' => usage_limits_normalize_subscription_row($afterRow, $userId),
+            'verified_active' => $result['verified_active'],
+            'repaired' => $result['repaired'],
+            'computed_is_pro' => $afterActive,
+        ]);
+    } catch (Throwable $e) {
+        usage_limits_log_exception('subscription_repair_failed', $e, [
+            'user_id' => $userId,
+            'resolved_rc_app_user_id' => $resolvedRcAppUserId,
+            'before_row' => usage_limits_normalize_subscription_row($beforeRow, $userId),
+        ]);
+    }
+
+    return $result;
 }
 
 function usage_limits_is_user_pro(PDO $pdo, string $userId): bool
