@@ -173,8 +173,8 @@ $(function () {
                             <tr><th>E-posta Doğrulandı</th><td>${boolBadge(u.email_verified)}</td></tr>
                             <tr><th>E-posta Doğrulama Tarihi</th><td>${esc(fmtDate(u.email_verified_at))}</td></tr>
                             <tr><th>Onboarding Tamamlandı</th><td>${boolBadge(u.onboarding_completed)}</td></tr>
-                            <tr><th>Mevcut Yeterlilik</th><td>${esc(u.current_qualification_name || '-')} ${u.current_qualification_id ? `<small class="text-muted">(${esc(u.current_qualification_id)})</small>` : ''}</td></tr>
-                            <tr><th>Hedef Yeterlilik</th><td>${esc(u.target_qualification_name || '-')} ${u.target_qualification_id ? `<small class="text-muted">(${esc(u.target_qualification_id)})</small>` : ''}</td></tr>
+                            <tr><th>Mevcut Yeterlilik</th><td>${esc(u.current_qualification_name || '-')}</td></tr>
+                            <tr><th>Hedef Yeterlilik</th><td>${esc(u.target_qualification_name || '-')}</td></tr>
                             <tr><th>Kayıt Tarihi</th><td>${esc(fmtDate(u.created_at))}</td></tr>
                             <tr><th>Güncellenme Tarihi</th><td>${esc(fmtDate(u.updated_at))}</td></tr>
                             <tr><th>Son Giriş</th><td>${esc(fmtDate(u.last_sign_in_at))}</td></tr>
@@ -242,7 +242,12 @@ $(function () {
         const breakdowns = data.breakdowns || {};
 
         const distRows = dist.length ? dist.map(x => `<tr><td>${esc(x.source || '-')}</td><td>${esc(fmtInt(x.total || 0))}</td></tr>`).join('') : '<tr><td colspan="2" class="text-muted">Kayıt yok</td></tr>';
-        const recentRows = recent.length ? recent.map(x => `<tr><td>${esc(fmtDate(x.event_at || x.created_at || null))}</td><td>${esc(x.source || '-')}</td><td>${esc(x.question_id || '-')}</td><td>${x.is_correct == 1 ? '<span class="badge text-bg-success">Doğru</span>' : '<span class="badge text-bg-danger">Yanlış</span>'}</td></tr>`).join('') : '<tr><td colspan="4" class="text-muted">Kayıt yok</td></tr>';
+        const recentRows = recent.length ? recent.map(x => {
+            let resultBadge = '<span class="badge text-bg-secondary">Bilinmiyor</span>';
+            if (x.is_correct == 1) resultBadge = '<span class="badge text-bg-success">Doğru</span>';
+            else if (x.is_correct == 0) resultBadge = '<span class="badge text-bg-danger">Yanlış</span>';
+            return `<tr><td>${esc(fmtDate(x.event_at || x.created_at || null))}</td><td>${esc(x.source || '-')}</td><td>${esc(x.question_id || '-')}</td><td>${resultBadge}</td></tr>`;
+        }).join('') : '<tr><td colspan="4" class="text-muted">Kayıt yok</td></tr>';
 
         const renderBreak = (title, rows) => {
             const body = (rows || []).length ? rows.map(r => `<tr><td>${esc(r.name || r.id || '-')}</td><td>${esc(fmtInt(r.total || 0))}</td></tr>`).join('') : '<tr><td colspan="2" class="text-muted">Kayıt yok</td></tr>';
@@ -310,7 +315,7 @@ $(function () {
             ? Object.keys(summary).map(k => `<tr><td>${esc(k)}</td><td>${esc(fmtInt(summary[k]?.total_used || 0))}</td><td>${esc(summary[k]?.daily_limit ?? '-')}</td></tr>`).join('')
             : '<tr><td colspan="3" class="text-muted">Özet veri yok.</td></tr>';
         const listRows = rows.length
-            ? rows.map(r => `<tr><td>${esc(r.usage_date || '-')}</td><td>${esc(r.feature_key || '-')}</td><td>${esc(fmtInt(r.used_count || 0))}</td><td>${esc(r.daily_limit ?? '-')}</td><td>${esc(r.qualification_name || '-')}</td><td>${esc(fmtDate(r.updated_at || r.created_at))}</td></tr>`).join('')
+            ? rows.map(r => `<tr><td>${esc(r.usage_date_tr || r.usage_date || '-')}</td><td>${esc(r.feature_key || '-')}</td><td>${esc(fmtInt(r.used_count || 0))}</td><td>${esc(r.daily_limit ?? '-')}</td><td>${esc(r.qualification_name || '-')}</td><td>${esc(fmtDate(r.updated_at || r.created_at))}</td></tr>`).join('')
             : '<tr><td colspan="6" class="text-muted">Kayıt yok.</td></tr>';
 
         $('#tab-usage').html(`
@@ -332,7 +337,7 @@ $(function () {
         const apiTokens = data.api_tokens || [];
         const pushTokens = data.push_tokens || [];
         const apiRows = apiTokens.length ? apiTokens.map(r => `<tr><td>${esc(r.id || '-')}</td><td>${esc(r.name || '-')}</td><td>${esc(fmtDate(r.last_used_at))}</td><td>${esc(fmtDate(r.expires_at))}</td><td>${r.revoked_at ? '<span class="badge text-bg-danger">Pasif</span>' : '<span class="badge text-bg-success">Aktif</span>'}</td></tr>`).join('') : '<tr><td colspan="5" class="text-muted">API token yok.</td></tr>';
-        const pushRows = pushTokens.length ? pushTokens.map(r => `<tr><td>${esc(r.id || '-')}</td><td>${esc(maskToken(r.token))}</td><td>${esc(r.installation_id || '-')}</td><td>${esc(r.device_name || '-')}</td><td>${esc(r.app_version || '-')}</td><td>${esc(r.permission_status || '-')}</td><td>${esc(r.platform || '-')}</td><td>${esc(fmtDate(r.last_seen_at))}</td><td>${esc(fmtDate(r.updated_at || r.created_at))}</td><td>${r.is_active == 1 ? '<span class="badge text-bg-success">Aktif</span>' : '<span class="badge text-bg-secondary">Pasif</span>'}</td></tr>`).join('') : '<tr><td colspan="10" class="text-muted">Push token yok.</td></tr>';
+        const pushRows = pushTokens.length ? pushTokens.map(r => `<tr><td>${esc(r.id || '-')}</td><td>${esc(maskToken(r.fcm_token || r.token))}</td><td>${esc(r.installation_id || '-')}</td><td>${esc(r.device_name || '-')}</td><td>${esc(r.app_version || '-')}</td><td>${esc(r.permission_status || '-')}</td><td>${esc(r.platform || '-')}</td><td>${esc(fmtDate(r.last_seen_at))}</td><td>${esc(fmtDate(r.updated_at || r.created_at))}</td><td>${r.is_active == 1 ? '<span class="badge text-bg-success">Aktif</span>' : '<span class="badge text-bg-secondary">Pasif</span>'}</td></tr>`).join('') : '<tr><td colspan="10" class="text-muted">Push token yok.</td></tr>';
 
         $('#tab-devices').html(`
             <div class="row g-3">
