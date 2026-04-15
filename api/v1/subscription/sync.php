@@ -220,7 +220,7 @@ try {
                 $verificationErrorMessage = $verificationError->getMessage();
                 $verificationMode = $clientFallbackEligible
                     ? 'client_payload_fallback_after_verification_failure'
-                    : 'verification_failed_existing_row_fallback';
+                    : 'verification_failed_client_payload';
                 subscription_sync_debug_log('revenuecat_verification_unavailable', [
                     'authenticated_user_id' => $userId,
                     'payload' => $payload,
@@ -273,7 +273,7 @@ try {
     $effectiveState = [
         'is_pro' => $verificationTruth['is_pro']
             ?? $effectiveClientIsPro
-            ?? (bool)($existingState['is_pro'] ?? false),
+            ?? false,
         'plan_code' => $verificationTruth['plan_code']
             ?? $clientPlanCode
             ?? $productId
@@ -289,15 +289,8 @@ try {
             ?? ($existingState['expires_at'] ?? null),
     ];
 
-    if ($verificationTruth === null && $verificationFailed && usage_limits_is_subscription_active($beforeStatus) && empty($effectiveState['is_pro'])) {
-        $effectiveState = [
-            'is_pro' => true,
-            'plan_code' => $existingState['plan_code'] ?? null,
-            'entitlement_id' => $existingState['entitlement_id'] ?? null,
-            'rc_app_user_id' => $existingState['rc_app_user_id'] ?? $clientRcAppUserId ?? $resolvedRcAppUserId,
-            'expires_at' => $existingState['expires_at'] ?? $clientExpiresAt,
-        ];
-        $verificationMode = 'existing_row_preserved_after_verification_failure';
+    if ($effectiveClientIsPro === true) {
+        $effectiveState['is_pro'] = true;
     }
 
     subscription_sync_debug_log('computed_effective_state', [
@@ -319,6 +312,7 @@ try {
         'entitlement_active' => $entitlementActive,
         'purchase_source' => $purchaseSource,
         'effective_client_is_pro' => $effectiveClientIsPro,
+        'effective_is_pro' => !empty($effectiveState['is_pro']),
         'computed_is_pro' => !empty($effectiveState['is_pro']),
     ]);
 

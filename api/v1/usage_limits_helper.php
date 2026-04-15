@@ -837,10 +837,8 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
         }
     }
 
-    $anonymousSkippedDueToNonAnonymous = !empty($nonAnonymous);
-    $finalCandidates = $anonymousSkippedDueToNonAnonymous
-        ? $nonAnonymous
-        : $anonymous;
+    $anonymousSkippedDueToNonAnonymous = false;
+    $finalCandidates = array_merge($nonAnonymous, $anonymous);
 
     usage_limits_subscription_debug_log('resolve_rc_app_user_id_candidates', [
         'user_id' => $userId,
