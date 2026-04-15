@@ -334,18 +334,79 @@ function usage_limits_fetch_revenuecat_subscription_truth(string $rcAppUserId, ?
     }
 
     $url = 'https://api.revenuecat.com/v1/subscribers/' . rawurlencode($rcAppUserId);
+    usage_limits_subscription_debug_log('revenuecat_verification_request', [
+        'rc_app_user_id' => $rcAppUserId,
+        'preferred_entitlement_id' => $preferredEntitlementId,
+        'url' => $url,
+    ]);
+
     $http = usage_limits_http_get_json($url, [
         'Accept: application/json',
         'Authorization: Bearer ' . $apiKey,
     ], 15);
 
     $statusCode = (int)($http['status_code'] ?? 0);
+    $json = is_array($http['json'] ?? null) ? $http['json'] : [];
+    $subscriber = $json['subscriber'] ?? null;
+    $subscriber = is_array($subscriber) ? $subscriber : [];
+    $entitlements = $subscriber['entitlements'] ?? [];
+    $entitlements = is_array($entitlements) ? $entitlements : [];
+
+    $responseOriginalAppUserId = trim((string)($subscriber['original_app_user_id'] ?? ''));
+    $responseAppUserId = trim((string)($subscriber['app_user_id'] ?? ''));
+    $wrongSubscriberIdSuspected = false;
+    if ($responseOriginalAppUserId !== '' && $responseOriginalAppUserId !== $rcAppUserId) {
+        $wrongSubscriberIdSuspected = true;
+    }
+    if ($responseAppUserId !== '' && $responseAppUserId !== $rcAppUserId) {
+        $wrongSubscriberIdSuspected = true;
+    }
+
+    $fetchedEntitlements = [];
+    foreach ($entitlements as $entitlementId => $entitlementRow) {
+        if (!is_array($entitlementRow)) {
+            continue;
+        }
+
+        $fetchedEntitlements[] = [
+            'entitlement_id' => (string)$entitlementId,
+            'product_identifier' => (($v = trim((string)($entitlementRow['product_identifier'] ?? ''))) !== '' ? $v : null),
+            'expires_date_raw' => $entitlementRow['expires_date'] ?? null,
+            'expires_date' => usage_limits_normalize_datetime_to_mysql($entitlementRow['expires_date'] ?? null),
+        ];
+    }
+
     if ($statusCode < 200 || $statusCode >= 300) {
+        usage_limits_subscription_debug_log('revenuecat_verification_failed', [
+            'rc_app_user_id' => $rcAppUserId,
+            'preferred_entitlement_id' => $preferredEntitlementId,
+            'response_status' => $statusCode,
+            'wrong_subscriber_id_suspected' => $wrongSubscriberIdSuspected || ($statusCode === 404),
+            'response_original_app_user_id' => ($responseOriginalAppUserId !== '' ? $responseOriginalAppUserId : null),
+            'response_app_user_id' => ($responseAppUserId !== '' ? $responseAppUserId : null),
+            'empty_entitlement' => empty($fetchedEntitlements),
+            'fetched_entitlements' => $fetchedEntitlements,
+            'response_body_preview' => mb_substr((string)($http['body'] ?? ''), 0, 2000),
+        ]);
+
         throw new RuntimeException('RevenueCat doğrulama isteği başarısız. HTTP=' . $statusCode);
     }
 
-    $json = is_array($http['json'] ?? null) ? $http['json'] : [];
     $truth = usage_limits_extract_revenuecat_truth($json, $rcAppUserId, $preferredEntitlementId);
+
+    if (empty($truth['is_pro'])) {
+        usage_limits_subscription_debug_log('revenuecat_verification_no_active_entitlement', [
+            'rc_app_user_id' => $rcAppUserId,
+            'preferred_entitlement_id' => $preferredEntitlementId,
+            'response_status' => $statusCode,
+            'wrong_subscriber_id_suspected' => $wrongSubscriberIdSuspected,
+            'response_original_app_user_id' => ($responseOriginalAppUserId !== '' ? $responseOriginalAppUserId : null),
+            'response_app_user_id' => ($responseAppUserId !== '' ? $responseAppUserId : null),
+            'empty_entitlement' => empty($fetchedEntitlements),
+            'fetched_entitlements' => $fetchedEntitlements,
+            'truth' => $truth,
+        ]);
+    }
 
     usage_limits_subscription_debug_log('revenuecat_verified', [
         'rc_app_user_id' => $rcAppUserId,
@@ -502,7 +563,35 @@ function usage_limits_get_user_subscription_status(PDO $pdo, string $userId): ar
 function usage_limits_is_user_pro(PDO $pdo, string $userId): bool
 {
     $status = usage_limits_get_user_subscription_status($pdo, $userId);
-    return usage_limits_is_subscription_active($status);
+    $isActive = usage_limits_is_subscription_active($status);
+
+    if (!$isActive) {
+        $expiresAt = $status['expires_at'] ?? null;
+        $expiresAtText = trim((string)$expiresAt);
+        $expiresAtTs = null;
+        $expiresAtParseResult = 'empty';
+
+        if ($expiresAtText !== '') {
+            $expiresAtTs = strtotime($expiresAtText);
+            if ($expiresAtTs === false) {
+                $expiresAtParseResult = 'invalid_datetime';
+                $expiresAtTs = null;
+            } else {
+                $expiresAtParseResult = gmdate('Y-m-d H:i:s', $expiresAtTs);
+            }
+        }
+
+        usage_limits_subscription_debug_log('is_user_pro_false', [
+            'user_id' => $userId,
+            'is_pro_field' => !empty($status['is_pro']),
+            'expires_at_field' => ($expiresAtText !== '' ? $expiresAtText : null),
+            'expires_at_parse_result' => $expiresAtParseResult,
+            'active_calculation_result' => $isActive,
+            'subscription_row' => usage_limits_normalize_subscription_row($status, $userId),
+        ]);
+    }
+
+    return $isActive;
 }
 
 function usage_limits_upsert_subscription_status(PDO $pdo, string $userId, array $payload): array

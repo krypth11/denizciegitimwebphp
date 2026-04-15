@@ -10,7 +10,16 @@ api_require_method('GET');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
-    if (!usage_limits_is_user_pro($pdo, $userId)) {
+    $subscriptionStatus = usage_limits_get_user_subscription_status($pdo, $userId);
+    $computedIsPro = usage_limits_is_subscription_active($subscriptionStatus);
+    if (!$computedIsPro) {
+        usage_limits_subscription_debug_log('offline_premium_required', [
+            'endpoint' => 'api/v1/offline/package.php',
+            'user_id' => $userId,
+            'db_subscription_row' => usage_limits_normalize_subscription_row($subscriptionStatus, $userId),
+            'computed_is_pro' => $computedIsPro,
+        ]);
+
         usage_limits_business_error(
             'PREMIUM_REQUIRED',
             'Offline içerik Pro üyelik gerektirir.',

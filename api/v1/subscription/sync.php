@@ -174,9 +174,28 @@ try {
     $verificationMode = 'client_payload';
     $verificationTruth = null;
 
-    if ($clientRcAppUserId !== null && usage_limits_revenuecat_verification_enabled()) {
-        $verificationTruth = usage_limits_fetch_revenuecat_subscription_truth($clientRcAppUserId, $clientEntitlementId);
-        $verificationMode = 'revenuecat_server';
+    if (usage_limits_revenuecat_verification_enabled()) {
+        if ($clientRcAppUserId !== null) {
+            try {
+                $verificationTruth = usage_limits_fetch_revenuecat_subscription_truth($clientRcAppUserId, $clientEntitlementId);
+                $verificationMode = 'revenuecat_server';
+            } catch (Throwable $verificationError) {
+                subscription_sync_debug_log('revenuecat_verification_unavailable', [
+                    'authenticated_user_id' => $userId,
+                    'client_rc_app_user_id' => $clientRcAppUserId,
+                    'verification_mode' => 'revenuecat_server',
+                    'verification_truth' => null,
+                    'error_message' => $verificationError->getMessage(),
+                ]);
+                throw $verificationError;
+            }
+        } else {
+            subscription_sync_debug_log('revenuecat_verification_skipped_missing_rc_app_user_id', [
+                'authenticated_user_id' => $userId,
+                'verification_mode' => 'client_payload',
+                'client_rc_app_user_id' => $clientRcAppUserId,
+            ]);
+        }
     }
 
     if ($verificationTruth === null && $clientIsPro === null) {
@@ -194,6 +213,14 @@ try {
     if (!empty($effectiveState['is_pro']) && empty($effectiveState['expires_at'])) {
         throw new RuntimeException('Premium kullanıcı için expires_at boş olamaz.');
     }
+
+    subscription_sync_debug_log('computed_effective_state', [
+        'authenticated_user_id' => $userId,
+        'client_rc_app_user_id' => $clientRcAppUserId,
+        'verification_mode' => $verificationMode,
+        'verification_truth' => $verificationTruth,
+        'computed_is_pro' => !empty($effectiveState['is_pro']),
+    ]);
 
     subscription_sync_debug_log('before_upsert', [
         'authenticated_user_id' => $userId,
