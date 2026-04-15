@@ -261,7 +261,21 @@ function users_get_qualification_map(PDO $pdo): array
 
     $map = [];
     try {
-        $stmt = $pdo->query('SELECT id, name FROM qualifications');
+        $cols = get_table_columns($pdo, 'qualifications');
+        $idCol = users_pick_column($cols, ['id'], false);
+        $nameCol = users_pick_column($cols, ['name', 'title'], false);
+        if (!$idCol || !$nameCol) {
+            error_log('[USERS][DETAIL] qualification map query failed | ' . json_encode([
+                'error' => 'qualification columns missing',
+                'columns' => $cols,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            users_debug_log('qualification map required columns unavailable', [
+                'columns' => $cols,
+            ]);
+            return [];
+        }
+
+        $stmt = $pdo->query('SELECT ' . users_q($idCol) . ' AS id, ' . users_q($nameCol) . ' AS name FROM ' . users_q('qualifications'));
         if (!$stmt) {
             users_debug_log('qualification map query returned no statement');
             return [];
@@ -282,6 +296,9 @@ function users_get_qualification_map(PDO $pdo): array
             $map[$id] = $name;
         }
     } catch (Throwable $e) {
+        error_log('[USERS][DETAIL] qualification map query failed | ' . json_encode([
+            'error' => $e->getMessage(),
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         users_debug_log('qualification map query failed', [
             'error' => $e->getMessage(),
         ]);
@@ -347,7 +364,7 @@ function users_pick_latest_datetime(?string ...$values): ?string
 
 function users_pick_user_fk_column(array $columns): ?string
 {
-    return users_pick_column($columns, ['user_id', 'user_profile_id', 'profile_id'], false);
+    return users_pick_column($columns, ['user_id', 'user_profile_id', 'profile_id', 'account_user_id', 'owner_user_id', 'actor_user_id'], false);
 }
 
 function users_pick_best_user_fk_column(PDO $pdo, string $table, string $userId): ?string
@@ -361,7 +378,7 @@ function users_pick_best_user_fk_column(PDO $pdo, string $table, string $userId)
         return null;
     }
 
-    $candidates = array_values(array_filter(['user_id', 'user_profile_id', 'profile_id'], static fn($c) => in_array($c, $cols, true)));
+    $candidates = array_values(array_filter(['user_id', 'user_profile_id', 'profile_id', 'account_user_id', 'owner_user_id', 'actor_user_id'], static fn($c) => in_array($c, $cols, true)));
     if (empty($candidates)) {
         return null;
     }
@@ -596,6 +613,9 @@ function users_get_name_lookup_map(PDO $pdo, array $tables, array $nameCandidate
         }
         return $map;
     } catch (Throwable $e) {
+        error_log('[USERS][DETAIL] qualification map query failed | ' . json_encode([
+            'error' => $e->getMessage(),
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
         users_debug_log('lookup map read failed', ['table' => $table, 'error' => $e->getMessage()]);
         return [];
     }
@@ -795,7 +815,7 @@ function users_get_user_study_stats(PDO $pdo, string $userId): array
                 $distribution = $dStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
             } elseif ($eventTotal > 0) {
                 $distribution = [[
-                    'source' => 'unknown',
+                    'source' => 'study',
                     'total' => $eventTotal,
                 ]];
             }
@@ -915,6 +935,26 @@ function users_get_user_study_stats(PDO $pdo, string $userId): array
         ? users_pick_latest_datetime($eventLastAt, $progressLastAt, $sessionLastAt)
         : users_pick_latest_datetime($progressLastAt, $eventLastAt, $sessionLastAt);
 
+    foreach ($distribution as &$distRow) {
+        $src = trim((string)($distRow['source'] ?? ''));
+        $distRow['source'] = $src !== '' ? $src : 'study';
+        $distRow['total'] = (int)($distRow['total'] ?? 0);
+    }
+    unset($distRow);
+
+    $qualificationMap = $qualificationMap ?? users_get_qualification_map($pdo);
+    $courseMap = $courseMap ?? users_get_name_lookup_map($pdo, ['courses']);
+    $topicMap = $topicMap ?? users_get_name_lookup_map($pdo, ['topics']);
+
+    foreach ($recent as &$recentRow) {
+        $recentRow['source'] = trim((string)($recentRow['source'] ?? '')) ?: 'study';
+        $recentRow['is_correct'] = $recentRow['is_correct'] !== null ? (int)$recentRow['is_correct'] : null;
+        $recentRow['qualification_name'] = users_resolve_qualification_name($qualificationMap, $recentRow['qualification_id'] ?? null);
+        $recentRow['course_name'] = users_resolve_lookup_name($courseMap, $recentRow['course_id'] ?? null, 'Tanımsız Ders');
+        $recentRow['topic_name'] = users_resolve_lookup_name($topicMap, $recentRow['topic_id'] ?? null, 'Tanımsız Konu');
+    }
+    unset($recentRow);
+
     users_debug_log('study stats computed', [
         'user_id' => $userId,
         'raw_rows' => [
@@ -941,13 +981,6 @@ function users_get_user_study_stats(PDO $pdo, string $userId): array
         'recent_event_count' => count($recent),
         'source_distribution_count' => count($distribution),
     ]);
-
-    foreach ($distribution as &$distRow) {
-        $src = trim((string)($distRow['source'] ?? ''));
-        $distRow['source'] = $src !== '' ? $src : 'unknown';
-        $distRow['total'] = (int)($distRow['total'] ?? 0);
-    }
-    unset($distRow);
 
     return [
         'total_solved' => $totalSolved,
@@ -1016,6 +1049,11 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     $modeCol = users_pick_column($cols, ['mode'], false);
     $poolTypeCol = users_pick_column($cols, ['pool_type'], false);
     $warningCol = users_pick_column($cols, ['warning_message'], false);
+    $idCol = users_pick_column($cols, ['id'], false);
+    $correctCountCol = users_pick_column($cols, ['correct_count'], false);
+    $wrongCountCol = users_pick_column($cols, ['wrong_count'], false);
+    $blankCountCol = users_pick_column($cols, ['blank_count'], false);
+    $successRateCol = users_pick_column($cols, ['success_rate'], false);
 
     $summarySelect = [];
     $summarySelect[] = $statusCol ? "`{$statusCol}` AS status" : 'NULL AS status';
@@ -1028,7 +1066,7 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     $summaryRows = $summaryStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     $select = [];
-    $select[] = users_pick_column($cols, ['id'], false) ? '`' . users_pick_column($cols, ['id'], false) . '` AS id' : 'NULL AS id';
+    $select[] = $idCol ? users_q($idCol) . ' AS id' : 'NULL AS id';
     $select[] = $statusCol ? "`{$statusCol}` AS status" : 'NULL AS status';
     $select[] = $startedCol ? "`{$startedCol}` AS started_at" : 'NULL AS started_at';
     $select[] = $submittedCol ? "`{$submittedCol}` AS submitted_at" : 'NULL AS submitted_at';
@@ -1040,6 +1078,10 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     $select[] = $modeCol ? "`{$modeCol}` AS mode" : 'NULL AS mode';
     $select[] = $poolTypeCol ? "`{$poolTypeCol}` AS pool_type" : 'NULL AS pool_type';
     $select[] = $warningCol ? "`{$warningCol}` AS warning_message" : 'NULL AS warning_message';
+    $select[] = $correctCountCol ? users_q($correctCountCol) . ' AS correct_count' : 'NULL AS correct_count';
+    $select[] = $wrongCountCol ? users_q($wrongCountCol) . ' AS wrong_count' : 'NULL AS wrong_count';
+    $select[] = $blankCountCol ? users_q($blankCountCol) . ' AS blank_count' : 'NULL AS blank_count';
+    $select[] = $successRateCol ? users_q($successRateCol) . ' AS success_rate' : 'NULL AS success_rate';
     $orderCol = $submittedCol ?: ($abandonedAtCol ?: ($startedCol ?: $uid));
     $listSql = 'SELECT ' . implode(', ', $select) . " FROM mock_exam_attempts WHERE `{$uid}` = ? ORDER BY `{$orderCol}` DESC LIMIT 100";
     $listStmt = $pdo->prepare($listSql);
@@ -1079,17 +1121,24 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     }
 
     foreach ($attempts as &$attempt) {
+        $rawStatus = (string)($attempt['status'] ?? '');
+        $attempt['raw_status'] = $rawStatus;
         $attempt['status'] = users_exam_status_normalize(
             $attempt['status'] ?? '',
             $attempt['submitted_at'] ?? null,
             $attempt['abandoned_at'] ?? null,
             $attempt['started_at'] ?? null
         );
+        $attempt['status_label'] = users_exam_status_label((string)$attempt['status']);
         $qid = (string)($attempt['qualification_id'] ?? '');
         $attempt['qualification_name'] = users_resolve_qualification_name($qMap, $qid);
         $attempt['requested_question_count'] = $attempt['requested_question_count'] !== null ? (int)$attempt['requested_question_count'] : null;
         $attempt['actual_question_count'] = $attempt['actual_question_count'] !== null ? (int)$attempt['actual_question_count'] : null;
         $attempt['elapsed_seconds'] = $attempt['elapsed_seconds'] !== null ? (int)$attempt['elapsed_seconds'] : null;
+        $attempt['correct_count'] = $attempt['correct_count'] !== null ? (int)$attempt['correct_count'] : null;
+        $attempt['wrong_count'] = $attempt['wrong_count'] !== null ? (int)$attempt['wrong_count'] : null;
+        $attempt['blank_count'] = $attempt['blank_count'] !== null ? (int)$attempt['blank_count'] : null;
+        $attempt['success_rate'] = $attempt['success_rate'] !== null ? (float)$attempt['success_rate'] : null;
         $attempt['warning_message'] = trim((string)($attempt['warning_message'] ?? ''));
     }
     unset($attempt);
@@ -1244,6 +1293,7 @@ function users_get_user_devices(PDO $pdo, string $userId): array
             $lastUsedCol = users_pick_column($cols, ['last_used_at'], false);
             $expiresCol = users_pick_column($cols, ['expires_at'], false);
             $revokedCol = users_pick_column($cols, ['revoked_at'], false);
+            $tokenHashCol = users_pick_column($cols, ['token_hash'], false);
 
             $select = [];
             $select[] = users_pick_column($cols, ['id'], false) ? '`' . users_pick_column($cols, ['id'], false) . '` AS id' : 'NULL AS id';
@@ -1252,12 +1302,22 @@ function users_get_user_devices(PDO $pdo, string $userId): array
             $select[] = $lastUsedCol ? "`{$lastUsedCol}` AS last_used_at" : 'NULL AS last_used_at';
             $select[] = $expiresCol ? "`{$expiresCol}` AS expires_at" : 'NULL AS expires_at';
             $select[] = $revokedCol ? "`{$revokedCol}` AS revoked_at" : 'NULL AS revoked_at';
+            $select[] = $tokenHashCol ? "`{$tokenHashCol}` AS token_hash" : 'NULL AS token_hash';
             $orderCol = $lastUsedCol ?: ($createdCol ?: $uid);
             $sql = 'SELECT ' . implode(', ', $select)
                 . " FROM api_tokens WHERE `{$uid}` = ? ORDER BY `{$orderCol}` DESC LIMIT 100";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$userId]);
             $apiTokens = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($apiTokens as &$tokenRow) {
+                $tokenRow['name'] = trim((string)($tokenRow['name'] ?? ''));
+                $tokenHash = trim((string)($tokenRow['token_hash'] ?? ''));
+                $tokenRow['token_hash_preview'] = $tokenHash !== ''
+                    ? (mb_strlen($tokenHash) > 16 ? (mb_substr($tokenHash, 0, 8) . '...' . mb_substr($tokenHash, -8)) : $tokenHash)
+                    : null;
+                unset($tokenRow['token_hash']);
+            }
+            unset($tokenRow);
         }
     }
 
@@ -1296,6 +1356,11 @@ function users_get_user_devices(PDO $pdo, string $userId): array
             $stmt = $pdo->prepare($sql);
             $stmt->execute([$userId]);
             $pushTokens = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($pushTokens as &$pushRow) {
+                $pushRow['is_active'] = (int)($pushRow['is_active'] ?? 0);
+                $pushRow['fcm_token_preview'] = users_push_token_preview($pushRow['fcm_token'] ?? null);
+            }
+            unset($pushRow);
         }
     }
 
