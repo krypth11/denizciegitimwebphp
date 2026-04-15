@@ -7,12 +7,67 @@ require_once dirname(__DIR__, 2) . '/includes/user_lifecycle_helper.php';
 
 api_require_method('POST');
 
+function subscription_sync_debug_enabled(): bool
+{
+    return usage_limits_subscription_debug_enabled();
+}
+
+function subscription_sync_capture_noncritical_error(array &$errors, string $stage, Throwable $e): void
+{
+    $errors[] = [
+        'stage' => $stage,
+        'message' => $e->getMessage(),
+    ];
+}
+
+function subscription_sync_noncritical_debug_log(string $message, array $context, array &$errors): void
+{
+    try {
+        usage_limits_subscription_debug_log($message, $context);
+    } catch (Throwable $e) {
+        subscription_sync_capture_noncritical_error($errors, 'debug_side_log:' . $message, $e);
+    }
+}
+
+function subscription_sync_noncritical_lifecycle_event(
+    PDO $pdo,
+    string $userId,
+    string $eventType,
+    string $title,
+    string $source,
+    ?string $fromValue,
+    ?string $toValue,
+    array $meta,
+    array &$errors
+): void {
+    try {
+        user_lifecycle_log_event($pdo, $userId, $eventType, $title, $source, $fromValue, $toValue, $meta);
+    } catch (Throwable $e) {
+        subscription_sync_capture_noncritical_error($errors, 'lifecycle_log:' . $eventType, $e);
+    }
+}
+
+function subscription_sync_build_success_response(array $debugData): array
+{
+    $response = ['success' => true];
+
+    if (subscription_sync_debug_enabled()) {
+        $response['debug'] = $debugData;
+    }
+
+    return $response;
+}
+
 function subscription_sync_validation_error(string $message, array $context = []): void
 {
-    usage_limits_subscription_debug_log('validation_error', [
-        'message' => $message,
-        'context' => $context,
-    ]);
+    try {
+        usage_limits_subscription_debug_log('validation_error', [
+            'message' => $message,
+            'context' => $context,
+        ]);
+    } catch (Throwable $ignored) {
+        // debug side log non-critical
+    }
 
     api_error($message, 422);
 }
@@ -90,14 +145,16 @@ function subscription_sync_parse_expires_at(array $payload): ?string
 }
 
 try {
+    $nonCriticalErrors = [];
+
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
     $payload = api_get_request_data();
 
-    usage_limits_subscription_debug_log('request_received', [
+    subscription_sync_noncritical_debug_log('request_received', [
         'user_id' => $userId,
         'payload' => $payload,
-    ]);
+    ], $nonCriticalErrors);
 
     $isPro = subscription_sync_parse_bool_required($payload, 'is_pro');
     $planCode = subscription_sync_parse_optional_string($payload, 'plan_code');
@@ -117,15 +174,15 @@ try {
     ];
 
     $incomingChanges = usage_limits_get_subscription_state_changes($beforeStatus, $incomingState);
-    usage_limits_subscription_debug_log('normalized_payload', [
+    subscription_sync_noncritical_debug_log('normalized_payload', [
         'user_id' => $userId,
         'normalized_expires_at' => $expiresAt,
         'before' => $beforeStatus,
         'incoming' => usage_limits_normalize_subscription_row($incomingState, $userId),
         'incoming_changes' => $incomingChanges,
-    ]);
+    ], $nonCriticalErrors);
 
-    $status = usage_limits_upsert_subscription_status($pdo, $userId, [
+    usage_limits_upsert_subscription_status($pdo, $userId, [
         'is_pro' => $isPro,
         'plan_code' => $planCode,
         'entitlement_id' => $entitlementId,
@@ -133,14 +190,16 @@ try {
         'expires_at' => $expiresAt,
     ]);
 
+    $status = usage_limits_get_user_subscription_status($pdo, $userId);
+
     $changes = usage_limits_get_subscription_state_changes($beforeStatus, $status);
-    usage_limits_subscription_debug_log('upsert_completed', [
+    subscription_sync_noncritical_debug_log('upsert_completed', [
         'user_id' => $userId,
         'before' => $beforeStatus,
         'after' => $status,
         'changes' => $changes,
         'updated' => !empty($changes),
-    ]);
+    ], $nonCriticalErrors);
 
     $beforeIsPro = !empty($beforeStatus['is_active']);
     $afterIsPro = !empty($status['is_active']);
@@ -148,7 +207,7 @@ try {
     $afterExpiry = (string)($status['expires_at'] ?? '');
 
     if (!$beforeIsPro && $afterIsPro) {
-        user_lifecycle_log_event(
+        subscription_sync_noncritical_lifecycle_event(
             $pdo,
             $userId,
             'premium_started',
@@ -156,10 +215,11 @@ try {
             'subscription.sync',
             null,
             ($afterExpiry !== '' ? $afterExpiry : 'active'),
-            ['plan_code' => $status['plan_code'] ?? null]
+            ['plan_code' => $status['plan_code'] ?? null],
+            $nonCriticalErrors
         );
     } elseif ($beforeIsPro && $afterIsPro && !empty($changes) && $beforeExpiry !== $afterExpiry && $afterExpiry !== '') {
-        user_lifecycle_log_event(
+        subscription_sync_noncritical_lifecycle_event(
             $pdo,
             $userId,
             'premium_renewed',
@@ -167,14 +227,15 @@ try {
             'subscription.sync',
             ($beforeExpiry !== '' ? $beforeExpiry : null),
             $afterExpiry,
-            ['plan_code' => $status['plan_code'] ?? null]
+            ['plan_code' => $status['plan_code'] ?? null],
+            $nonCriticalErrors
         );
     } elseif ($beforeIsPro && !$afterIsPro) {
         $eventType = ($beforeExpiry !== '' && strtotime($beforeExpiry) !== false && strtotime($beforeExpiry) <= time())
             ? 'premium_expired'
             : 'premium_cancelled';
         $title = $eventType === 'premium_expired' ? 'Premium süresi doldu' : 'Premium iptal edildi';
-        user_lifecycle_log_event(
+        subscription_sync_noncritical_lifecycle_event(
             $pdo,
             $userId,
             $eventType,
@@ -182,31 +243,49 @@ try {
             'subscription.sync',
             ($beforeExpiry !== '' ? $beforeExpiry : 'active'),
             'free',
-            ['plan_code' => $beforeStatus['plan_code'] ?? null]
+            ['plan_code' => $beforeStatus['plan_code'] ?? null],
+            $nonCriticalErrors
         );
     }
 
-    api_success('Abonelik durumu senkronize edildi.', [
-        'subscription' => [
-            'is_pro' => (bool)($status['is_pro'] ?? false),
-            'is_active' => (bool)($status['is_active'] ?? false),
-            'plan_code' => $status['plan_code'] ?? null,
-            'entitlement_id' => $status['entitlement_id'] ?? null,
-            'rc_app_user_id' => $status['rc_app_user_id'] ?? null,
-            'expires_at' => $status['expires_at'] ?? null,
-        ],
-        'subscription_state' => [
-            'before' => usage_limits_normalize_subscription_row($beforeStatus, $userId),
-            'after' => usage_limits_normalize_subscription_row($status, $userId),
-            'changes' => $changes,
-            'updated' => !empty($changes),
-        ],
-    ]);
+    subscription_sync_noncritical_debug_log('sync_success_response', [
+        'user_id' => $userId,
+        'state_changed' => !empty($changes),
+        'after' => $status,
+        'noncritical_error_count' => count($nonCriticalErrors),
+    ], $nonCriticalErrors);
+
+    api_send_json(subscription_sync_build_success_response([
+        'request_payload' => $payload,
+        'before_status' => usage_limits_normalize_subscription_row($beforeStatus, $userId),
+        'after_status' => usage_limits_normalize_subscription_row($status, $userId),
+        'state_changed' => !empty($changes),
+        'is_pro_after' => (bool)($status['is_pro'] ?? false),
+        'expires_after' => $status['expires_at'] ?? null,
+        'rc_app_user_id' => $status['rc_app_user_id'] ?? ($rcAppUserId ?? null),
+        'caught_noncritical_errors' => $nonCriticalErrors,
+    ]), 200);
 } catch (Throwable $e) {
-    usage_limits_subscription_debug_log('sync_failed', [
-        'message' => $e->getMessage(),
-        'file' => $e->getFile(),
-        'line' => $e->getLine(),
-    ]);
+    try {
+        usage_limits_subscription_debug_log('sync_failed', [
+            'message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ]);
+    } catch (Throwable $ignored) {
+        // debug side log non-critical
+    }
+
+    if (subscription_sync_debug_enabled()) {
+        api_send_json([
+            'success' => false,
+            'message' => 'İşlem sırasında bir sunucu hatası oluştu.',
+            'data' => null,
+            'exception_message' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ], 500);
+    }
+
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
 }

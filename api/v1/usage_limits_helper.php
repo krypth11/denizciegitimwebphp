@@ -519,6 +519,7 @@ function usage_limits_build_feature_summary(
             'daily_limit' => $dailyLimit,
             'used_count' => $usedCount,
             'remaining_count' => null,
+            'remainingCount' => null,
             'state' => 'premium',
         ];
     }
@@ -529,6 +530,7 @@ function usage_limits_build_feature_summary(
         'daily_limit' => $dailyLimit,
         'used_count' => $usedCount,
         'remaining_count' => $remaining,
+        'remainingCount' => $remaining,
         'state' => ($remaining > 0 ? 'available' : 'exhausted'),
     ];
 }
