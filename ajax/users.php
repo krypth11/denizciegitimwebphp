@@ -301,6 +301,37 @@ function users_pick_latest_datetime(?string ...$values): ?string
     return $latest;
 }
 
+function users_pick_user_fk_column(array $columns): ?string
+{
+    return users_pick_column($columns, ['user_id', 'user_profile_id', 'profile_id'], false);
+}
+
+function users_exam_status_normalize($rawStatus, $submittedAt = null, $abandonedAt = null, $startedAt = null): string
+{
+    $status = strtolower(trim((string)$rawStatus));
+    if (in_array($status, ['completed', 'submitted', 'finished'], true)) {
+        return 'completed';
+    }
+    if (in_array($status, ['abandoned', 'cancelled', 'expired'], true)) {
+        return 'abandoned';
+    }
+    if (in_array($status, ['in_progress', 'active', 'started'], true)) {
+        return 'in_progress';
+    }
+
+    if (trim((string)$submittedAt) !== '') {
+        return 'completed';
+    }
+    if (trim((string)$abandonedAt) !== '') {
+        return 'abandoned';
+    }
+    if (trim((string)$startedAt) !== '') {
+        return 'in_progress';
+    }
+
+    return 'unknown';
+}
+
 function users_debug_log(string $message, array $context = []): void
 {
     static $enabled = null;
@@ -449,7 +480,7 @@ function users_get_user_study_stats(PDO $pdo, string $userId): array
 
     if (users_has_table($pdo, 'question_attempt_events')) {
         $cols = get_table_columns($pdo, 'question_attempt_events');
-        $uid = users_pick_column($cols, ['user_id'], false);
+        $uid = users_pick_user_fk_column($cols);
         if ($uid) {
             $rawEventRows = users_count_rows_by_user($pdo, 'question_attempt_events', $userId);
             $isCorrectCol = users_pick_column($cols, ['is_correct', 'correct', 'is_correct_answer'], false);
@@ -552,7 +583,7 @@ function users_get_user_study_stats(PDO $pdo, string $userId): array
     if (users_has_table($pdo, 'user_progress')) {
         $rawProgressRows = users_count_rows_by_user($pdo, 'user_progress', $userId);
         $cols = get_table_columns($pdo, 'user_progress');
-        $uid = users_pick_column($cols, ['user_id'], false);
+        $uid = users_pick_user_fk_column($cols);
         if ($uid) {
             $totalAnswerCol = users_pick_column($cols, ['total_answer_count', 'answer_count', 'total_answers'], false);
             $correctAnswerCol = users_pick_column($cols, ['correct_answer_count', 'correct_count'], false);
@@ -582,7 +613,7 @@ function users_get_user_study_stats(PDO $pdo, string $userId): array
     if (users_has_table($pdo, 'study_sessions')) {
         $rawSessionRows = users_count_rows_by_user($pdo, 'study_sessions', $userId);
         $cols = get_table_columns($pdo, 'study_sessions');
-        $uid = users_pick_column($cols, ['user_id'], false);
+        $uid = users_pick_user_fk_column($cols);
         if ($uid) {
             $sessionDateCol = users_pick_column($cols, ['completed_at', 'ended_at', 'updated_at', 'created_at'], false);
             if ($sessionDateCol) {
@@ -629,15 +660,34 @@ function users_get_user_study_stats(PDO $pdo, string $userId): array
         'source_distribution_count' => count($distribution),
     ]);
 
+    foreach ($distribution as &$distRow) {
+        $src = trim((string)($distRow['source'] ?? ''));
+        $distRow['source'] = $src !== '' ? $src : 'unknown';
+        $distRow['total'] = (int)($distRow['total'] ?? 0);
+    }
+    unset($distRow);
+
     return [
+        'total_solved' => $totalSolved,
+        'total_correct' => $correct,
+        'total_wrong' => $wrong,
+        'success_rate' => $successRate,
+        'last_study_at' => users_pick_latest_datetime($eventLastAt, $progressLastAt, $sessionLastAt),
+        'qualification_distribution' => $breakdown['qualification'],
+        'course_distribution' => $breakdown['course'],
+        'topic_distribution' => $breakdown['topic'],
+        'recent_attempts' => $recent,
         'totals' => [
             'total_solved' => $totalSolved,
+            'total_correct' => $correct,
+            'total_wrong' => $wrong,
             'correct' => $correct,
             'wrong' => $wrong,
             'success_rate' => $successRate,
             'last_study_at' => users_pick_latest_datetime($eventLastAt, $progressLastAt, $sessionLastAt),
         ],
         'source_distribution' => $distribution,
+        'recent_attempts' => $recent,
         'recent_events' => $recent,
         'breakdowns' => $breakdown,
     ] + $zero;
@@ -659,7 +709,7 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     }
 
     $cols = get_table_columns($pdo, 'mock_exam_attempts');
-    $uid = users_pick_column($cols, ['user_id'], false);
+    $uid = users_pick_user_fk_column($cols);
     if (!$uid) {
         return [
             'summary' => [
@@ -685,21 +735,6 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     $poolTypeCol = users_pick_column($cols, ['pool_type'], false);
     $warningCol = users_pick_column($cols, ['warning_message'], false);
 
-    $statusExpr = $statusCol ? "LOWER(TRIM(COALESCE(`{$statusCol}`, '')))" : "''";
-    $completedExpr = $statusCol ? "SUM(CASE WHEN {$statusExpr} IN ('completed', 'submitted', 'finished') THEN 1 ELSE 0 END)" : '0';
-    $progressExpr = $statusCol ? "SUM(CASE WHEN {$statusExpr} IN ('in_progress', 'active', 'started') THEN 1 ELSE 0 END)" : '0';
-    $abandonedExpr = $statusCol ? "SUM(CASE WHEN {$statusExpr} IN ('abandoned', 'cancelled', 'expired') THEN 1 ELSE 0 END)" : '0';
-    $lastExpr = 'MAX(COALESCE('
-        . ($submittedCol ? "`{$submittedCol}`" : 'NULL') . ', '
-        . ($abandonedAtCol ? "`{$abandonedAtCol}`" : 'NULL') . ', '
-        . ($startedCol ? "`{$startedCol}`" : 'NULL')
-        . '))';
-
-    $sql = "SELECT COUNT(*) AS total, {$completedExpr} AS completed, {$progressExpr} AS in_progress, {$abandonedExpr} AS abandoned, {$lastExpr} AS last_exam_at FROM mock_exam_attempts WHERE `{$uid}` = ?";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([$userId]);
-    $summary = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
-
     $select = [];
     $select[] = users_pick_column($cols, ['id'], false) ? '`' . users_pick_column($cols, ['id'], false) . '` AS id' : 'NULL AS id';
     $select[] = $statusCol ? "`{$statusCol}` AS status" : 'NULL AS status';
@@ -719,11 +754,39 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     $listStmt->execute([$userId]);
     $attempts = $listStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
+    $summary = [
+        'total' => 0,
+        'completed' => 0,
+        'in_progress' => 0,
+        'abandoned' => 0,
+        'last_exam_at' => null,
+    ];
     $qMap = users_get_qualification_map($pdo);
     foreach ($attempts as &$attempt) {
-        $attempt['status'] = strtolower(trim((string)($attempt['status'] ?? '')));
+        $attempt['status'] = users_exam_status_normalize(
+            $attempt['status'] ?? '',
+            $attempt['submitted_at'] ?? null,
+            $attempt['abandoned_at'] ?? null,
+            $attempt['started_at'] ?? null
+        );
         $qid = (string)($attempt['qualification_id'] ?? '');
         $attempt['qualification_name'] = users_resolve_qualification_name($qMap, $qid);
+
+        $summary['total']++;
+        if ($attempt['status'] === 'completed') {
+            $summary['completed']++;
+        } elseif ($attempt['status'] === 'in_progress') {
+            $summary['in_progress']++;
+        } elseif ($attempt['status'] === 'abandoned') {
+            $summary['abandoned']++;
+        }
+
+        $summary['last_exam_at'] = users_pick_latest_datetime(
+            $summary['last_exam_at'],
+            $attempt['submitted_at'] ?? null,
+            $attempt['abandoned_at'] ?? null,
+            $attempt['started_at'] ?? null
+        );
     }
     unset($attempt);
 
@@ -742,6 +805,12 @@ function users_get_user_exam_stats(PDO $pdo, string $userId): array
     ]);
 
     return [
+        'total_exams' => (int)($summary['total'] ?? 0),
+        'completed_exams' => (int)($summary['completed'] ?? 0),
+        'in_progress_exams' => (int)($summary['in_progress'] ?? 0),
+        'abandoned_exams' => (int)($summary['abandoned'] ?? 0),
+        'last_exam_at' => $summary['last_exam_at'] ?? null,
+        'exam_rows' => $attempts,
         'summary' => [
             'total' => (int)($summary['total'] ?? 0),
             'completed' => (int)($summary['completed'] ?? 0),
@@ -763,7 +832,7 @@ function users_get_user_usage_limits(PDO $pdo, string $userId): array
     }
 
     $cols = get_table_columns($pdo, 'user_daily_usage_counters');
-    $uid = users_pick_column($cols, ['user_id'], false);
+    $uid = users_pick_user_fk_column($cols);
     if (!$uid) {
         return ['summary' => [], 'rows' => []];
     }
@@ -801,8 +870,9 @@ function users_get_user_usage_limits(PDO $pdo, string $userId): array
             $key = 'unknown';
         }
         if (!isset($summary[$key])) {
-            $summary[$key] = ['total_used' => 0, 'daily_limit' => null];
+            $summary[$key] = ['used_count' => 0, 'total_used' => 0, 'daily_limit' => null];
         }
+        $summary[$key]['used_count'] += (int)($row['used_count'] ?? 0);
         $summary[$key]['total_used'] += (int)($row['used_count'] ?? 0);
 
         $detectedDailyLimit = $row['daily_limit'] !== null ? (int)$row['daily_limit'] : users_feature_daily_limit($key);
@@ -825,6 +895,8 @@ function users_get_user_usage_limits(PDO $pdo, string $userId): array
     ]);
 
     return [
+        'summary_by_feature' => $summary,
+        'usage_rows' => $rows,
         'summary' => $summary,
         'rows' => $rows,
     ];
@@ -835,7 +907,7 @@ function users_get_user_devices(PDO $pdo, string $userId): array
     $apiTokens = [];
     if (users_has_table($pdo, 'api_tokens')) {
         $cols = get_table_columns($pdo, 'api_tokens');
-        $uid = users_pick_column($cols, ['user_id'], false);
+        $uid = users_pick_user_fk_column($cols);
         if ($uid) {
             $nameCol = users_pick_column($cols, ['name'], false);
             $createdCol = users_pick_column($cols, ['created_at'], false);
@@ -862,7 +934,7 @@ function users_get_user_devices(PDO $pdo, string $userId): array
     $pushTokens = [];
     if (users_has_table($pdo, 'user_push_tokens')) {
         $cols = get_table_columns($pdo, 'user_push_tokens');
-        $uid = users_pick_column($cols, ['user_id'], false);
+        $uid = users_pick_user_fk_column($cols);
         if ($uid) {
             $tokenCol = users_pick_column($cols, ['fcm_token', 'push_token', 'token'], false);
             $platformCol = users_pick_column($cols, ['platform'], false);
@@ -1223,12 +1295,24 @@ try {
                         'created_at' => $subData['created_at'] ?? null,
                         'updated_at' => $subData['updated_at'] ?? null,
                     ],
+                    'premium_summary' => [
+                        'status' => $isPremium ? 'active' : 'inactive',
+                        'expires_at' => $subData['expires_at'] ?? null,
+                    ],
                 ],
                 'kpi' => [
                     'total_solved' => (int)($studyStats['totals']['total_solved'] ?? 0),
+                    'total_correct' => (int)($studyStats['totals']['total_correct'] ?? $studyStats['totals']['correct'] ?? 0),
+                    'total_wrong' => (int)($studyStats['totals']['total_wrong'] ?? $studyStats['totals']['wrong'] ?? 0),
                     'correct' => (int)($studyStats['totals']['correct'] ?? 0),
                     'wrong' => (int)($studyStats['totals']['wrong'] ?? 0),
                     'success_rate' => (float)($studyStats['totals']['success_rate'] ?? 0),
+                    'total_exams' => (int)($examStats['summary']['total'] ?? 0),
+                    'completed_exams' => (int)($examStats['summary']['completed'] ?? 0),
+                    'premium_active' => $isPremium ? 1 : 0,
+                ],
+                'top_summary' => [
+                    'total_solved' => (int)($studyStats['totals']['total_solved'] ?? 0),
                     'total_exams' => (int)($examStats['summary']['total'] ?? 0),
                     'completed_exams' => (int)($examStats['summary']['completed'] ?? 0),
                     'premium_active' => $isPremium ? 1 : 0,

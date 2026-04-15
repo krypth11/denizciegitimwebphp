@@ -96,6 +96,11 @@ $(function () {
     const appConfirm = (title, message, options = {}) => window.showAppConfirm ? window.showAppConfirm({ title, message, ...options }) : Promise.resolve(false);
     const fmtDate = (value) => !value ? '-' : (typeof window.formatDate === 'function' ? window.formatDate(value) : value);
     const fmtInt = (value) => Number(value || 0).toLocaleString('tr-TR');
+    const fmtPct = (value) => {
+        const n = Number(value || 0);
+        if (!Number.isFinite(n)) return '0';
+        return n.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    };
     const boolBadge = (value) => value ? '<span class="badge text-bg-success">Evet</span>' : '<span class="badge text-bg-secondary">Hayır</span>';
     const examStatusLabel = (status) => {
         const s = String(status || '').toLowerCase();
@@ -121,6 +126,60 @@ $(function () {
         if (status === 'premium_active') return '<span class="badge text-bg-success">Premium Aktif</span>';
         return '<span class="badge text-bg-primary">Kayıtlı (Free)</span>';
     };
+
+    const lifeValueLabel = (value) => {
+        const v = String(value ?? '').trim().toLowerCase();
+        const map = {
+            registered: '<span class="badge text-bg-primary">Kayıtlı</span>',
+            free: '<span class="badge text-bg-secondary">Ücretsiz</span>',
+            premium_active: '<span class="badge text-bg-success">Premium Aktif</span>',
+            guest: '<span class="badge text-bg-warning">Misafir</span>',
+            true: '<span class="badge text-bg-success">Evet</span>',
+            false: '<span class="badge text-bg-secondary">Hayır</span>',
+            '1': '<span class="badge text-bg-success">Evet</span>',
+            '0': '<span class="badge text-bg-secondary">Hayır</span>'
+        };
+        if (map[v]) return map[v];
+        return `<code>${esc(value ?? '-')}</code>`;
+    };
+
+    const normalizeStudyData = (data) => {
+        const totals = data.totals || {};
+        const mergedTotals = {
+            total_solved: Number(data.total_solved ?? totals.total_solved ?? 0),
+            correct: Number(data.total_correct ?? totals.total_correct ?? totals.correct ?? 0),
+            wrong: Number(data.total_wrong ?? totals.total_wrong ?? totals.wrong ?? 0),
+            success_rate: Number(data.success_rate ?? totals.success_rate ?? 0),
+            last_study_at: data.last_study_at ?? totals.last_study_at ?? null
+        };
+        return {
+            totals: mergedTotals,
+            source_distribution: Array.isArray(data.source_distribution) ? data.source_distribution : [],
+            qualification_distribution: Array.isArray(data.qualification_distribution) ? data.qualification_distribution : (data.breakdowns?.qualification || []),
+            course_distribution: Array.isArray(data.course_distribution) ? data.course_distribution : (data.breakdowns?.course || []),
+            topic_distribution: Array.isArray(data.topic_distribution) ? data.topic_distribution : (data.breakdowns?.topic || []),
+            recent_attempts: Array.isArray(data.recent_attempts) ? data.recent_attempts : (Array.isArray(data.recent_events) ? data.recent_events : [])
+        };
+    };
+
+    const normalizeExamData = (data) => {
+        const summary = data.summary || {};
+        return {
+            summary: {
+                total: Number(data.total_exams ?? summary.total ?? 0),
+                completed: Number(data.completed_exams ?? summary.completed ?? 0),
+                in_progress: Number(data.in_progress_exams ?? summary.in_progress ?? 0),
+                abandoned: Number(data.abandoned_exams ?? summary.abandoned ?? 0),
+                last_exam_at: data.last_exam_at ?? summary.last_exam_at ?? null
+            },
+            rows: Array.isArray(data.exam_rows) ? data.exam_rows : (Array.isArray(data.attempts) ? data.attempts : [])
+        };
+    };
+
+    const normalizeUsageData = (data) => ({
+        summary: data.summary_by_feature || data.summary || {},
+        rows: Array.isArray(data.usage_rows) ? data.usage_rows : (Array.isArray(data.rows) ? data.rows : [])
+    });
 
     function setLoading(tabId, text = 'Yükleniyor...') {
         $(tabId).html(`<div class="card user-soft-card"><div class="card-body text-muted"><div class="spinner-border spinner-border-sm me-2"></div>${esc(text)}</div></div>`);
@@ -153,9 +212,9 @@ $(function () {
         $('#tab-general').html(`
             <div class="row g-3 mb-3">
                 <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam Çözülen</div><div class="h4 mb-0">${esc(fmtInt(k.total_solved || 0))}</div></div></div></div>
-                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Doğru</div><div class="h4 mb-0">${esc(fmtInt(k.correct || 0))}</div></div></div></div>
-                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Yanlış</div><div class="h4 mb-0">${esc(fmtInt(k.wrong || 0))}</div></div></div></div>
-                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Başarı Oranı</div><div class="h4 mb-0">%${esc(k.success_rate || 0)}</div></div></div></div>
+                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Doğru</div><div class="h4 mb-0">${esc(fmtInt(k.total_correct ?? k.correct ?? 0))}</div></div></div></div>
+                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Yanlış</div><div class="h4 mb-0">${esc(fmtInt(k.total_wrong ?? k.wrong ?? 0))}</div></div></div></div>
+                <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Başarı Oranı</div><div class="h4 mb-0">%${esc(fmtPct(k.success_rate || 0))}</div></div></div></div>
                 <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam Deneme</div><div class="h4 mb-0">${esc(fmtInt(k.total_exams || 0))}</div></div></div></div>
                 <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Tamamlanan Deneme</div><div class="h4 mb-0">${esc(fmtInt(k.completed_exams || 0))}</div></div></div></div>
                 <div class="col-6 col-lg-3"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Premium</div><div class="h6 mb-0">${k.premium_active ? 'Aktif' : 'Ücretsiz'}</div></div></div></div>
@@ -202,7 +261,7 @@ $(function () {
                             <small class="text-muted">${esc(fmtDate(item.created_at))}</small>
                         </div>
                         <div class="small text-muted mt-1">Kaynak: ${esc(item.source || '-')}</div>
-                        <div class="mt-2 small">Old: <code>${esc(item.old_value ?? '-')}</code> | New: <code>${esc(item.new_value ?? '-')}</code></div>
+                        <div class="mt-2 small">Eski: ${lifeValueLabel(item.old_value)} | Yeni: ${lifeValueLabel(item.new_value)}</div>
                         ${item.meta ? `<pre class="small mt-2 mb-0 lifecycle-meta">${esc(JSON.stringify(item.meta, null, 2))}</pre>` : ''}
                     </div>
                 </div>
@@ -213,13 +272,18 @@ $(function () {
     }
 
     function renderSubscription(s) {
+        const isPro = Number(s.is_pro || 0) === 1;
+        const isPremiumActive = Number(s.premium_active || 0) === 1;
+        const premiumState = isPremiumActive
+            ? '<span class="badge text-bg-success">Aktif</span>'
+            : (isPro ? '<span class="badge text-bg-warning">Pro var, süresi dolmuş olabilir</span>' : '<span class="badge text-bg-secondary">Ücretsiz</span>');
         $('#tab-subscription').html(`
             <div class="card user-soft-card">
                 <div class="card-body table-responsive">
                     <table class="table table-sm align-middle mb-0">
                         <tbody>
                             <tr><th width="220">Pro Üyelik</th><td>${boolBadge(s.is_pro)}</td></tr>
-                            <tr><th>Premium Aktif mi?</th><td>${s.premium_active ? '<span class="badge text-bg-success">Aktif</span>' : '<span class="badge text-bg-secondary">Ücretsiz</span>'}</td></tr>
+                            <tr><th>Premium Aktif mi?</th><td>${premiumState}</td></tr>
                             <tr><th>Paket Kodu</th><td>${esc(s.plan_code || '-')}</td></tr>
                             <tr><th>Sağlayıcı</th><td>${esc(s.provider || '-')}</td></tr>
                             <tr><th>Entitlement ID</th><td>${esc(s.entitlement_id || '-')}</td></tr>
@@ -236,10 +300,10 @@ $(function () {
     }
 
     function renderStudy(data) {
-        const totals = data.totals || {};
-        const dist = data.source_distribution || [];
-        const recent = data.recent_events || [];
-        const breakdowns = data.breakdowns || {};
+        const normalized = normalizeStudyData(data || {});
+        const totals = normalized.totals;
+        const dist = normalized.source_distribution;
+        const recent = normalized.recent_attempts;
 
         const distRows = dist.length ? dist.map(x => `<tr><td>${esc(x.source || '-')}</td><td>${esc(fmtInt(x.total || 0))}</td></tr>`).join('') : '<tr><td colspan="2" class="text-muted">Kayıt yok</td></tr>';
         const recentRows = recent.length ? recent.map(x => {
@@ -259,7 +323,7 @@ $(function () {
                 <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Toplam Çözülen</div><div class="h5 mb-0">${esc(fmtInt(totals.total_solved || 0))}</div></div></div></div>
                 <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Doğru</div><div class="h5 mb-0">${esc(fmtInt(totals.correct || 0))}</div></div></div></div>
                 <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Yanlış</div><div class="h5 mb-0">${esc(fmtInt(totals.wrong || 0))}</div></div></div></div>
-                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Başarı</div><div class="h5 mb-0">%${esc(totals.success_rate || 0)}</div></div></div></div>
+                <div class="col-6 col-lg-2"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Başarı</div><div class="h5 mb-0">%${esc(fmtPct(totals.success_rate || 0))}</div></div></div></div>
                 <div class="col-12 col-lg-4"><div class="card user-soft-card"><div class="card-body"><div class="small text-muted">Son Çalışma</div><div class="h6 mb-0">${esc(fmtDate(totals.last_study_at))}</div></div></div></div>
             </div>
             <div class="row g-3 mb-3">
@@ -271,16 +335,17 @@ $(function () {
                 </div>
             </div>
             <div class="row g-3">
-                ${renderBreak('Yeterlilik Dağılımı', breakdowns.qualification)}
-                ${renderBreak('Ders Dağılımı', breakdowns.course)}
-                ${renderBreak('Konu Dağılımı', breakdowns.topic)}
+                ${renderBreak('Yeterlilik Dağılımı', normalized.qualification_distribution)}
+                ${renderBreak('Ders Dağılımı', normalized.course_distribution)}
+                ${renderBreak('Konu Dağılımı', normalized.topic_distribution)}
             </div>
         `);
     }
 
     function renderExams(data) {
-        const s = data.summary || {};
-        const attempts = data.attempts || [];
+        const normalized = normalizeExamData(data || {});
+        const s = normalized.summary;
+        const attempts = normalized.rows;
         const rows = attempts.length ? attempts.map(a => `
             <tr>
                 <td>${esc(a.qualification_name || '-')}</td>
@@ -309,10 +374,11 @@ $(function () {
     }
 
     function renderUsage(data) {
-        const summary = data.summary || {};
-        const rows = data.rows || [];
+        const normalized = normalizeUsageData(data || {});
+        const summary = normalized.summary;
+        const rows = normalized.rows;
         const sumRows = Object.keys(summary).length
-            ? Object.keys(summary).map(k => `<tr><td>${esc(k)}</td><td>${esc(fmtInt(summary[k]?.total_used || 0))}</td><td>${esc(summary[k]?.daily_limit ?? '-')}</td></tr>`).join('')
+            ? Object.keys(summary).map(k => `<tr><td>${esc(k)}</td><td>${esc(fmtInt(summary[k]?.used_count ?? summary[k]?.total_used || 0))}</td><td>${esc(summary[k]?.daily_limit ?? '-')}</td></tr>`).join('')
             : '<tr><td colspan="3" class="text-muted">Özet veri yok.</td></tr>';
         const listRows = rows.length
             ? rows.map(r => `<tr><td>${esc(r.usage_date_tr || r.usage_date || '-')}</td><td>${esc(r.feature_key || '-')}</td><td>${esc(fmtInt(r.used_count || 0))}</td><td>${esc(r.daily_limit ?? '-')}</td><td>${esc(r.qualification_name || '-')}</td><td>${esc(fmtDate(r.updated_at || r.created_at))}</td></tr>`).join('')
@@ -458,6 +524,13 @@ $(function () {
         noteList = detailData.admin_notes || [];
         renderTopSummary(detailData.user || {}, detailData.kpi || {});
         renderGeneral();
+
+        if (!loadedTabs.study) {
+            await loadTab('study');
+        }
+        if (!loadedTabs.exams) {
+            await loadTab('exams');
+        }
     }
 
     $('button[data-bs-toggle="tab"]').on('shown.bs.tab', async function () {
