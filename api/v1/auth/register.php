@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once dirname(__DIR__, 2) . '/includes/user_lifecycle_helper.php';
 
 api_require_method('POST');
 
@@ -91,6 +92,17 @@ try {
 
         $token = api_create_user_token($pdo, $userId);
         api_update_last_sign_in($pdo, $userId);
+
+        user_lifecycle_log_event(
+            $pdo,
+            $userId,
+            'account_created_registered',
+            'Kayıtlı hesap oluşturma başlatıldı',
+            'auth.register',
+            null,
+            $email,
+            ['pending_verification' => true]
+        );
 
         api_create_and_send_email_otp($pdo, $userId, $email, 'signup');
 

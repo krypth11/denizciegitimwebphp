@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/usage_limits_helper.php';
+require_once dirname(__DIR__, 2) . '/includes/user_lifecycle_helper.php';
 
 api_require_method('POST');
 
@@ -41,6 +42,8 @@ try {
         }
     }
 
+    $beforeStatus = usage_limits_get_user_subscription_status($pdo, $userId);
+
     $status = usage_limits_upsert_subscription_status($pdo, $userId, [
         'is_pro' => (bool)$isPro,
         'plan_code' => ($planCode !== '' ? $planCode : null),
@@ -48,6 +51,50 @@ try {
         'rc_app_user_id' => ($rcAppUserId !== '' ? $rcAppUserId : null),
         'expires_at' => $expiresAt,
     ]);
+
+    $beforeIsPro = !empty($beforeStatus['is_pro']);
+    $afterIsPro = !empty($status['is_pro']);
+    $beforeExpiry = (string)($beforeStatus['expires_at'] ?? '');
+    $afterExpiry = (string)($status['expires_at'] ?? '');
+
+    if (!$beforeIsPro && $afterIsPro) {
+        user_lifecycle_log_event(
+            $pdo,
+            $userId,
+            'premium_started',
+            'Premium başlatıldı',
+            'subscription.sync',
+            null,
+            ($afterExpiry !== '' ? $afterExpiry : 'active'),
+            ['plan_code' => $status['plan_code'] ?? null]
+        );
+    } elseif ($beforeIsPro && $afterIsPro && $beforeExpiry !== $afterExpiry && $afterExpiry !== '') {
+        user_lifecycle_log_event(
+            $pdo,
+            $userId,
+            'premium_renewed',
+            'Premium yenilendi',
+            'subscription.sync',
+            ($beforeExpiry !== '' ? $beforeExpiry : null),
+            $afterExpiry,
+            ['plan_code' => $status['plan_code'] ?? null]
+        );
+    } elseif ($beforeIsPro && !$afterIsPro) {
+        $eventType = ($beforeExpiry !== '' && strtotime($beforeExpiry) !== false && strtotime($beforeExpiry) <= time())
+            ? 'premium_expired'
+            : 'premium_cancelled';
+        $title = $eventType === 'premium_expired' ? 'Premium süresi doldu' : 'Premium iptal edildi';
+        user_lifecycle_log_event(
+            $pdo,
+            $userId,
+            $eventType,
+            $title,
+            'subscription.sync',
+            ($beforeExpiry !== '' ? $beforeExpiry : 'active'),
+            'free',
+            ['plan_code' => $beforeStatus['plan_code'] ?? null]
+        );
+    }
 
     api_success('Abonelik durumu senkronize edildi.', [
         'subscription' => [

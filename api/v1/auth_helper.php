@@ -1,6 +1,7 @@
 <?php
 
 require_once dirname(__DIR__, 2) . '/includes/auth.php';
+require_once dirname(__DIR__, 2) . '/includes/user_lifecycle_helper.php';
 
 function api_get_all_headers_safe(): array
 {
@@ -1259,6 +1260,18 @@ function api_email_verification_apply(PDO $pdo, string $userId, string $purpose)
         $values[] = $userId;
         $stmt = $pdo->prepare($sql);
         $stmt->execute($values);
+
+        user_lifecycle_log_event(
+            $pdo,
+            $userId,
+            'email_verified',
+            'Email doğrulandı',
+            'auth.verify_email_otp',
+            null,
+            $pending,
+            ['purpose' => 'signup']
+        );
+
         return;
     }
 
@@ -1294,6 +1307,29 @@ function api_email_verification_apply(PDO $pdo, string $userId, string $purpose)
         $values[] = $userId;
         $stmt = $pdo->prepare($sql);
         $stmt->execute($values);
+
+        user_lifecycle_log_event(
+            $pdo,
+            $userId,
+            'guest_converted_registered',
+            'Misafir hesap kayıtlı hesaba dönüştürüldü',
+            'auth.verify_email_otp',
+            'guest',
+            'registered',
+            ['purpose' => 'guest_convert', 'email' => $pending]
+        );
+
+        user_lifecycle_log_event(
+            $pdo,
+            $userId,
+            'email_verified',
+            'Email doğrulandı',
+            'auth.verify_email_otp',
+            null,
+            $pending,
+            ['purpose' => 'guest_convert']
+        );
+
         return;
     }
 

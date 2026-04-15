@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once dirname(__DIR__, 2) . '/includes/user_lifecycle_helper.php';
 
 api_require_method('PUT');
 
@@ -29,11 +30,27 @@ try {
         $profileSchema['current_qualification_id'] => $qualificationId,
     ];
 
+    $beforeProfile = api_find_profile_by_user_id($pdo, $userId);
+    $oldQualificationId = (string)($beforeProfile['current_qualification_id'] ?? '');
+
     if ($profileSchema['onboarding_completed']) {
         $updates[$profileSchema['onboarding_completed']] = 1;
     }
 
     api_update_profile_fields($pdo, $userId, $updates);
+
+    if ($oldQualificationId !== $qualificationId) {
+        user_lifecycle_log_event(
+            $pdo,
+            $userId,
+            'qualification_changed',
+            'Mevcut yeterlilik değişti',
+            'profile.current_qualification',
+            ($oldQualificationId !== '' ? $oldQualificationId : null),
+            $qualificationId,
+            ['context' => 'profile.current-qualification']
+        );
+    }
 
     $resolvedQualificationId = get_current_user_qualification_id($pdo, $userId);
     api_qualification_access_log('profile current qualification updated to', [

@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once dirname(__DIR__, 2) . '/includes/user_lifecycle_helper.php';
 
 api_require_method('POST');
 
@@ -24,6 +25,17 @@ try {
 
     $token = api_create_user_token($pdo, $userId);
     api_update_last_sign_in($pdo, $userId);
+
+    user_lifecycle_log_event(
+        $pdo,
+        $userId,
+        'account_created_guest',
+        'Misafir hesap oluşturuldu',
+        'auth.guest_login',
+        null,
+        null,
+        ['email' => $guestEmail]
+    );
 
     api_success('Misafir girişi başarılı.', [
         'token' => $token,
