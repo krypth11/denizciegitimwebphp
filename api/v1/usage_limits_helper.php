@@ -671,6 +671,21 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
         $target[] = $normalized;
     };
 
+    $latestSyncPayload = $options['latest_sync_payload'] ?? null;
+    if (is_array($latestSyncPayload)) {
+        foreach ([
+            'current_rc_app_user_id',
+            'original_app_user_id',
+            'rc_app_user_id',
+            'logged_in_app_user_id',
+        ] as $key) {
+            $v = trim((string)($latestSyncPayload[$key] ?? ''));
+            if ($v !== '') {
+                $requestCandidates[] = $v;
+            }
+        }
+    }
+
     $preferredRequestRcId = trim((string)($options['preferred_rc_app_user_id'] ?? ''));
     if ($preferredRequestRcId !== '') {
         $appendCandidate($requestCandidates, $preferredRequestRcId);
@@ -680,14 +695,6 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
     $appendCandidate($requestCandidates, $options['original_app_user_id'] ?? null);
     $appendCandidate($requestCandidates, $options['rc_app_user_id'] ?? null);
     $appendCandidate($requestCandidates, $options['logged_in_app_user_id'] ?? null);
-
-    $latestSyncPayload = $options['latest_sync_payload'] ?? null;
-    if (is_array($latestSyncPayload)) {
-        $appendCandidate($requestCandidates, $latestSyncPayload['current_rc_app_user_id'] ?? null);
-        $appendCandidate($requestCandidates, $latestSyncPayload['original_app_user_id'] ?? null);
-        $appendCandidate($requestCandidates, $latestSyncPayload['rc_app_user_id'] ?? null);
-        $appendCandidate($requestCandidates, $latestSyncPayload['logged_in_app_user_id'] ?? null);
-    }
 
     $beforeNormalized = usage_limits_normalize_subscription_row($beforeRow, $userId);
     if (!empty($beforeNormalized['rc_app_user_id'])) {
