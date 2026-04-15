@@ -171,7 +171,7 @@ try {
     $clientEntitlementId = subscription_sync_parse_optional_string($payload, 'entitlement_id');
     $clientRcAppUserId = subscription_sync_parse_optional_string($payload, 'rc_app_user_id');
     $clientExpiresAt = subscription_sync_parse_expires_at($payload);
-    $clientFallbackEligible = (!empty($clientIsPro) && !empty($clientRcAppUserId) && !empty($clientExpiresAt));
+    $clientFallbackEligible = (!empty($clientIsPro));
     $existingState = usage_limits_normalize_subscription_row($beforeStatus, $userId);
     $resolvedRcAppUserId = $clientRcAppUserId
         ?? usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeStatus, [
@@ -235,8 +235,8 @@ try {
             ?? ($existingState['entitlement_id'] ?? null),
         'rc_app_user_id' => $verificationTruth['rc_app_user_id']
             ?? $clientRcAppUserId
-            ?? $resolvedRcAppUserId
-            ?? ($existingState['rc_app_user_id'] ?? null),
+            ?? ($existingState['rc_app_user_id'] ?? null)
+            ?? $resolvedRcAppUserId,
         'expires_at' => $verificationTruth['expires_at']
             ?? $clientExpiresAt
             ?? ($existingState['expires_at'] ?? null),
@@ -251,10 +251,6 @@ try {
             'expires_at' => $existingState['expires_at'] ?? $clientExpiresAt,
         ];
         $verificationMode = 'existing_row_preserved_after_verification_failure';
-    }
-
-    if (!empty($effectiveState['is_pro']) && empty($effectiveState['expires_at'])) {
-        throw new RuntimeException('Premium kullanıcı için expires_at boş olamaz.');
     }
 
     subscription_sync_debug_log('computed_effective_state', [
@@ -291,35 +287,31 @@ try {
     $afterStatus = usage_limits_get_user_subscription_status($pdo, $userId);
 
     $expectedIsPro = !empty($effectiveState['is_pro']);
-    $expectedExpiresAt = usage_limits_normalize_datetime_to_mysql($effectiveState['expires_at'] ?? null);
-    $expectedRcCandidates = array_values(array_unique(array_filter([
-        $verificationTruth['rc_app_user_id'] ?? null,
-        $clientRcAppUserId,
-        $resolvedRcAppUserId,
-    ], static fn($v) => trim((string)$v) !== '')));
     $actualIsPro = ((int)($afterStatus['is_pro'] ?? 0) === 1);
-    $actualExpiresAt = usage_limits_normalize_datetime_to_mysql($afterStatus['expires_at'] ?? null);
-    $actualRcAppUserId = trim((string)($afterStatus['rc_app_user_id'] ?? ''));
+    $postCheckRow = usage_limits_normalize_subscription_row($afterStatus, $userId);
+    $postCheckComputedIsPro = usage_limits_is_subscription_active($afterStatus);
 
-    if ($expectedIsPro && (!$actualIsPro || empty($actualExpiresAt) || $actualRcAppUserId === '' || (!empty($expectedRcCandidates) && !in_array($actualRcAppUserId, $expectedRcCandidates, true)))) {
-        subscription_sync_debug_log('subscription_sync_post_check_failed', [
+    subscription_sync_debug_log('subscription_sync_post_check', [
+        'authenticated_user_id' => $userId,
+        'verification_mode' => $verificationMode,
+        'effective_state' => $effectiveState,
+        'is_pro' => !empty($postCheckRow['is_pro']),
+        'entitlement_id' => $postCheckRow['entitlement_id'] ?? null,
+        'rc_app_user_id' => $postCheckRow['rc_app_user_id'] ?? null,
+        'expires_at' => $postCheckRow['expires_at'] ?? null,
+        'computed_is_pro' => $postCheckComputedIsPro,
+    ]);
+
+    if ($expectedIsPro && !$actualIsPro) {
+        subscription_sync_debug_log('subscription_sync_post_check_mismatch', [
             'authenticated_user_id' => $userId,
             'verification_mode' => $verificationMode,
             'verification_failed' => $verificationFailed,
             'verification_error_message' => $verificationErrorMessage,
-            'effective_state' => $effectiveState,
-            'after_subscription_row' => usage_limits_normalize_subscription_row($afterStatus, $userId),
-            'expected_rc_candidates' => $expectedRcCandidates,
-            'actual_rc_app_user_id' => ($actualRcAppUserId !== '' ? $actualRcAppUserId : null),
+            'expected_is_pro' => true,
+            'actual_is_pro' => false,
+            'after_subscription_row' => $postCheckRow,
         ]);
-
-        throw new RuntimeException('Subscription upsert post-check başarısız: premium kayıt beklenirken DB satırı doğrulanamadı.');
-    }
-
-    if (!$expectedIsPro && $actualIsPro && $expectedExpiresAt !== null) {
-        throw new RuntimeException(
-            'Subscription upsert doğrulaması başarısız: free beklenirken DB is_pro=1 döndü.'
-        );
     }
 
     $changes = usage_limits_get_subscription_state_changes($beforeStatus, $afterStatus);

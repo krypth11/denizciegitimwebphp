@@ -817,7 +817,7 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
         }
     }
 
-    $finalCandidates = !empty($nonAnonymous) ? $nonAnonymous : $anonymous;
+    $finalCandidates = array_merge($nonAnonymous, $anonymous);
 
     usage_limits_subscription_debug_log('resolve_rc_app_user_id_candidates', [
         'user_id' => $userId,
@@ -826,7 +826,7 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
         'subscription_row_candidates' => $subscriptionCandidates,
         'non_anonymous_candidates' => $nonAnonymous,
         'anonymous_candidates' => $anonymous,
-        'anonymous_skipped_due_to_non_anonymous' => (!empty($nonAnonymous) && !empty($anonymous)),
+        'anonymous_skipped_due_to_non_anonymous' => false,
         'final_candidates' => $finalCandidates,
     ]);
 
@@ -836,7 +836,24 @@ function usage_limits_collect_revenuecat_app_user_id_candidates(PDO $pdo, string
 function usage_limits_resolve_revenuecat_app_user_id(PDO $pdo, string $userId, array $beforeRow = [], array $options = []): ?string
 {
     $candidates = usage_limits_collect_revenuecat_app_user_id_candidates($pdo, $userId, $beforeRow, $options);
-    return !empty($candidates) ? (string)$candidates[0] : null;
+
+    $firstAnonymous = null;
+    foreach ($candidates as $candidate) {
+        $candidate = trim((string)$candidate);
+        if ($candidate === '') {
+            continue;
+        }
+
+        if (!usage_limits_is_revenuecat_anonymous_app_user_id($candidate)) {
+            return $candidate;
+        }
+
+        if ($firstAnonymous === null) {
+            $firstAnonymous = $candidate;
+        }
+    }
+
+    return $firstAnonymous;
 }
 
 function usage_limits_try_repair_subscription_status(PDO $pdo, string $userId, array $context = []): array
@@ -855,7 +872,10 @@ function usage_limits_try_repair_subscription_status(PDO $pdo, string $userId, a
         'after' => $beforeRow,
         'repaired' => false,
         'verified_active' => $beforeActive,
-        'rc_app_user_id' => (!empty($resolvedCandidates) ? (string)$resolvedCandidates[0] : null),
+        'rc_app_user_id' => usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeRow, [
+            'preferred_rc_app_user_id' => $preferredRcAppUserId,
+            'latest_sync_payload' => $latestSyncPayload,
+        ]),
         'rc_app_user_id_candidates' => $resolvedCandidates,
     ];
 

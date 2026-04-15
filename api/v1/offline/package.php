@@ -44,6 +44,7 @@ try {
                 'computed_is_pro' => $computedIsPro,
                 'repaired' => !empty($repair['repaired']),
                 'verified_active' => !empty($repair['verified_active']),
+                'used_rc_app_user_id' => $repair['rc_app_user_id'] ?? null,
                 'rc_app_user_id' => $repair['rc_app_user_id'] ?? null,
                 'rc_app_user_id_candidates' => $repair['rc_app_user_id_candidates'] ?? [],
             ]);
@@ -61,6 +62,7 @@ try {
             'computed_is_pro' => $computedIsPro,
             'repaired' => !empty($repair['repaired']),
             'verified_active' => !empty($repair['verified_active']),
+            'used_rc_app_user_id' => $repair['rc_app_user_id'] ?? ($afterNormalized['rc_app_user_id'] ?? null),
             'rc_app_user_id' => $repair['rc_app_user_id'] ?? ($afterNormalized['rc_app_user_id'] ?? null),
             'rc_app_user_id_candidates' => $repair['rc_app_user_id_candidates'] ?? [],
         ]);
