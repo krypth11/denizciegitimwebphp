@@ -485,12 +485,11 @@ function usage_limits_normalize_datetime_to_mysql($value, bool $allowNull = true
         return $dt->format('Y-m-d H:i:s');
     }
 
-    if (
-        is_int($value) ||
-        (is_string($value) && preg_match('/^\d{10}(?:\d{3})?$/', trim($value)))
-    ) {
-        $raw = (string)$value;
-        $seconds = strlen($raw) > 10 ? ((int)$raw / 1000) : (int)$raw;
+    $numericRaw = is_string($value) ? trim($value) : (is_int($value) ? (string)$value : null);
+    if ($numericRaw !== null && preg_match('/^\d{10}(?:\d{3})?$/', $numericRaw)) {
+        $seconds = (strlen($numericRaw) === 13)
+            ? intdiv((int)$numericRaw, 1000)
+            : (int)$numericRaw;
 
         try {
             $dt = (new DateTimeImmutable('@' . (string)$seconds))
@@ -513,7 +512,9 @@ function usage_limits_normalize_datetime_to_mysql($value, bool $allowNull = true
     }
 
     try {
-        $dt = new DateTimeImmutable($text, $tz);
+        $dt = (new DateTimeImmutable($text, $tz))
+            ->setTimezone($tz);
+
         return $dt->format('Y-m-d H:i:s');
     } catch (Throwable $e) {
         $ts = strtotime($text);
@@ -522,7 +523,9 @@ function usage_limits_normalize_datetime_to_mysql($value, bool $allowNull = true
             return null;
         }
 
-        return date('Y-m-d H:i:s', $ts);
+        return (new DateTimeImmutable('@' . (string)$ts))
+            ->setTimezone($tz)
+            ->format('Y-m-d H:i:s');
     }
 }
 
