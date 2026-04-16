@@ -667,6 +667,88 @@ function usage_limits_get_user_subscription_status(PDO $pdo, string $userId): ar
     ];
 }
 
+function usage_limits_is_expired_pro_row(array $status, ?int $nowTs = null): bool
+{
+    $normalized = usage_limits_normalize_subscription_row($status, (string)($status['user_id'] ?? ''));
+    if (empty($status['exists']) || empty($normalized['is_pro'])) {
+        return false;
+    }
+
+    $expiresAt = $normalized['expires_at'] ?? null;
+    if ($expiresAt === null || $expiresAt === '') {
+        return false;
+    }
+
+    $expiresAtTs = strtotime((string)$expiresAt);
+    if ($expiresAtTs === false) {
+        return false;
+    }
+
+    $nowTs = $nowTs ?? time();
+    return $expiresAtTs <= $nowTs;
+}
+
+function usage_limits_self_heal_expired_subscription_row(PDO $pdo, string $userId, ?array $status = null, array $context = []): array
+{
+    $before = is_array($status) ? $status : usage_limits_get_user_subscription_status($pdo, $userId);
+    $beforeNormalized = usage_limits_normalize_subscription_row($before, $userId);
+
+    if (!usage_limits_is_expired_pro_row($before)) {
+        return [
+            'applied' => false,
+            'before' => $before,
+            'after' => $before,
+        ];
+    }
+
+    usage_limits_subscription_debug_log('expired row detected', [
+        'user_id' => $userId,
+        'source' => $context['source'] ?? null,
+        'before_is_pro' => !empty($beforeNormalized['is_pro']),
+        'before_expires_at' => $beforeNormalized['expires_at'] ?? null,
+    ]);
+
+    $s = usage_limits_get_subscription_schema($pdo);
+    $set = [usage_limits_q($s['is_pro']) . ' = 0'];
+    if (!empty($s['last_synced_at'])) {
+        $set[] = usage_limits_q($s['last_synced_at']) . ' = NOW()';
+    }
+    if (!empty($s['updated_at'])) {
+        $set[] = usage_limits_q($s['updated_at']) . ' = NOW()';
+    }
+
+    $whereCol = $s['id'] ?: $s['user_id'];
+    $whereVal = $s['id'] ? (string)($before['id'] ?? '') : $userId;
+    if ($whereVal === '') {
+        $whereCol = $s['user_id'];
+        $whereVal = $userId;
+    }
+
+    $sql = 'UPDATE ' . usage_limits_q($s['table'])
+        . ' SET ' . implode(', ', $set)
+        . ' WHERE ' . usage_limits_q($whereCol) . ' = ? LIMIT 1';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$whereVal]);
+
+    $after = usage_limits_get_user_subscription_status($pdo, $userId);
+    $afterNormalized = usage_limits_normalize_subscription_row($after, $userId);
+
+    usage_limits_subscription_debug_log('db self-heal applied', [
+        'user_id' => $userId,
+        'source' => $context['source'] ?? null,
+        'before_is_pro' => !empty($beforeNormalized['is_pro']),
+        'after_is_pro' => !empty($afterNormalized['is_pro']),
+        'before_expires_at' => $beforeNormalized['expires_at'] ?? null,
+        'after_expires_at' => $afterNormalized['expires_at'] ?? null,
+    ]);
+
+    return [
+        'applied' => true,
+        'before' => $before,
+        'after' => $after,
+    ];
+}
+
 function usage_limits_is_revenuecat_anonymous_app_user_id(?string $value): bool
 {
     $v = strtolower(trim((string)$value));

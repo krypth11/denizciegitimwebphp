@@ -12,6 +12,12 @@ try {
     $qualificationId = api_require_current_user_qualification_id($pdo, $auth, 'usage.summary');
 
     $subscription = usage_limits_get_user_subscription_status($pdo, $userId);
+    $selfHeal = usage_limits_self_heal_expired_subscription_row($pdo, $userId, $subscription, [
+        'source' => 'usage.summary',
+    ]);
+    if (!empty($selfHeal['applied']) && is_array($selfHeal['after'] ?? null)) {
+        $subscription = $selfHeal['after'];
+    }
     $subscriptionIsActive = usage_limits_is_subscription_active($subscription);
 
     $summary = usage_limits_get_summary($pdo, $userId, $qualificationId);

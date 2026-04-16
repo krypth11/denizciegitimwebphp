@@ -391,7 +391,12 @@ try {
         'last_synced_at' => gmdate('Y-m-d H:i:s'),
     ];
 
-    if ($effectiveClientIsPro === true) {
+    $serverVerifiedInactive = (is_array($verificationTruth) && !$verificationTruthActive);
+    if ($serverVerifiedInactive) {
+        $effectiveState['is_pro'] = false;
+    }
+
+    if ($effectiveClientIsPro === true && !$serverVerifiedInactive) {
         $effectiveState['is_pro'] = true;
     }
 
