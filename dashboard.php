@@ -113,6 +113,8 @@ include 'includes/sidebar.php';
                     <button type="button" class="chip active" data-type="registrations">Kaydolan Kullanıcılar</button>
                     <button type="button" class="chip active" data-type="daily_quiz">Daily Quiz</button>
                     <button type="button" class="chip active" data-type="solved_questions">Çözülen Sorular</button>
+                    <button type="button" class="chip active" data-type="subscription_started">Yeni Abonelikler</button>
+                    <button type="button" class="chip active" data-type="subscription_renewed">Abonelik Yenilemeleri</button>
                 </div>
                 <select class="form-select form-select-sm w-auto" id="activityLimit">
                     <option value="10">10</option>
@@ -133,7 +135,7 @@ include 'includes/sidebar.php';
         <div class="card-header d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2">
             <div>
                 <h5 class="mb-0">Aktivite Grafiği</h5>
-                <small class="text-muted">Filtreler değişince otomatik güncellenir · <span id="chartRefreshInfo">Son güncelleme: -</span></small>
+                <small class="text-muted">Filtreler değişince otomatik güncellenir · Abonelik serileri katkı puanı olarak hesaplanır · <span id="chartRefreshInfo">Son güncelleme: -</span></small>
             </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
                 <div class="dashboard-date-filter" id="chartDateFilter">
@@ -158,6 +160,8 @@ include 'includes/sidebar.php';
                 <button type="button" class="chip active" data-type="solved_questions">Çözülen Sorular</button>
                 <button type="button" class="chip active" data-type="daily_quiz_completed">Daily Quiz Tamamlananlar</button>
                 <button type="button" class="chip active" data-type="added_questions">Eklenen Sorular</button>
+                <button type="button" class="chip active" data-type="subscription_started">Yeni Abonelikler</button>
+                <button type="button" class="chip active" data-type="subscription_renewed">Abonelik Yenilemeleri</button>
             </div>
             <div class="row g-2 mb-3" id="chartTotals"></div>
             <div class="chart-wrap">
@@ -188,8 +192,8 @@ include 'includes/sidebar.php';
         question: { qualification_id: '', course_id: '' },
         solved: { range: '7d', start_date: '', end_date: '' },
         users: { user_type: 'all' },
-        activity: { types: ['registrations', 'daily_quiz', 'solved_questions'], limit: 25 },
-        chart: { range: '7d', start_date: '', end_date: '', types: ['registrations', 'solved_questions', 'daily_quiz_completed', 'added_questions'] },
+        activity: { types: ['registrations', 'daily_quiz', 'solved_questions', 'subscription_started', 'subscription_renewed'], limit: 25 },
+        chart: { range: '7d', start_date: '', end_date: '', types: ['registrations', 'solved_questions', 'daily_quiz_completed', 'added_questions', 'subscription_started', 'subscription_renewed'] },
         refs: { qualifications: [], courses: [] },
         polling: { timer: null, interval: 1000 }
     };
@@ -485,7 +489,9 @@ include 'includes/sidebar.php';
         const map = {
             registrations: 'Kayıt',
             daily_quiz: 'Daily Quiz',
-            solved_questions: 'Soru Çözümü'
+            solved_questions: 'Soru Çözümü',
+            subscription_started: 'Yeni Abonelik',
+            subscription_renewed: 'Abonelik Yenileme'
         };
         return map[type] || type;
     }
@@ -494,7 +500,9 @@ include 'includes/sidebar.php';
         const map = {
             registrations: 'bi-person-plus',
             daily_quiz: 'bi-lightning-charge',
-            solved_questions: 'bi-bullseye'
+            solved_questions: 'bi-bullseye',
+            subscription_started: 'bi-gem',
+            subscription_renewed: 'bi-arrow-repeat'
         };
         return map[type] || 'bi-activity';
     }
@@ -507,6 +515,9 @@ include 'includes/sidebar.php';
         }
         if (item.type === 'registrations') return `Yeni kayıt: ${name}`;
         if (item.type === 'daily_quiz') return `Daily Quiz tamamlandı: ${item.detail?.correct_count ?? 0}/${item.detail?.total_count ?? 0} doğru`;
+        if (item.type === 'subscription_started' || item.type === 'subscription_renewed') {
+            return safe(item.detail?.sentence, safe(item.subtitle, `${name} için abonelik hareketi`));
+        }
         return safe(item.title, 'Aktivite');
     }
 
@@ -677,11 +688,47 @@ include 'includes/sidebar.php';
             </div>`;
     }
 
+    function renderSubscriptionDetail(activity) {
+        const isRenewal = activity.type === 'subscription_renewed';
+        const eventTypeMap = {
+            INITIAL_PURCHASE: 'İlk Satın Alma',
+            RENEWAL: 'Yenileme'
+        };
+        const eventTypeLabel = eventTypeMap[String(activity.detail?.event_type || '').toUpperCase()] || safe(activity.detail?.event_type);
+        const planLabel = safe(activity.detail?.plan_duration_label, safe(activity.detail?.plan_code, 'Bilinmeyen Plan'));
+        return `
+            <div class="activity-detail-modal">
+                <div class="activity-detail-head">
+                    <i class="bi ${isRenewal ? 'bi-arrow-repeat' : 'bi-gem'}"></i>
+                    <div><h6>${isRenewal ? 'Abonelik Yenileme' : 'Yeni Abonelik'} Detayı</h6><p>${safe(activity.detail?.sentence, 'Abonelik olayı')}</p></div>
+                </div>
+                <div class="activity-badges">
+                    <span class="activity-stat-pill">${isRenewal ? 'Yenileme' : 'Yeni Abonelik'}</span>
+                    <span class="activity-stat-pill">Plan: ${planLabel}</span>
+                    <span class="activity-stat-pill">Katkı Puanı: ${formatNumber(activity.detail?.weight_score || 1)}</span>
+                </div>
+                ${buildInfoGrid([
+                    ['Kullanıcı', safe(activity.user?.full_name)],
+                    ['Email', safe(activity.user?.email)],
+                    ['Plan', planLabel],
+                    ['Mağaza', safe(activity.detail?.store)],
+                    ['Entitlement', safe(activity.detail?.entitlement_id)],
+                    ['Olay Tipi', eventTypeLabel],
+                    ['Tarih', formatDateTime(activity.detail?.event_at || activity.created_at)],
+                    ['Katkı Puanı', formatNumber(activity.detail?.weight_score || 1)],
+                    ['Provider', safe(activity.detail?.provider)],
+                    ['Source', safe(activity.detail?.source)],
+                    ['Plan Kodu', safe(activity.detail?.plan_code)]
+                ])}
+            </div>`;
+    }
+
     function renderActivityDetail(activity) {
         if (!activity) return '<div class="activity-detail-modal"><p>Detay bulunamadı.</p></div>';
         if (activity.type === 'solved_questions') return renderSolvedQuestionDetail(activity);
         if (activity.type === 'registrations') return renderRegistrationDetail(activity);
         if (activity.type === 'daily_quiz') return renderDailyQuizDetail(activity);
+        if (activity.type === 'subscription_started' || activity.type === 'subscription_renewed') return renderSubscriptionDetail(activity);
         return `
             <div class="activity-detail-modal">
                 <div class="activity-detail-head"><i class="bi bi-activity"></i><div><h6>Aktivite Detayı</h6><p>Bu aktivite için özel görünüm bulunamadı.</p></div></div>
@@ -788,7 +835,9 @@ include 'includes/sidebar.php';
             ['Toplam Kayıt', totals.registrations || 0],
             ['Toplam Çözülen Soru', totals.solved_questions || 0],
             ['Toplam Daily Quiz', totals.daily_quiz_completed || 0],
-            ['Toplam Eklenen Soru', totals.added_questions || 0]
+            ['Toplam Eklenen Soru', totals.added_questions || 0],
+            ['Yeni Abonelik Katkı Puanı', totals.subscription_started || 0],
+            ['Yenileme Katkı Puanı', totals.subscription_renewed || 0]
         ];
         box.innerHTML = items.map(([k, v]) => `<div class="col-6 col-lg-4"><div class="chart-total-box"><small>${k}</small><strong>${formatNumber(v)}</strong></div></div>`).join('');
     }
@@ -824,6 +873,8 @@ include 'includes/sidebar.php';
                 { key: 'solved_questions', label: 'Çözülen Sorular', color: '#6AA786', dash: [] },
                 { key: 'daily_quiz_completed', label: 'Daily Quiz', color: '#C89B54', dash: [6, 4] },
                 { key: 'added_questions', label: 'Eklenen Sorular', color: '#8A63D2', dash: [] },
+                { key: 'subscription_started', label: 'Yeni Abonelikler (Katkı)', color: '#2F9E44', dash: [] },
+                { key: 'subscription_renewed', label: 'Abonelik Yenilemeleri (Katkı)', color: '#D97706', dash: [4, 3] },
             ];
 
             const datasets = datasetsMeta

@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once __DIR__ . '/stats_filters.php';
+require_once dirname(__DIR__, 3) . '/includes/subscription_management_helper.php';
 
 api_require_method('GET');
 
@@ -93,7 +94,7 @@ try {
         api_error('Admin yetkisi gerekli.', 403);
     }
 
-    $allowedTypes = ['registrations', 'daily_quiz', 'solved_questions'];
+    $allowedTypes = ['registrations', 'daily_quiz', 'solved_questions', 'subscription_started', 'subscription_renewed'];
     $types = stats_parse_types_from_query($allowedTypes);
     $limit = api_get_int_query('limit', 25, 10, 100);
 
@@ -313,6 +314,105 @@ try {
             $userId = (string)($item['user_id'] ?? '');
             if ($quizDate !== '' && $userId !== '') {
                 $rows[count($rows) - 1]['detail']['questions'] = ra_fetch_daily_quiz_questions($pdo, $userId, $quizDate, max(10, $total));
+            }
+        }
+    }
+
+    $subscriptionSchema = subscription_mgmt_history_schema($pdo);
+    $subscriptionTypeMap = [
+        'INITIAL_PURCHASE' => 'subscription_started',
+        'RENEWAL' => 'subscription_renewed',
+    ];
+    $requestedSubscriptionEventTypes = [];
+    if (in_array('subscription_started', $types, true)) {
+        $requestedSubscriptionEventTypes[] = 'INITIAL_PURCHASE';
+    }
+    if (in_array('subscription_renewed', $types, true)) {
+        $requestedSubscriptionEventTypes[] = 'RENEWAL';
+    }
+
+    if ($subscriptionSchema && !empty($requestedSubscriptionEventTypes) && $uId && $uEmail) {
+        $hEventType = $subscriptionSchema['event_type'];
+        $hPlanCode = $subscriptionSchema['plan_code'];
+        $hProvider = $subscriptionSchema['provider'];
+        $hStore = $subscriptionSchema['store'];
+        $hEntitlement = $subscriptionSchema['entitlement_id'];
+        $hSource = $subscriptionSchema['source'];
+        $hEventAt = $subscriptionSchema['event_at'];
+        $hCreatedAt = $subscriptionSchema['created_at'];
+        $hUserId = $subscriptionSchema['user_id'];
+
+        if ($hEventType && $hUserId && ($hEventAt || $hCreatedAt)) {
+            $orderCol = $hEventAt ?: $hCreatedAt;
+            $eventTypePlaceholders = implode(',', array_fill(0, count($requestedSubscriptionEventTypes), '?'));
+            $guestExpr = ra_detect_guest_sql('u.`' . $uEmail . '`', $uFullName ? ('u.`' . $uFullName . '`') : null);
+
+            $sql = 'SELECT h.`' . $hEventType . '` AS event_type, '
+                . ($hPlanCode ? 'h.`' . $hPlanCode . '`' : 'NULL') . ' AS plan_code, '
+                . ($hProvider ? 'h.`' . $hProvider . '`' : 'NULL') . ' AS provider, '
+                . ($hStore ? 'h.`' . $hStore . '`' : 'NULL') . ' AS store, '
+                . ($hEntitlement ? 'h.`' . $hEntitlement . '`' : 'NULL') . ' AS entitlement_id, '
+                . ($hSource ? 'h.`' . $hSource . '`' : 'NULL') . ' AS source, '
+                . ($hEventAt ? 'h.`' . $hEventAt . '`' : 'NULL') . ' AS event_at, '
+                . ($hCreatedAt ? 'h.`' . $hCreatedAt . '`' : 'NULL') . ' AS history_created_at, '
+                . ($hUserId ? 'h.`' . $hUserId . '`' : 'NULL') . ' AS user_id, '
+                . 'u.`' . $uEmail . '` AS email, '
+                . ($uFullName ? 'u.`' . $uFullName . '`' : "''") . ' AS full_name, '
+                . 'CASE WHEN ' . $guestExpr . " THEN 'guest' ELSE 'registered' END AS user_type "
+                . 'FROM `' . $subscriptionSchema['table'] . '` h '
+                . ($hUserId ? 'LEFT JOIN `user_profiles` u ON h.`' . $hUserId . '` = u.`' . $uId . '` ' : '')
+                . 'WHERE UPPER(TRIM(h.`' . $hEventType . '`)) IN (' . $eventTypePlaceholders . ') '
+                . 'ORDER BY h.`' . $orderCol . '` DESC LIMIT ' . (int)$limit;
+
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($requestedSubscriptionEventTypes);
+            $list = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            foreach ($list as $item) {
+                $rawEventType = strtoupper(trim((string)($item['event_type'] ?? '')));
+                $mappedType = $subscriptionTypeMap[$rawEventType] ?? null;
+                if ($mappedType === null) {
+                    continue;
+                }
+
+                $planCode = trim((string)($item['plan_code'] ?? ''));
+                $planDurationLabel = subscription_mgmt_plan_duration_label($planCode !== '' ? $planCode : null);
+                $weightScore = subscription_mgmt_plan_duration_weight($planCode !== '' ? $planCode : null);
+                $name = trim((string)($item['full_name'] ?? ''));
+                $displayName = $name !== '' ? $name : trim((string)($item['email'] ?? ''));
+                if ($displayName === '') {
+                    $displayName = 'Kullanıcı';
+                }
+
+                $planTitle = 'Pro';
+                $eventVerb = $mappedType === 'subscription_renewed' ? 'aboneliğini yeniledi' : 'abonelik satın aldı';
+                $humanSentence = $displayName . ' ' . $planDurationLabel . ' ' . $planTitle . ' ' . $eventVerb . '.';
+
+                $rows[] = [
+                    'type' => $mappedType,
+                    'title' => $mappedType === 'subscription_renewed' ? 'Abonelik yenilemesi' : 'Yeni abonelik',
+                    'subtitle' => $humanSentence,
+                    'created_at' => $item['event_at'] ?? $item['history_created_at'] ?? null,
+                    'user' => [
+                        'id' => (string)($item['user_id'] ?? ''),
+                        'email' => (string)($item['email'] ?? ''),
+                        'full_name' => (string)($item['full_name'] ?? ''),
+                        'user_type' => (string)($item['user_type'] ?? 'registered'),
+                    ],
+                    'detail' => [
+                        'event_type' => $rawEventType,
+                        'plan_code' => $planCode !== '' ? $planCode : null,
+                        'provider' => $item['provider'] ?? null,
+                        'store' => $item['store'] ?? null,
+                        'entitlement_id' => $item['entitlement_id'] ?? null,
+                        'source' => $item['source'] ?? null,
+                        'event_at' => $item['event_at'] ?? null,
+                        'created_at' => $item['history_created_at'] ?? null,
+                        'plan_duration_label' => $planDurationLabel,
+                        'weight_score' => $weightScore,
+                        'sentence' => $humanSentence,
+                    ],
+                ];
             }
         }
     }

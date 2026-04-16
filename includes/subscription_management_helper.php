@@ -697,3 +697,126 @@ function subscription_mgmt_process_status_from_result(array $beforeStatus, array
 
     return 'processed';
 }
+
+function subscription_mgmt_plan_code_normalize(?string $planCode): string
+{
+    $raw = trim((string)$planCode);
+    if ($raw === '') {
+        return '';
+    }
+
+    $raw = strtr($raw, [
+        'İ' => 'i', 'I' => 'i', 'ı' => 'i',
+        'Ğ' => 'g', 'ğ' => 'g',
+        'Ü' => 'u', 'ü' => 'u',
+        'Ş' => 's', 'ş' => 's',
+        'Ö' => 'o', 'ö' => 'o',
+        'Ç' => 'c', 'ç' => 'c',
+    ]);
+    $raw = strtolower($raw);
+
+    return preg_replace('/[^a-z0-9]+/i', ' ', $raw) ?? '';
+}
+
+function subscription_mgmt_plan_duration_weight(?string $planCode): int
+{
+    $normalized = subscription_mgmt_plan_code_normalize($planCode);
+    if ($normalized === '') {
+        return 1;
+    }
+
+    $patterns = [
+        12 => [
+            '/\byillik\b/i',
+            '/\bannual\b/i',
+            '/\byearly\b/i',
+            '/\b12\s*month\b/i',
+            '/\b12month\b/i',
+            '/\b12\s*ay\b/i',
+            '/\b12ay\b/i',
+        ],
+        6 => [
+            '/\b6\s*aylik\b/i',
+            '/\bsemi\s*annual\b/i',
+            '/\bsemiannual\b/i',
+            '/\b6\s*month\b/i',
+            '/\b6month\b/i',
+            '/\b6\s*ay\b/i',
+            '/\b6ay\b/i',
+        ],
+        3 => [
+            '/\b3\s*aylik\b/i',
+            '/\bquarterly\b/i',
+            '/\b3\s*month\b/i',
+            '/\b3month\b/i',
+            '/\b3\s*ay\b/i',
+            '/\b3ay\b/i',
+        ],
+        1 => [
+            '/\baylik\b/i',
+            '/\bmonthly\b/i',
+            '/\b1\s*month\b/i',
+            '/\b1month\b/i',
+            '/\b1\s*ay\b/i',
+            '/\b1ay\b/i',
+        ],
+    ];
+
+    foreach ($patterns as $weight => $regexList) {
+        foreach ($regexList as $regex) {
+            if (preg_match($regex, $normalized) === 1) {
+                return (int)$weight;
+            }
+        }
+    }
+
+    return 1;
+}
+
+function subscription_mgmt_plan_duration_label_from_weight(int $weight): string
+{
+    return match ($weight) {
+        12 => 'Yıllık',
+        6 => '6 Aylık',
+        3 => '3 Aylık',
+        default => 'Aylık',
+    };
+}
+
+function subscription_mgmt_plan_duration_label(?string $planCode): string
+{
+    $raw = trim((string)$planCode);
+    if ($raw === '') {
+        return 'Bilinmeyen Plan';
+    }
+
+    $normalized = subscription_mgmt_plan_code_normalize($planCode);
+    if ($normalized === '') {
+        return $raw;
+    }
+
+    $patterns = [
+        12 => [
+            '/\byillik\b/i', '/\bannual\b/i', '/\byearly\b/i', '/\b12\s*month\b/i', '/\b12month\b/i', '/\b12\s*ay\b/i', '/\b12ay\b/i',
+        ],
+        6 => [
+            '/\b6\s*aylik\b/i', '/\bsemi\s*annual\b/i', '/\bsemiannual\b/i', '/\b6\s*month\b/i', '/\b6month\b/i', '/\b6\s*ay\b/i', '/\b6ay\b/i',
+        ],
+        3 => [
+            '/\b3\s*aylik\b/i', '/\bquarterly\b/i', '/\b3\s*month\b/i', '/\b3month\b/i', '/\b3\s*ay\b/i', '/\b3ay\b/i',
+        ],
+        1 => [
+            '/\baylik\b/i', '/\bmonthly\b/i', '/\b1\s*month\b/i', '/\b1month\b/i', '/\b1\s*ay\b/i', '/\b1ay\b/i',
+        ],
+    ];
+
+    foreach ($patterns as $weight => $regexList) {
+        foreach ($regexList as $regex) {
+            if (preg_match($regex, $normalized) === 1) {
+                return subscription_mgmt_plan_duration_label_from_weight((int)$weight);
+            }
+        }
+    }
+
+    return $raw;
+}

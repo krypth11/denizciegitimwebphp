@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once __DIR__ . '/stats_filters.php';
+require_once dirname(__DIR__, 3) . '/includes/subscription_management_helper.php';
 
 api_require_method('GET');
 
@@ -69,7 +70,7 @@ if (($_GET['scope'] ?? '') === 'admin') {
             $window = stats_resolve_date_window(['range' => '30d'], 'range', 'start_date', 'end_date', '30d');
         }
 
-        $types = stats_parse_types_from_query(['registrations', 'solved_questions', 'daily_quiz_completed', 'added_questions']);
+        $types = stats_parse_types_from_query(['registrations', 'solved_questions', 'daily_quiz_completed', 'added_questions', 'subscription_started', 'subscription_renewed']);
         [$dateKeys, $labels] = trends_labels_from_dates((string)$window['start_date'], (string)$window['end_date']);
         $dateIndex = array_flip($dateKeys);
 
@@ -78,6 +79,8 @@ if (($_GET['scope'] ?? '') === 'admin') {
             'solved_questions' => trends_series_empty($labels),
             'daily_quiz_completed' => trends_series_empty($labels),
             'added_questions' => trends_series_empty($labels),
+            'subscription_started' => trends_series_empty($labels),
+            'subscription_renewed' => trends_series_empty($labels),
         ];
 
         $totals = [
@@ -85,6 +88,8 @@ if (($_GET['scope'] ?? '') === 'admin') {
             'solved_questions' => 0,
             'daily_quiz_completed' => 0,
             'added_questions' => 0,
+            'subscription_started' => 0,
+            'subscription_renewed' => 0,
         ];
 
         $uCols = get_table_columns($pdo, 'user_profiles');
@@ -160,6 +165,57 @@ if (($_GET['scope'] ?? '') === 'admin') {
                 $v = (int)($row['c'] ?? 0);
                 $series['added_questions'][$dateIndex[$d]] = $v;
                 $totals['added_questions'] += $v;
+            }
+        }
+
+        $subscriptionSchema = subscription_mgmt_history_schema($pdo);
+        $requestedSubscriptionTypes = array_values(array_intersect(['subscription_started', 'subscription_renewed'], $types));
+        if ($subscriptionSchema && !empty($requestedSubscriptionTypes)) {
+            $hEventType = $subscriptionSchema['event_type'];
+            $hPlanCode = $subscriptionSchema['plan_code'];
+            $hEventAt = $subscriptionSchema['event_at'];
+            $hCreatedAt = $subscriptionSchema['created_at'];
+            $dateCol = $hEventAt ?: $hCreatedAt;
+
+            if ($hEventType && $dateCol) {
+                $rawEventTypeMap = [];
+                if (in_array('subscription_started', $requestedSubscriptionTypes, true)) {
+                    $rawEventTypeMap['INITIAL_PURCHASE'] = 'subscription_started';
+                }
+                if (in_array('subscription_renewed', $requestedSubscriptionTypes, true)) {
+                    $rawEventTypeMap['RENEWAL'] = 'subscription_renewed';
+                }
+
+                if (!empty($rawEventTypeMap)) {
+                    $eventTypes = array_keys($rawEventTypeMap);
+                    $eventTypePlaceholders = implode(',', array_fill(0, count($eventTypes), '?'));
+                    $sql = 'SELECT DATE(`' . $dateCol . '`) AS d, UPPER(TRIM(`' . $hEventType . '`)) AS event_type, '
+                        . ($hPlanCode ? '`' . $hPlanCode . '`' : 'NULL') . ' AS plan_code '
+                        . 'FROM `' . $subscriptionSchema['table'] . '` '
+                        . 'WHERE DATE(`' . $dateCol . '`) BETWEEN ? AND ? '
+                        . 'AND UPPER(TRIM(`' . $hEventType . '`)) IN (' . $eventTypePlaceholders . ')';
+
+                    $params = array_merge([$window['start_date'], $window['end_date']], $eventTypes);
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute($params);
+
+                    foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
+                        $d = (string)($row['d'] ?? '');
+                        if (!isset($dateIndex[$d])) {
+                            continue;
+                        }
+
+                        $rawType = strtoupper(trim((string)($row['event_type'] ?? '')));
+                        $mappedType = $rawEventTypeMap[$rawType] ?? null;
+                        if ($mappedType === null) {
+                            continue;
+                        }
+
+                        $weightScore = subscription_mgmt_plan_duration_weight((string)($row['plan_code'] ?? ''));
+                        $series[$mappedType][$dateIndex[$d]] += $weightScore;
+                        $totals[$mappedType] += $weightScore;
+                    }
+                }
             }
         }
 
