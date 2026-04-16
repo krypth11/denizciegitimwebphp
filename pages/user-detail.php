@@ -188,6 +188,37 @@ $(function () {
         if (['abandoned', 'cancelled', 'expired'].includes(s)) return '<span class="badge text-bg-danger">Terk Edildi</span>';
         return `<span class="badge text-bg-secondary">${esc(safeText(status))}</span>`;
     };
+    const subscriptionEventUiMap = {
+        premium_started: { label: 'Premium başlatıldı', className: 'sub-event-started' },
+        premium_renewed: { label: 'Premium yenilendi', className: 'sub-event-renewed' },
+        premium_expired: { label: 'Süre doldu', className: 'sub-event-expired' },
+        premium_cancelled: { label: 'İptal edildi', className: 'sub-event-cancelled' }
+    };
+    const getSubscriptionEventUi = (eventType) => {
+        const key = String(eventType || '').trim().toLowerCase();
+        return subscriptionEventUiMap[key] || { label: safeText(eventType), className: 'sub-event-default' };
+    };
+    const summarizeSubscriptionMeta = (meta, event) => {
+        const src = toPlainObject(meta);
+        if (!Object.keys(src).length) return [];
+
+        const lines = [];
+        const planCode = safeText(event?.plan_code || src.plan_code || src.product_id || src.subscription_plan, '');
+        const previousExpiry = safeText(src.previous_expiry || src.old_expiry || src.before_expiry || src.previous_expires_at, '');
+        const nextExpiry = safeText(src.new_expiry || src.after_expiry || src.expires_at || src.next_expiry || src.new_expires_at, '');
+        const entitlementId = safeText(src.entitlement_id, '');
+
+        if (planCode) lines.push({ label: 'Plan', value: planCode });
+        if (previousExpiry || nextExpiry) {
+            lines.push({
+                label: 'Bitiş değişimi',
+                value: `${previousExpiry || '-'} → ${nextExpiry || '-'}`
+            });
+        }
+        if (entitlementId) lines.push({ label: 'Entitlement', value: entitlementId });
+
+        return lines.slice(0, 4);
+    };
 
     const api = async (action, method = 'GET', data = {}) => {
         if (typeof window.appAjax === 'function') {
@@ -387,31 +418,79 @@ $(function () {
         $('#tab-lifecycle').html(`<div class="lifecycle-wrap">${rows}</div>`);
     }
 
-    function renderSubscription(s) {
+    function renderSubscription(s, historyItems = []) {
         const isPro = Number(s.is_pro || 0) === 1;
         const isPremiumActive = Number(s.premium_active || 0) === 1;
         const premiumState = isPremiumActive
             ? '<span class="badge text-bg-success">Aktif</span>'
             : (isPro ? '<span class="badge text-bg-warning">Pro var, süresi dolmuş olabilir</span>' : '<span class="badge text-bg-secondary">Ücretsiz</span>');
-        $('#tab-subscription').html(`
+        const history = toArray(historyItems);
+        const historyHtml = history.length ? history.map((item) => {
+            const ui = getSubscriptionEventUi(item.event_type);
+            const oldValue = safeText(item.old_value);
+            const newValue = safeText(item.new_value);
+            const planCode = safeText(item.plan_code);
+            const source = safeText(item.source);
+            const summaryRows = summarizeSubscriptionMeta(item.meta, item);
+            const hasMeta = isPlainObject(item.meta) && Object.keys(item.meta).length > 0;
+            const metaSummaryHtml = summaryRows.length
+                ? `<div class="sub-meta-summary">${summaryRows.map(row => `<span><strong>${esc(row.label)}:</strong> ${esc(row.value)}</span>`).join('')}</div>`
+                : '<div class="sub-meta-summary text-muted">Ek meta özeti yok.</div>';
+
+            return `
+                <div class="sub-history-item card user-soft-card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap mb-2">
+                            <div class="d-flex align-items-center gap-2 flex-wrap">
+                                <span class="badge sub-event-badge ${esc(ui.className)}">${esc(ui.label)}</span>
+                                <span class="text-muted small">${esc(fmtDate(item.created_at))}</span>
+                            </div>
+                            <span class="badge text-bg-light">${esc(planCode)}</span>
+                        </div>
+                        <div class="row g-2 small mb-2">
+                            <div class="col-12 col-md-6"><strong>Eski değer:</strong> ${esc(oldValue)}</div>
+                            <div class="col-12 col-md-6"><strong>Yeni değer:</strong> ${esc(newValue)}</div>
+                            <div class="col-12 col-md-6"><strong>Kaynak:</strong> ${esc(source)}</div>
+                            <div class="col-12 col-md-6"><strong>Plan kodu:</strong> ${esc(planCode)}</div>
+                        </div>
+                        ${metaSummaryHtml}
+                        ${hasMeta ? `<details class="mt-2"><summary class="small text-muted">Ham veri</summary><pre class="small mt-2 mb-0 lifecycle-meta">${esc(JSON.stringify(item.meta, null, 2))}</pre></details>` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('') : `
             <div class="card user-soft-card">
-                <div class="card-body table-responsive">
-                    <table class="table table-sm align-middle mb-0">
-                        <tbody>
-                            <tr><th width="220">Pro Üyelik</th><td>${boolBadge(s.is_pro)}</td></tr>
-                            <tr><th>Premium Aktif mi?</th><td>${premiumState}</td></tr>
-                            <tr><th>Paket Kodu</th><td>${esc(s.plan_code || '-')}</td></tr>
-                            <tr><th>Sağlayıcı</th><td>${esc(s.provider || '-')}</td></tr>
-                            <tr><th>Entitlement ID</th><td>${esc(s.entitlement_id || '-')}</td></tr>
-                            <tr><th>RC App User ID</th><td>${esc(s.rc_app_user_id || '-')}</td></tr>
-                            <tr><th>Bitiş Tarihi</th><td>${esc(fmtDate(s.expires_at))}</td></tr>
-                            <tr><th>Son Senkron</th><td>${esc(fmtDate(s.last_synced_at))}</td></tr>
-                            <tr><th>Oluşturulma</th><td>${esc(fmtDate(s.created_at))}</td></tr>
-                            <tr><th>Güncelleme</th><td>${esc(fmtDate(s.updated_at))}</td></tr>
-                        </tbody>
-                    </table>
+                <div class="card-body text-muted">Henüz abonelik geçmişi kaydı bulunmuyor.</div>
+            </div>
+        `;
+
+        $('#tab-subscription').html(`
+            <div class="card user-soft-card mb-3">
+                <div class="card-body">
+                    <h6 class="mb-3">Mevcut Abonelik Durumu</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <tbody>
+                                <tr><th width="220">Premium aktif mi</th><td>${premiumState}</td></tr>
+                                <tr><th>Pro üyelik alanı</th><td>${boolBadge(s.is_pro)}</td></tr>
+                                <tr><th>Paket kodu</th><td>${esc(s.plan_code || '-')}</td></tr>
+                                <tr><th>Sağlayıcı</th><td>${esc(s.provider || '-')}</td></tr>
+                                <tr><th>Entitlement ID</th><td>${esc(s.entitlement_id || '-')}</td></tr>
+                                <tr><th>RC App User ID</th><td>${esc(s.rc_app_user_id || '-')}</td></tr>
+                                <tr><th>Bitiş tarihi</th><td>${esc(fmtDate(s.expires_at))}</td></tr>
+                                <tr><th>Son senkron</th><td>${esc(fmtDate(s.last_synced_at))}</td></tr>
+                                <tr><th>Oluşturulma</th><td>${esc(fmtDate(s.created_at))}</td></tr>
+                                <tr><th>Güncellenme</th><td>${esc(fmtDate(s.updated_at))}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
+            <div class="mb-2 d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                <h6 class="mb-0">Abonelik Geçmişi</h6>
+                <span class="text-muted small">Toplam kayıt: ${esc(history.length)}</span>
+            </div>
+            <div class="sub-history-wrap">${historyHtml}</div>
         `);
     }
 
@@ -664,9 +743,13 @@ $(function () {
 
         if (key === 'subscription') {
             setLoading('#tab-subscription');
-            const res = await api('get_user_subscription', 'GET', { user_id: userId });
-            if (!res.success) return $('#tab-subscription').html(`<div class="card user-soft-card"><div class="card-body text-danger">${esc(res.message || 'Yüklenemedi')}</div></div>`);
-            renderSubscription(res.data?.subscription || {});
+            const [subRes, historyRes] = await Promise.all([
+                api('get_user_subscription', 'GET', { user_id: userId }),
+                api('get_user_subscription_history', 'GET', { user_id: userId })
+            ]);
+            if (!subRes.success) return $('#tab-subscription').html(`<div class="card user-soft-card"><div class="card-body text-danger">${esc(subRes.message || 'Yüklenemedi')}</div></div>`);
+            const historyItems = historyRes?.success ? toArray(historyRes.data?.items) : [];
+            renderSubscription(subRes.data?.subscription || {}, historyItems);
             loadedTabs.subscription = true;
         }
 
@@ -908,11 +991,57 @@ $(function () {
     padding: 10px;
 }
 
+.sub-history-wrap {
+    display: grid;
+    gap: 12px;
+}
+
+.sub-event-badge {
+    font-weight: 600;
+}
+
+.sub-event-started {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.sub-event-renewed {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.sub-event-expired {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.sub-event-cancelled {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.sub-event-default {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.sub-meta-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: .85rem;
+}
+
 @media (max-width: 767.98px) {
     .user-detail-tabs {
         overflow-x: auto;
         flex-wrap: nowrap;
         white-space: nowrap;
+    }
+
+    .sub-meta-summary {
+        flex-direction: column;
+        gap: 4px;
     }
 }
 </style>

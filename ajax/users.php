@@ -1483,6 +1483,123 @@ function users_get_user_lifecycle(PDO $pdo, string $userId): array
     return $rows;
 }
 
+function users_subscription_event_type_labels(): array
+{
+    return [
+        'premium_started' => 'Premium başlatıldı',
+        'premium_renewed' => 'Premium yenilendi',
+        'premium_expired' => 'Süre doldu',
+        'premium_cancelled' => 'İptal edildi',
+    ];
+}
+
+function users_decode_lifecycle_meta($metaRaw): ?array
+{
+    if (is_array($metaRaw)) {
+        return $metaRaw;
+    }
+
+    $metaText = trim((string)$metaRaw);
+    if ($metaText === '') {
+        return null;
+    }
+
+    $decoded = json_decode($metaText, true);
+    return is_array($decoded) ? $decoded : null;
+}
+
+function users_extract_plan_code_from_meta(?array $meta): ?string
+{
+    if (!$meta) {
+        return null;
+    }
+
+    $candidates = [
+        $meta['plan_code'] ?? null,
+        $meta['product_id'] ?? null,
+        $meta['subscription_plan'] ?? null,
+        is_array($meta['subscription'] ?? null) ? ($meta['subscription']['plan_code'] ?? null) : null,
+    ];
+
+    foreach ($candidates as $candidate) {
+        $value = trim((string)$candidate);
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    return null;
+}
+
+function users_get_user_subscription_history(PDO $pdo, string $userId): array
+{
+    $schema = user_lifecycle_schema($pdo);
+    if (!$schema || !$schema['event_type']) {
+        return [];
+    }
+
+    $eventLabels = users_subscription_event_type_labels();
+    $eventTypes = array_keys($eventLabels);
+    if (empty($eventTypes)) {
+        return [];
+    }
+
+    $orderCol = $schema['created_at'] ?: ($schema['id'] ?: $schema['user_id']);
+    $placeholders = implode(', ', array_fill(0, count($eventTypes), '?'));
+    $select = [
+        ($schema['id'] ? "`{$schema['id']}`" : 'NULL') . ' AS id',
+        "`{$schema['user_id']}` AS user_id",
+        "`{$schema['event_type']}` AS event_type",
+        ($schema['title'] ? "`{$schema['title']}`" : 'NULL') . ' AS title',
+        ($schema['old_value'] ? "`{$schema['old_value']}`" : 'NULL') . ' AS old_value',
+        ($schema['new_value'] ? "`{$schema['new_value']}`" : 'NULL') . ' AS new_value',
+        ($schema['source'] ? "`{$schema['source']}`" : 'NULL') . ' AS source',
+        ($schema['meta_json'] ? "`{$schema['meta_json']}`" : 'NULL') . ' AS meta_json',
+        ($schema['created_at'] ? "`{$schema['created_at']}`" : 'NULL') . ' AS created_at',
+    ];
+
+    try {
+        $sql = 'SELECT ' . implode(', ', $select)
+            . " FROM `{$schema['table']}`"
+            . " WHERE `{$schema['user_id']}` = ?"
+            . " AND `{$schema['event_type']}` IN ({$placeholders})"
+            . " ORDER BY `{$orderCol}` DESC LIMIT 250";
+
+        $params = array_merge([$userId], $eventTypes);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Throwable $e) {
+        return [];
+    }
+
+    $items = [];
+    foreach ($rows as $row) {
+        $eventType = trim((string)($row['event_type'] ?? ''));
+        if ($eventType === '' || !isset($eventLabels[$eventType])) {
+            continue;
+        }
+
+        $meta = users_decode_lifecycle_meta($row['meta_json'] ?? null);
+        $oldValue = trim((string)($row['old_value'] ?? ''));
+        $newValue = trim((string)($row['new_value'] ?? ''));
+        $title = trim((string)($row['title'] ?? ''));
+
+        $items[] = [
+            'event_type' => $eventType,
+            'title' => ($title !== '' ? $title : $eventLabels[$eventType]),
+            'old_value' => ($oldValue !== '' ? $oldValue : null),
+            'new_value' => ($newValue !== '' ? $newValue : null),
+            'source' => (($src = trim((string)($row['source'] ?? ''))) !== '' ? $src : null),
+            'meta' => $meta,
+            'created_at' => $row['created_at'] ?? null,
+            'plan_code' => users_extract_plan_code_from_meta($meta),
+        ];
+    }
+
+    return $items;
+}
+
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
 try {
@@ -1818,6 +1935,18 @@ try {
                 'computed_active' => users_is_premium_active($row) ? 1 : 0,
             ];
             users_response(true, '', ['subscription' => $row]);
+            break;
+        }
+
+        case 'get_user_subscription_history': {
+            $id = trim((string)($_GET['id'] ?? $_GET['user_id'] ?? ''));
+            if ($id === '') {
+                users_response(false, 'ID gerekli.', [], 422, ['id' => 'required']);
+            }
+
+            users_response(true, '', [
+                'items' => users_get_user_subscription_history($pdo, $id),
+            ]);
             break;
         }
 

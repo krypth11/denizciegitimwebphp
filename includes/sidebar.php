@@ -30,6 +30,18 @@ $menuGroups = [
     ],
     [
         ['slug' => 'users', 'url' => '/pages/users.php', 'icon' => 'bi-people', 'label' => 'Kullanıcılar'],
+        [
+            'slug' => 'subscription-management',
+            'icon' => 'bi-stars',
+            'label' => 'Abonelik Yönetimi',
+            'children' => [
+                ['slug' => 'subscription-dashboard', 'url' => '/pages/subscription-dashboard.php', 'icon' => 'bi-grid', 'label' => 'Genel Bakış'],
+                ['slug' => 'subscription-events', 'url' => '/pages/subscription-events.php', 'icon' => 'bi-activity', 'label' => 'Webhook Olayları'],
+                ['slug' => 'subscription-history', 'url' => '/pages/subscription-history.php', 'icon' => 'bi-clock-history', 'label' => 'Abonelik Geçmişi'],
+                ['slug' => 'subscription-active', 'url' => '/pages/subscription-active.php', 'icon' => 'bi-patch-check', 'label' => 'Aktif Premiumlar'],
+                ['slug' => 'subscription-issues', 'url' => '/pages/subscription-issues.php', 'icon' => 'bi-exclamation-diamond', 'label' => 'Sorunlu Kayıtlar'],
+            ],
+        ],
         ['slug' => 'stories', 'url' => '/pages/stories.php', 'icon' => 'bi-images', 'label' => 'Dashboard Hikayeleri'],
         ['slug' => 'notifications-create', 'url' => '/pages/notifications-create.php', 'icon' => 'bi-bell', 'label' => 'Yeni Bildirim'],
         ['slug' => 'notifications-history', 'url' => '/pages/notifications-history.php', 'icon' => 'bi-clock-history', 'label' => 'Gönderim Geçmişi'],
@@ -169,6 +181,7 @@ function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
 
 
 
