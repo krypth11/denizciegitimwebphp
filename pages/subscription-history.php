@@ -23,7 +23,7 @@ include '../includes/sidebar.php';
         <div class="card-body">
             <div class="row g-2">
                 <div class="col-12 col-lg-4"><input type="search" id="fltUser" class="form-control" placeholder="Kullanıcı (user_id) ara"></div>
-                <div class="col-8 col-lg-3"><input type="text" id="fltEventType" class="form-control" placeholder="Event type"></div>
+                <div class="col-8 col-lg-3"><input type="text" id="fltEventType" class="form-control" placeholder="Olay tipi"></div>
                 <div class="col-4 col-lg-2"><button id="btnFilter" class="btn btn-primary w-100">Filtrele</button></div>
             </div>
         </div>
@@ -34,7 +34,7 @@ include '../includes/sidebar.php';
             <table class="table table-hover align-middle mb-0">
                 <thead>
                     <tr>
-                        <th>Kullanıcı</th><th>Olay</th><th>Plan</th><th>Provider/Store</th><th>Entitlement</th><th>Eski</th><th>Yeni</th><th>Kaynak</th><th>Tarih</th>
+                        <th>Kullanıcı</th><th>Olay</th><th>Plan</th><th>Sağlayıcı / Mağaza</th><th>Hak Tanımı</th><th>Önceki Durum</th><th>Yeni Durum</th><th>Kaynak</th><th>Tarih</th>
                     </tr>
                 </thead>
                 <tbody id="historyBody"><tr><td colspan="9" class="text-muted">Yükleniyor...</td></tr></tbody>
@@ -50,6 +50,8 @@ $(function () {
     const endpoint = '../ajax/subscriptions.php';
     const esc = (t) => $('<div>').text(t ?? '').html();
     const fmtDate = (v) => v ? (window.formatDate ? window.formatDate(v) : v) : '-';
+    const trUi = window.subscriptionAdminUi || {};
+    const eventTypeLabel = (v) => trUi.eventTypeLabel ? trUi.eventTypeLabel(v) : (v || '-');
     const api = async (action, data = {}) => window.appAjax({ url: endpoint + '?action=' + encodeURIComponent(action), method: 'GET', data, dataType: 'json' });
 
     const filters = () => ({
@@ -80,14 +82,14 @@ $(function () {
         const rows = (items || []).map(x => `
             <tr>
                 <td>${userCell(x)}</td>
-                <td><span class="badge text-bg-light border">${esc(x.event_type || '-')}</span></td>
+                <td><span class="badge text-bg-light border">${esc(eventTypeLabel(x.event_type || '-'))}</span></td>
                 <td>${esc(x.plan_code || '-')}</td>
                 <td><small>${esc((x.provider || '-') + ' / ' + (x.store || '-'))}</small></td>
                 <td><small>${esc(x.entitlement_id || '-')}</small></td>
                 <td><small>${esc(x.old_value || '-')}</small></td>
                 <td><small>${esc(x.new_value || '-')}</small></td>
                 <td><small>${esc(x.source || '-')}</small></td>
-                <td><small class="text-muted">${esc(fmtDate(x.created_at))}</small></td>
+                <td><small class="text-muted">${esc(fmtDate(x.event_at || x.created_at))}</small></td>
             </tr>
         `).join('');
         $('#historyBody').html(rows || '<tr><td colspan="9" class="text-muted">Kayıt bulunamadı.</td></tr>');

@@ -21,10 +21,10 @@ include '../includes/sidebar.php';
 
     <div class="row g-3 mb-3" id="subSummaryCards">
         <div class="col-6 col-lg-2"><div class="card sub-soft-card"><div class="card-body"><div class="sub-label">Aktif Premium</div><div class="sub-value" id="sumActivePremium">0</div></div></div></div>
-        <div class="col-6 col-lg-2"><div class="card sub-soft-card"><div class="card-body"><div class="sub-label">30g Initial</div><div class="sub-value" id="sumInitial">0</div></div></div></div>
-        <div class="col-6 col-lg-2"><div class="card sub-soft-card"><div class="card-body"><div class="sub-label">30g Renewal</div><div class="sub-value" id="sumRenewal">0</div></div></div></div>
-        <div class="col-6 col-lg-2"><div class="card sub-soft-card"><div class="card-body"><div class="sub-label">30g Expiration</div><div class="sub-value" id="sumExpiration">0</div></div></div></div>
-        <div class="col-6 col-lg-2"><div class="card sub-soft-card"><div class="card-body"><div class="sub-label">30g Cancellation</div><div class="sub-value" id="sumCancellation">0</div></div></div></div>
+        <div class="col-6 col-lg-2"><div class="card sub-soft-card"><div class="card-body"><div class="sub-label">Son 30 Gün İlk Satın Alma</div><div class="sub-value" id="sumInitial">0</div></div></div></div>
+        <div class="col-6 col-lg-2"><div class="card sub-soft-card"><div class="card-body"><div class="sub-label">Son 30 Gün Yenileme</div><div class="sub-value" id="sumRenewal">0</div></div></div></div>
+        <div class="col-6 col-lg-2"><div class="card sub-soft-card"><div class="card-body"><div class="sub-label">Son 30 Gün Süre Dolumu</div><div class="sub-value" id="sumExpiration">0</div></div></div></div>
+        <div class="col-6 col-lg-2"><div class="card sub-soft-card"><div class="card-body"><div class="sub-label">Son 30 Gün İptal</div><div class="sub-value" id="sumCancellation">0</div></div></div></div>
         <div class="col-6 col-lg-2"><div class="card sub-soft-card"><div class="card-body"><div class="sub-label">Son Başarılı Webhook</div><div class="small fw-semibold mt-2" id="sumLastSuccess">-</div></div></div></div>
     </div>
 
@@ -32,7 +32,7 @@ include '../includes/sidebar.php';
         <div class="col-12">
             <div class="card sub-soft-card">
                 <div class="card-header bg-transparent border-0 pb-0 d-flex align-items-center justify-content-between">
-                    <h6 class="mb-0">Son 30 Gün Event Trendi</h6>
+                    <h6 class="mb-0">Son 30 Gün Olay Trendi</h6>
                     <small class="text-muted" id="chartSourceHint">Kaynak: -</small>
                 </div>
                 <div class="card-body">
@@ -48,11 +48,11 @@ include '../includes/sidebar.php';
         <div class="col-12">
             <div class="card sub-soft-card">
                 <div class="card-header bg-transparent border-0 pb-0">
-                    <h6 class="mb-0">Son Webhook Eventleri</h6>
+                    <h6 class="mb-0">Son Webhook Olayları</h6>
                 </div>
                 <div class="card-body table-responsive">
                     <table class="table table-sm table-hover align-middle mb-0">
-                        <thead><tr><th>Event</th><th>Kullanıcı</th><th>App User</th><th>Durum</th><th>Tarih</th><th class="text-end">İşlem</th></tr></thead>
+                        <thead><tr><th>Olay</th><th>Kullanıcı</th><th>Uygulama Kullanıcısı</th><th>Durum</th><th>Tarih</th><th class="text-end">İşlem</th></tr></thead>
                         <tbody id="recentEventsBody"><tr><td colspan="6" class="text-muted">Yükleniyor...</td></tr></tbody>
                     </table>
                 </div>
@@ -78,7 +78,7 @@ include '../includes/sidebar.php';
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Kullanıcı Abonelik Timeline</h5>
+                <h5 class="modal-title">Kullanıcı Abonelik Geçmişi</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
@@ -92,12 +92,12 @@ include '../includes/sidebar.php';
                     <table class="table table-sm table-hover align-middle mb-0">
                         <thead>
                             <tr>
-                                <th>Event</th>
+                                <th>Olay</th>
                                 <th>Plan</th>
-                                <th>Provider/Store</th>
-                                <th>Entitlement</th>
-                                <th>Eski</th>
-                                <th>Yeni</th>
+                                <th>Sağlayıcı / Mağaza</th>
+                                <th>Hak Tanımı</th>
+                                <th>Önceki Durum</th>
+                                <th>Yeni Durum</th>
                                 <th>Kaynak</th>
                                 <th>Tarih</th>
                             </tr>
@@ -119,6 +119,8 @@ $(function () {
     const esc = (t) => $('<div>').text(t ?? '').html();
     let trendChart = null;
 
+    const trUi = window.subscriptionAdminUi || {};
+
     const chartColors = {
         INITIAL_PURCHASE: '#0d6efd',
         RENEWAL: '#198754',
@@ -126,13 +128,16 @@ $(function () {
         CANCELLATION: '#fd7e14'
     };
 
+    const eventTypeLabel = (v) => trUi.eventTypeLabel ? trUi.eventTypeLabel(v) : (v || '-');
+    const statusLabel = (v) => trUi.statusLabel ? trUi.statusLabel(v) : (v || '-');
+
     const statusBadge = (s) => {
         const key = String(s || '').toLowerCase();
-        if (key === 'processed') return '<span class="badge text-bg-success">Processed</span>';
-        if (key === 'duplicate') return '<span class="badge text-bg-warning">Duplicate</span>';
-        if (key === 'unmatched_user') return '<span class="badge text-bg-secondary">Unmatched</span>';
-        if (key === 'conflict') return '<span class="badge text-bg-info">Conflict</span>';
-        return '<span class="badge text-bg-danger">Failed</span>';
+        if (key === 'processed') return '<span class="badge text-bg-success">' + esc(statusLabel(key)) + '</span>';
+        if (key === 'duplicate') return '<span class="badge text-bg-warning">' + esc(statusLabel(key)) + '</span>';
+        if (key === 'unmatched_user') return '<span class="badge text-bg-secondary">' + esc(statusLabel(key)) + '</span>';
+        if (key === 'conflict') return '<span class="badge text-bg-info">' + esc(statusLabel(key)) + '</span>';
+        return '<span class="badge text-bg-danger">' + esc(statusLabel('failed')) + '</span>';
     };
 
     const api = async (action, data = {}) => {
@@ -170,13 +175,13 @@ $(function () {
     function renderEvents(items) {
         const rows = (items || []).map((x) => `
             <tr>
-                <td><span class="badge text-bg-light border">${esc(x.event_type || '-')}</span></td>
+                <td><span class="badge text-bg-light border">${esc(eventTypeLabel(x.event_type || '-'))}</span></td>
                 <td>${renderUserCell(x)}</td>
                 <td><small class="text-muted">${esc(x.app_user_id || x.rc_app_user_id || '-')}</small></td>
                 <td>${statusBadge(x.process_status)}</td>
                 <td><small class="text-muted">${esc(fmtDate(x.created_at))}</small></td>
                 <td class="text-end">
-                    <button type="button" class="btn btn-sm btn-outline-secondary btn-view-user" data-user-id="${esc(x.user_id || '')}" ${x.user_id ? '' : 'disabled'} title="Kullanıcı timeline">
+                    <button type="button" class="btn btn-sm btn-outline-secondary btn-view-user" data-user-id="${esc(x.user_id || '')}" ${x.user_id ? '' : 'disabled'} title="Kullanıcı geçmişi">
                         <i class="bi bi-eye"></i>
                     </button>
                 </td>
@@ -204,7 +209,7 @@ $(function () {
         if (!ctx) return;
 
         const datasets = ['INITIAL_PURCHASE', 'RENEWAL', 'EXPIRATION', 'CANCELLATION'].map((key) => ({
-            label: key,
+            label: eventTypeLabel(key),
             data: series[key] || new Array(labels.length).fill(0),
             borderColor: chartColors[key],
             backgroundColor: chartColors[key] + '1f',
@@ -237,7 +242,7 @@ $(function () {
             }
         });
 
-        $('#chartSourceHint').text('Kaynak: ' + (source === 'webhook_fallback' ? 'Webhook (fallback)' : 'History'));
+        $('#chartSourceHint').text('Kaynak: ' + (source === 'webhook_fallback' ? 'Webhook (yedek)' : 'Geçmiş'));
     }
 
     function renderTimelineModal(data) {
@@ -248,12 +253,12 @@ $(function () {
             <div class="row g-2 small">
                 <div class="col-12 col-lg-4"><span class="text-muted">Ad Soyad:</span> <span class="fw-semibold">${esc(u.full_name || '-')}</span></div>
                 <div class="col-12 col-lg-4"><span class="text-muted">Email:</span> <span class="fw-semibold">${esc(u.email || '-')}</span></div>
-                <div class="col-12 col-lg-4"><span class="text-muted">User ID:</span> <span class="fw-semibold">${esc(u.user_id || '-')}</span></div>
-                <div class="col-12 col-lg-4"><span class="text-muted">RC App User ID:</span> <span class="fw-semibold">${esc(u.rc_app_user_id || '-')}</span></div>
+                <div class="col-12 col-lg-4"><span class="text-muted">Kullanıcı ID:</span> <span class="fw-semibold">${esc(u.user_id || '-')}</span></div>
+                <div class="col-12 col-lg-4"><span class="text-muted">RC Uygulama Kullanıcı ID:</span> <span class="fw-semibold">${esc(u.rc_app_user_id || '-')}</span></div>
                 <div class="col-12 col-lg-4"><span class="text-muted">Plan:</span> <span class="fw-semibold">${esc(u.plan_code || '-')}</span></div>
-                <div class="col-12 col-lg-4"><span class="text-muted">Entitlement:</span> <span class="fw-semibold">${esc(u.entitlement_id || '-')}</span></div>
-                <div class="col-12 col-lg-4"><span class="text-muted">Expires At:</span> <span class="fw-semibold">${esc(fmtDate(u.expires_at))}</span></div>
-                <div class="col-12 col-lg-4"><span class="text-muted">Last Synced:</span> <span class="fw-semibold">${esc(fmtDate(u.last_synced_at))}</span></div>
+                <div class="col-12 col-lg-4"><span class="text-muted">Hak Tanımı:</span> <span class="fw-semibold">${esc(u.entitlement_id || '-')}</span></div>
+                <div class="col-12 col-lg-4"><span class="text-muted">Bitiş Tarihi:</span> <span class="fw-semibold">${esc(fmtDate(u.expires_at))}</span></div>
+                <div class="col-12 col-lg-4"><span class="text-muted">Son Senkron:</span> <span class="fw-semibold">${esc(fmtDate(u.last_synced_at))}</span></div>
             </div>
         `);
 
@@ -265,7 +270,7 @@ $(function () {
         const rows = timeline.map((x) => `
             <tr>
                 <td>
-                    <span class="badge text-bg-light border">${esc(x.event_type || '-')}</span>
+                    <span class="badge text-bg-light border">${esc(eventTypeLabel(x.event_type || '-'))}</span>
                     ${x.event_title ? `<div class="small text-muted">${esc(x.event_title)}</div>` : ''}
                 </td>
                 <td><small>${esc(x.plan_code || '-')}</small></td>
@@ -290,7 +295,7 @@ $(function () {
 
         const res = await api('user_timeline', { user_id: uid });
         if (!res.success) {
-            $('#timelineTableBody').html('<tr><td colspan="8" class="text-danger">Timeline verisi alınamadı.</td></tr>');
+            $('#timelineTableBody').html('<tr><td colspan="8" class="text-danger">Geçmiş verisi alınamadı.</td></tr>');
             return;
         }
 

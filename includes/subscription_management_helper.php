@@ -191,6 +191,48 @@ function subscription_mgmt_normalize_event_type(?string $eventType): string
     return $map[$normalized] ?? ($normalized !== '' ? $normalized : 'UNKNOWN');
 }
 
+function subscription_mgmt_event_type_label_map_tr(): array
+{
+    return [
+        'INITIAL_PURCHASE' => 'İlk Satın Alma',
+        'RENEWAL' => 'Yenileme',
+        'EXPIRATION' => 'Süre Doldu',
+        'CANCELLATION' => 'İptal',
+        'BILLING_ISSUE' => 'Ödeme Sorunu',
+        'REFUND' => 'İade',
+        'PRODUCT_CHANGE' => 'Paket Değişikliği',
+        'UNCANCELLATION' => 'İptal Geri Alındı',
+        'TRANSFER' => 'Transfer',
+        'SUBSCRIPTION_PAUSED' => 'Abonelik Duraklatıldı',
+        'TEMPORARY_ENTITLEMENT_GRANT' => 'Geçici Erişim',
+    ];
+}
+
+function subscription_mgmt_status_label_map_tr(): array
+{
+    return [
+        'processed' => 'İşlendi',
+        'duplicate' => 'Tekrar',
+        'unmatched_user' => 'Eşleşmedi',
+        'conflict' => 'Çakışma',
+        'failed' => 'Hata',
+    ];
+}
+
+function subscription_mgmt_event_type_label_tr(?string $eventType): string
+{
+    $key = subscription_mgmt_normalize_event_type($eventType);
+    $map = subscription_mgmt_event_type_label_map_tr();
+    return $map[$key] ?? ($key !== '' ? $key : '-');
+}
+
+function subscription_mgmt_status_label_tr(?string $status): string
+{
+    $key = strtolower(trim((string)$status));
+    $map = subscription_mgmt_status_label_map_tr();
+    return $map[$key] ?? ($key !== '' ? $key : '-');
+}
+
 function subscription_mgmt_extract_event_payload(array $payload): array
 {
     if (isset($payload['event']) && is_array($payload['event'])) {

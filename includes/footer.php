@@ -35,6 +35,53 @@
         </div>
     </div>
 
+    <?php
+    $sub_event_label_map_tr = function_exists('subscription_mgmt_event_type_label_map_tr')
+        ? subscription_mgmt_event_type_label_map_tr()
+        : [
+            'INITIAL_PURCHASE' => 'İlk Satın Alma',
+            'RENEWAL' => 'Yenileme',
+            'EXPIRATION' => 'Süre Doldu',
+            'CANCELLATION' => 'İptal',
+            'BILLING_ISSUE' => 'Ödeme Sorunu',
+            'REFUND' => 'İade',
+            'PRODUCT_CHANGE' => 'Paket Değişikliği',
+            'UNCANCELLATION' => 'İptal Geri Alındı',
+            'TRANSFER' => 'Transfer',
+            'SUBSCRIPTION_PAUSED' => 'Abonelik Duraklatıldı',
+            'TEMPORARY_ENTITLEMENT_GRANT' => 'Geçici Erişim',
+        ];
+    $sub_status_label_map_tr = function_exists('subscription_mgmt_status_label_map_tr')
+        ? subscription_mgmt_status_label_map_tr()
+        : [
+            'processed' => 'İşlendi',
+            'duplicate' => 'Tekrar',
+            'unmatched_user' => 'Eşleşmedi',
+            'conflict' => 'Çakışma',
+            'failed' => 'Hata',
+        ];
+    ?>
+
+    <script>
+        (function () {
+            const eventTypeLabels = <?= json_encode($sub_event_label_map_tr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+            const statusLabels = <?= json_encode($sub_status_label_map_tr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
+            window.subscriptionAdminUi = {
+                eventTypeLabels,
+                statusLabels,
+                eventTypeLabel(value) {
+                    const key = String(value || '').trim().toUpperCase();
+                    return eventTypeLabels[key] || (key || '-');
+                },
+                statusLabel(value) {
+                    const key = String(value || '').trim().toLowerCase();
+                    return statusLabels[key] || (key || '-');
+                }
+            };
+        })();
+    </script>
+
     <!-- Sayfa özel JavaScript -->
     <?php if (isset($extra_js)): ?>
         <?= $extra_js ?>

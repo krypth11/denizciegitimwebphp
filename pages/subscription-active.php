@@ -24,7 +24,7 @@ include '../includes/sidebar.php';
             <table class="table table-hover align-middle mb-0">
                 <thead>
                     <tr>
-                        <th>Ad Soyad</th><th>Email</th><th>Plan</th><th>Entitlement</th><th>Expires At</th><th>Provider</th><th>Last Synced</th><th>RC App User ID</th>
+                        <th>Ad Soyad</th><th>E-posta</th><th>Plan</th><th>Hak Tanımı</th><th>Bitiş Tarihi</th><th>Sağlayıcı</th><th>Son Senkron</th><th>RC Uygulama Kullanıcı ID</th>
                     </tr>
                 </thead>
                 <tbody id="activeBody"><tr><td colspan="8" class="text-muted">Yükleniyor...</td></tr></tbody>

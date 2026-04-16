@@ -466,37 +466,38 @@ function subscriptions_get_history(PDO $pdo): array
 
     $eventType = trim((string)($_GET['event_type'] ?? ''));
     if ($eventType !== '' && $history['event_type']) {
-        $where[] = subscription_mgmt_q($history['event_type']) . ' = ?';
+        $where[] = 'h.' . subscription_mgmt_q($history['event_type']) . ' = ?';
         $params[] = strtoupper($eventType);
     }
 
     $userSearch = trim((string)($_GET['user'] ?? ''));
     if ($userSearch !== '' && $history['user_id']) {
-        $where[] = subscription_mgmt_q($history['user_id']) . ' LIKE ?';
+        $where[] = 'h.' . subscription_mgmt_q($history['user_id']) . ' LIKE ?';
         $params[] = '%' . $userSearch . '%';
     }
 
     $whereSql = empty($where) ? '' : (' WHERE ' . implode(' AND ', $where));
     $limit = subscriptions_to_limit(100, 500);
-    $orderCol = $history['created_at'] ?: ($history['id'] ?: $history['event_id']);
+    $orderCol = $history['event_at'] ?: ($history['created_at'] ?: ($history['id'] ?: $history['event_id']));
 
-    $countSql = 'SELECT COUNT(*) FROM ' . subscription_mgmt_q($history['table']) . $whereSql;
+    $countSql = 'SELECT COUNT(*) FROM ' . subscription_mgmt_q($history['table']) . ' h' . $whereSql;
     $stmtCount = $pdo->prepare($countSql);
     $stmtCount->execute($params);
     $totalCount = (int)$stmtCount->fetchColumn();
 
     $select = [
-        ($history['id'] ? subscription_mgmt_q($history['id']) : 'NULL') . ' AS id',
-        ($history['user_id'] ? subscription_mgmt_q($history['user_id']) : 'NULL') . ' AS user_id',
-        ($history['event_type'] ? subscription_mgmt_q($history['event_type']) : 'NULL') . ' AS event_type',
-        ($history['plan_code'] ? subscription_mgmt_q($history['plan_code']) : 'NULL') . ' AS plan_code',
-        ($history['provider'] ? subscription_mgmt_q($history['provider']) : 'NULL') . ' AS provider',
-        ($history['store'] ? subscription_mgmt_q($history['store']) : 'NULL') . ' AS store',
-        ($history['entitlement_id'] ? subscription_mgmt_q($history['entitlement_id']) : 'NULL') . ' AS entitlement_id',
-        ($history['old_value'] ? subscription_mgmt_q($history['old_value']) : 'NULL') . ' AS old_value',
-        ($history['new_value'] ? subscription_mgmt_q($history['new_value']) : 'NULL') . ' AS new_value',
-        ($history['source'] ? subscription_mgmt_q($history['source']) : 'NULL') . ' AS source',
-        ($history['created_at'] ? subscription_mgmt_q($history['created_at']) : 'NULL') . ' AS created_at',
+        ($history['id'] ? ('h.' . subscription_mgmt_q($history['id'])) : 'NULL') . ' AS id',
+        ($history['user_id'] ? ('h.' . subscription_mgmt_q($history['user_id'])) : 'NULL') . ' AS user_id',
+        ($history['event_type'] ? ('h.' . subscription_mgmt_q($history['event_type'])) : 'NULL') . ' AS event_type',
+        ($history['plan_code'] ? ('h.' . subscription_mgmt_q($history['plan_code'])) : 'NULL') . ' AS plan_code',
+        ($history['provider'] ? ('h.' . subscription_mgmt_q($history['provider'])) : 'NULL') . ' AS provider',
+        ($history['store'] ? ('h.' . subscription_mgmt_q($history['store'])) : 'NULL') . ' AS store',
+        ($history['entitlement_id'] ? ('h.' . subscription_mgmt_q($history['entitlement_id'])) : 'NULL') . ' AS entitlement_id',
+        ($history['old_value'] ? ('h.' . subscription_mgmt_q($history['old_value'])) : 'NULL') . ' AS old_value',
+        ($history['new_value'] ? ('h.' . subscription_mgmt_q($history['new_value'])) : 'NULL') . ' AS new_value',
+        ($history['source'] ? ('h.' . subscription_mgmt_q($history['source'])) : 'NULL') . ' AS source',
+        ($history['event_at'] ? ('h.' . subscription_mgmt_q($history['event_at'])) : 'NULL') . ' AS event_at',
+        ($history['created_at'] ? ('h.' . subscription_mgmt_q($history['created_at'])) : 'NULL') . ' AS created_at',
     ];
 
     $join = '';

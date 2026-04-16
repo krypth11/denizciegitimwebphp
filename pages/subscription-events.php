@@ -22,15 +22,15 @@ include '../includes/sidebar.php';
     <div class="card sub-soft-card mb-3">
         <div class="card-body">
             <div class="row g-2">
-                <div class="col-6 col-lg-2"><input type="text" id="fltEventType" class="form-control" placeholder="Event type"></div>
+                <div class="col-6 col-lg-2"><input type="text" id="fltEventType" class="form-control" placeholder="Olay tipi"></div>
                 <div class="col-6 col-lg-2">
                     <select id="fltStatus" class="form-select">
                         <option value="">Durum (Tümü)</option>
-                        <option value="processed">Processed</option>
-                        <option value="failed">Failed</option>
-                        <option value="duplicate">Duplicate</option>
-                        <option value="unmatched_user">Unmatched</option>
-                        <option value="conflict">Conflict</option>
+                        <option value="processed">İşlendi</option>
+                        <option value="failed">Hata</option>
+                        <option value="duplicate">Tekrar</option>
+                        <option value="unmatched_user">Eşleşmedi</option>
+                        <option value="conflict">Çakışma</option>
                     </select>
                 </div>
                 <div class="col-6 col-lg-2"><input type="date" id="fltFrom" class="form-control"></div>
@@ -44,7 +44,7 @@ include '../includes/sidebar.php';
     <div class="card sub-soft-card">
         <div class="card-body table-responsive">
             <table class="table table-hover align-middle mb-0">
-                <thead><tr><th>Event</th><th>User</th><th>App User</th><th>Durum</th><th>Tarih</th></tr></thead>
+                <thead><tr><th>Olay</th><th>Kullanıcı</th><th>Uygulama Kullanıcısı</th><th>Durum</th><th>Tarih</th></tr></thead>
                 <tbody id="eventsBody"><tr><td colspan="5" class="text-muted">Yükleniyor...</td></tr></tbody>
             </table>
         </div>
@@ -54,7 +54,7 @@ include '../includes/sidebar.php';
 <div class="modal fade" id="payloadModal" tabindex="-1">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title">Payload Detayı</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-header"><h5 class="modal-title">Yük İçeriği Detayı</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
                 <pre class="small bg-body-tertiary p-3 rounded" id="payloadDetailPre">-</pre>
             </div>
@@ -69,13 +69,16 @@ $(function () {
     const endpoint = '../ajax/subscriptions.php';
     const esc = (t) => $('<div>').text(t ?? '').html();
     const fmtDate = (v) => v ? (window.formatDate ? window.formatDate(v) : v) : '-';
+    const trUi = window.subscriptionAdminUi || {};
+    const eventTypeLabel = (v) => trUi.eventTypeLabel ? trUi.eventTypeLabel(v) : (v || '-');
+    const statusLabel = (v) => trUi.statusLabel ? trUi.statusLabel(v) : (v || '-');
     const statusBadge = (s) => {
         const k = String(s || '').toLowerCase();
-        if (k === 'processed') return '<span class="badge text-bg-success">Processed</span>';
-        if (k === 'duplicate') return '<span class="badge text-bg-warning">Duplicate</span>';
-        if (k === 'unmatched_user') return '<span class="badge text-bg-secondary">Unmatched</span>';
-        if (k === 'conflict') return '<span class="badge text-bg-info">Conflict</span>';
-        return '<span class="badge text-bg-danger">Failed</span>';
+        if (k === 'processed') return '<span class="badge text-bg-success">' + esc(statusLabel(k)) + '</span>';
+        if (k === 'duplicate') return '<span class="badge text-bg-warning">' + esc(statusLabel(k)) + '</span>';
+        if (k === 'unmatched_user') return '<span class="badge text-bg-secondary">' + esc(statusLabel(k)) + '</span>';
+        if (k === 'conflict') return '<span class="badge text-bg-info">' + esc(statusLabel(k)) + '</span>';
+        return '<span class="badge text-bg-danger">' + esc(statusLabel('failed')) + '</span>';
     };
 
     const api = async (action, data = {}) => window.appAjax({ url: endpoint + '?action=' + encodeURIComponent(action), method: 'GET', data, dataType: 'json' });
@@ -92,7 +95,7 @@ $(function () {
     function render(items) {
         const rows = (items || []).map(x => `
             <tr class="event-row" data-id="${esc(x.id || x.event_id || '')}">
-                <td><span class="badge text-bg-light border">${esc(x.event_type || '-')}</span><div class="small text-muted">${esc(x.event_id || '-')}</div></td>
+                <td><span class="badge text-bg-light border">${esc(eventTypeLabel(x.event_type || '-'))}</span><div class="small text-muted">${esc(x.event_id || '-')}</div></td>
                 <td><small>${esc(x.user_id || '-')}</small></td>
                 <td><small>${esc(x.app_user_id || x.rc_app_user_id || '-')}</small></td>
                 <td>${statusBadge(x.process_status)}</td>
@@ -105,7 +108,7 @@ $(function () {
     async function load() {
         const res = await api('list_events', collectFilters());
         if (!res.success) {
-            if (window.showAppAlert) await window.showAppAlert({ title: 'Hata', message: res.message || 'Eventler alınamadı.', type: 'error' });
+            if (window.showAppAlert) await window.showAppAlert({ title: 'Hata', message: res.message || 'Olaylar alınamadı.', type: 'error' });
             return;
         }
         render(res.data?.items || []);
