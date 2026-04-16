@@ -59,9 +59,27 @@ $(function () {
     });
 
     function render(items) {
+        const userCell = (x) => {
+            const fullName = (x.full_name || '').trim();
+            const email = (x.email || '').trim();
+            const userId = (x.user_id || '').trim();
+
+            if (!fullName && !email) {
+                return `<small>${esc(userId || '-')}</small>`;
+            }
+
+            return `
+                <div>
+                    <div class="fw-semibold text-truncate">${esc(fullName || userId || '-')}</div>
+                    <div class="small text-muted text-truncate">${esc(email || '-')}</div>
+                    <div class="xsmall text-secondary text-truncate">${esc(userId || '-')}</div>
+                </div>
+            `;
+        };
+
         const rows = (items || []).map(x => `
             <tr>
-                <td><small>${esc(x.user_id || '-')}</small></td>
+                <td>${userCell(x)}</td>
                 <td><span class="badge text-bg-light border">${esc(x.event_type || '-')}</span></td>
                 <td>${esc(x.plan_code || '-')}</td>
                 <td><small>${esc((x.provider || '-') + ' / ' + (x.store || '-'))}</small></td>
@@ -91,7 +109,10 @@ $(function () {
 });
 </script>
 
-<style>.subscription-page .sub-soft-card{border:none;box-shadow:var(--shadow-soft);}</style>
+<style>
+.subscription-page .sub-soft-card{border:none;box-shadow:var(--shadow-soft);}
+.subscription-page .xsmall{font-size:11px;}
+</style>
 JAVASCRIPT;
 ?>
 

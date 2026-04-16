@@ -59,6 +59,232 @@ function subscriptions_to_limit(int $default = 50, int $max = 500): int
     return min($max, $limit);
 }
 
+function subscriptions_get_dashboard_recent_events(PDO $pdo, int $limit = 20): array
+{
+    $webhook = subscription_mgmt_webhook_schema($pdo);
+    if (!$webhook) {
+        return [];
+    }
+
+    $userSchema = subscriptions_user_schema($pdo);
+    $orderCol = $webhook['created_at'] ?: ($webhook['event_timestamp'] ?: $webhook['event_id']);
+
+    $select = [
+        ($webhook['id'] ? ('w.' . subscription_mgmt_q($webhook['id'])) : 'NULL') . ' AS id',
+        'w.' . subscription_mgmt_q($webhook['event_id']) . ' AS event_id',
+        'w.' . subscription_mgmt_q($webhook['event_type']) . ' AS event_type',
+        ($webhook['app_user_id'] ? ('w.' . subscription_mgmt_q($webhook['app_user_id'])) : 'NULL') . ' AS app_user_id',
+        ($webhook['rc_app_user_id'] ? ('w.' . subscription_mgmt_q($webhook['rc_app_user_id'])) : 'NULL') . ' AS rc_app_user_id',
+        ($webhook['user_id'] ? ('w.' . subscription_mgmt_q($webhook['user_id'])) : 'NULL') . ' AS user_id',
+        ($webhook['process_status'] ? ('w.' . subscription_mgmt_q($webhook['process_status'])) : "'processed'") . ' AS process_status',
+        ($webhook['error_message'] ? ('w.' . subscription_mgmt_q($webhook['error_message'])) : 'NULL') . ' AS error_message',
+        ($webhook['created_at'] ? ('w.' . subscription_mgmt_q($webhook['created_at'])) : 'NULL') . ' AS created_at',
+    ];
+
+    $join = '';
+    if ($userSchema && $webhook['user_id']) {
+        $select[] = ($userSchema['full_name'] ? ('u.' . subscription_mgmt_q($userSchema['full_name'])) : "''") . ' AS full_name';
+        $select[] = ($userSchema['email'] ? ('u.' . subscription_mgmt_q($userSchema['email'])) : "''") . ' AS email';
+        $join = ' LEFT JOIN ' . subscription_mgmt_q($userSchema['table']) . ' u'
+            . ' ON u.' . subscription_mgmt_q($userSchema['id']) . ' = w.' . subscription_mgmt_q($webhook['user_id']);
+    } else {
+        $select[] = "'' AS full_name";
+        $select[] = "'' AS email";
+    }
+
+    $sql = 'SELECT ' . implode(', ', $select)
+        . ' FROM ' . subscription_mgmt_q($webhook['table']) . ' w'
+        . $join
+        . ' ORDER BY w.' . subscription_mgmt_q($orderCol) . ' DESC'
+        . ' LIMIT ' . (int)max(1, $limit);
+
+    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function subscriptions_get_dashboard_chart(PDO $pdo): array
+{
+    $seriesKeys = ['INITIAL_PURCHASE', 'RENEWAL', 'EXPIRATION', 'CANCELLATION'];
+    $labels = [];
+    $series = [];
+    $dateIndex = [];
+
+    for ($i = 29; $i >= 0; $i--) {
+        $d = date('Y-m-d', strtotime('-' . $i . ' day'));
+        $dateIndex[$d] = count($labels);
+        $labels[] = $d;
+    }
+    foreach ($seriesKeys as $key) {
+        $series[$key] = array_fill(0, count($labels), 0);
+    }
+
+    $loadRows = static function (PDO $pdo, string $table, string $eventTypeCol, string $dateCol) use ($seriesKeys): array {
+        $in = implode(', ', array_fill(0, count($seriesKeys), '?'));
+        $sql = 'SELECT DATE(' . subscription_mgmt_q($dateCol) . ') AS d, '
+            . subscription_mgmt_q($eventTypeCol) . ' AS event_type, COUNT(*) AS c'
+            . ' FROM ' . subscription_mgmt_q($table)
+            . ' WHERE ' . subscription_mgmt_q($dateCol) . ' >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)'
+            . ' AND ' . subscription_mgmt_q($eventTypeCol) . ' IN (' . $in . ')'
+            . ' GROUP BY DATE(' . subscription_mgmt_q($dateCol) . '), ' . subscription_mgmt_q($eventTypeCol);
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($seriesKeys);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    };
+
+    $source = 'history';
+    $rows = [];
+
+    $history = subscription_mgmt_history_schema($pdo);
+    if ($history && $history['event_type'] && ($history['event_at'] || $history['created_at'])) {
+        $rows = $loadRows($pdo, $history['table'], $history['event_type'], $history['event_at'] ?: $history['created_at']);
+    }
+
+    if (empty($rows)) {
+        $webhook = subscription_mgmt_webhook_schema($pdo);
+        if ($webhook && $webhook['event_type'] && ($webhook['created_at'] || $webhook['event_timestamp'])) {
+            $rows = $loadRows($pdo, $webhook['table'], $webhook['event_type'], $webhook['created_at'] ?: $webhook['event_timestamp']);
+            $source = 'webhook_fallback';
+        }
+    }
+
+    foreach ($rows as $row) {
+        $eventType = strtoupper((string)($row['event_type'] ?? ''));
+        $d = (string)($row['d'] ?? '');
+        if (!isset($series[$eventType]) || !isset($dateIndex[$d])) {
+            continue;
+        }
+        $series[$eventType][$dateIndex[$d]] = (int)($row['c'] ?? 0);
+    }
+
+    return [
+        'labels' => $labels,
+        'series' => $series,
+        'source' => $source,
+    ];
+}
+
+function subscriptions_get_user_timeline(PDO $pdo, string $userId): array
+{
+    $userId = trim($userId);
+    if ($userId === '') {
+        return [
+            'user' => [],
+            'timeline' => [],
+            'current_status' => [],
+        ];
+    }
+
+    $userSchema = subscriptions_user_schema($pdo);
+    $history = subscription_mgmt_history_schema($pdo);
+    $subSchema = null;
+    try {
+        $subSchema = usage_limits_get_subscription_schema($pdo);
+    } catch (Throwable $e) {
+        $subSchema = null;
+    }
+
+    $user = [
+        'user_id' => $userId,
+        'full_name' => '',
+        'email' => '',
+        'rc_app_user_id' => null,
+        'plan_code' => null,
+        'entitlement_id' => null,
+        'expires_at' => null,
+        'last_synced_at' => null,
+    ];
+
+    if ($userSchema) {
+        $select = [
+            'u.' . subscription_mgmt_q($userSchema['id']) . ' AS user_id',
+            ($userSchema['full_name'] ? ('u.' . subscription_mgmt_q($userSchema['full_name'])) : "''") . ' AS full_name',
+            ($userSchema['email'] ? ('u.' . subscription_mgmt_q($userSchema['email'])) : "''") . ' AS email',
+        ];
+        $sql = 'SELECT ' . implode(', ', $select)
+            . ' FROM ' . subscription_mgmt_q($userSchema['table']) . ' u'
+            . ' WHERE u.' . subscription_mgmt_q($userSchema['id']) . ' = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $profile = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        if (!empty($profile)) {
+            $user['full_name'] = (string)($profile['full_name'] ?? '');
+            $user['email'] = (string)($profile['email'] ?? '');
+        }
+    }
+
+    $currentStatus = [];
+    if ($subSchema) {
+        $select = [
+            's.' . subscription_mgmt_q($subSchema['user_id']) . ' AS user_id',
+            's.' . subscription_mgmt_q($subSchema['is_pro']) . ' AS is_pro',
+            ($subSchema['plan_code'] ? ('s.' . subscription_mgmt_q($subSchema['plan_code'])) : 'NULL') . ' AS plan_code',
+            ($subSchema['entitlement_id'] ? ('s.' . subscription_mgmt_q($subSchema['entitlement_id'])) : 'NULL') . ' AS entitlement_id',
+            ($subSchema['rc_app_user_id'] ? ('s.' . subscription_mgmt_q($subSchema['rc_app_user_id'])) : 'NULL') . ' AS rc_app_user_id',
+            ($subSchema['expires_at'] ? ('s.' . subscription_mgmt_q($subSchema['expires_at'])) : 'NULL') . ' AS expires_at',
+            ($subSchema['last_synced_at'] ? ('s.' . subscription_mgmt_q($subSchema['last_synced_at'])) : 'NULL') . ' AS last_synced_at',
+        ];
+        $sql = 'SELECT ' . implode(', ', $select)
+            . ' FROM ' . subscription_mgmt_q($subSchema['table']) . ' s'
+            . ' WHERE s.' . subscription_mgmt_q($subSchema['user_id']) . ' = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $statusRow = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        if (!empty($statusRow)) {
+            $currentStatus = $statusRow;
+            $user['rc_app_user_id'] = $statusRow['rc_app_user_id'] ?? $user['rc_app_user_id'];
+            $user['plan_code'] = $statusRow['plan_code'] ?? $user['plan_code'];
+            $user['entitlement_id'] = $statusRow['entitlement_id'] ?? $user['entitlement_id'];
+            $user['expires_at'] = $statusRow['expires_at'] ?? $user['expires_at'];
+            $user['last_synced_at'] = $statusRow['last_synced_at'] ?? $user['last_synced_at'];
+        }
+    }
+
+    $timeline = [];
+    if ($history && $history['user_id']) {
+        $orderCol = $history['event_at'] ?: ($history['created_at'] ?: ($history['id'] ?: $history['event_id']));
+        $select = [
+            ($history['id'] ? ('h.' . subscription_mgmt_q($history['id'])) : 'NULL') . ' AS id',
+            ('h.' . subscription_mgmt_q($history['user_id'])) . ' AS user_id',
+            ($history['event_type'] ? ('h.' . subscription_mgmt_q($history['event_type'])) : 'NULL') . ' AS event_type',
+            ($history['event_title'] ? ('h.' . subscription_mgmt_q($history['event_title'])) : 'NULL') . ' AS event_title',
+            ($history['plan_code'] ? ('h.' . subscription_mgmt_q($history['plan_code'])) : 'NULL') . ' AS plan_code',
+            ($history['provider'] ? ('h.' . subscription_mgmt_q($history['provider'])) : 'NULL') . ' AS provider',
+            ($history['store'] ? ('h.' . subscription_mgmt_q($history['store'])) : 'NULL') . ' AS store',
+            ($history['entitlement_id'] ? ('h.' . subscription_mgmt_q($history['entitlement_id'])) : 'NULL') . ' AS entitlement_id',
+            ($history['old_value'] ? ('h.' . subscription_mgmt_q($history['old_value'])) : 'NULL') . ' AS old_value',
+            ($history['new_value'] ? ('h.' . subscription_mgmt_q($history['new_value'])) : 'NULL') . ' AS new_value',
+            ($history['source'] ? ('h.' . subscription_mgmt_q($history['source'])) : 'NULL') . ' AS source',
+            ($history['event_at'] ? ('h.' . subscription_mgmt_q($history['event_at'])) : 'NULL') . ' AS event_at',
+            ($history['created_at'] ? ('h.' . subscription_mgmt_q($history['created_at'])) : 'NULL') . ' AS created_at',
+            ($history['rc_app_user_id'] ? ('h.' . subscription_mgmt_q($history['rc_app_user_id'])) : 'NULL') . ' AS rc_app_user_id',
+        ];
+
+        $sql = 'SELECT ' . implode(', ', $select)
+            . ' FROM ' . subscription_mgmt_q($history['table']) . ' h'
+            . ' WHERE h.' . subscription_mgmt_q($history['user_id']) . ' = ?'
+            . ' ORDER BY h.' . subscription_mgmt_q($orderCol) . ' DESC'
+            . ' LIMIT 300';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $timeline = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        if ($user['rc_app_user_id'] === null) {
+            foreach ($timeline as $item) {
+                $candidate = trim((string)($item['rc_app_user_id'] ?? ''));
+                if ($candidate !== '') {
+                    $user['rc_app_user_id'] = $candidate;
+                    break;
+                }
+            }
+        }
+    }
+
+    return [
+        'user' => $user,
+        'timeline' => $timeline,
+        'current_status' => $currentStatus,
+    ];
+}
+
 function subscriptions_get_dashboard(PDO $pdo): array
 {
     $webhook = subscription_mgmt_webhook_schema($pdo);
@@ -122,24 +348,7 @@ function subscriptions_get_dashboard(PDO $pdo): array
         }
     }
 
-    $recentEvents = [];
-    if ($webhook) {
-        $orderCol = $webhook['created_at'] ?: ($webhook['event_timestamp'] ?: $webhook['event_id']);
-        $select = [
-            ($webhook['id'] ? subscription_mgmt_q($webhook['id']) : 'NULL') . ' AS id',
-            subscription_mgmt_q($webhook['event_id']) . ' AS event_id',
-            subscription_mgmt_q($webhook['event_type']) . ' AS event_type',
-            ($webhook['app_user_id'] ? subscription_mgmt_q($webhook['app_user_id']) : 'NULL') . ' AS app_user_id',
-            ($webhook['user_id'] ? subscription_mgmt_q($webhook['user_id']) : 'NULL') . ' AS user_id',
-            ($webhook['process_status'] ? subscription_mgmt_q($webhook['process_status']) : "'processed'") . ' AS process_status',
-            ($webhook['error_message'] ? subscription_mgmt_q($webhook['error_message']) : 'NULL') . ' AS error_message',
-            ($webhook['created_at'] ? subscription_mgmt_q($webhook['created_at']) : 'NULL') . ' AS created_at',
-        ];
-
-        $sql = 'SELECT ' . implode(', ', $select) . ' FROM ' . subscription_mgmt_q($webhook['table'])
-            . ' ORDER BY ' . subscription_mgmt_q($orderCol) . ' DESC LIMIT 12';
-        $recentEvents = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    }
+    $recentEvents = subscriptions_get_dashboard_recent_events($pdo, 12);
 
     $recentIssues = subscriptions_get_issues($pdo, 10);
 
@@ -247,6 +456,7 @@ function subscriptions_get_events(PDO $pdo): array
 function subscriptions_get_history(PDO $pdo): array
 {
     $history = subscription_mgmt_history_schema($pdo);
+    $userSchema = subscriptions_user_schema($pdo);
     if (!$history) {
         return ['items' => [], 'total_count' => 0];
     }
@@ -289,10 +499,22 @@ function subscriptions_get_history(PDO $pdo): array
         ($history['created_at'] ? subscription_mgmt_q($history['created_at']) : 'NULL') . ' AS created_at',
     ];
 
+    $join = '';
+    if ($userSchema && $history['user_id']) {
+        $select[] = ($userSchema['full_name'] ? ('u.' . subscription_mgmt_q($userSchema['full_name'])) : "''") . ' AS full_name';
+        $select[] = ($userSchema['email'] ? ('u.' . subscription_mgmt_q($userSchema['email'])) : "''") . ' AS email';
+        $join = ' LEFT JOIN ' . subscription_mgmt_q($userSchema['table']) . ' u'
+            . ' ON u.' . subscription_mgmt_q($userSchema['id']) . ' = h.' . subscription_mgmt_q($history['user_id']);
+    } else {
+        $select[] = "'' AS full_name";
+        $select[] = "'' AS email";
+    }
+
     $sql = 'SELECT ' . implode(', ', $select)
-        . ' FROM ' . subscription_mgmt_q($history['table'])
+        . ' FROM ' . subscription_mgmt_q($history['table']) . ' h'
+        . $join
         . $whereSql
-        . ' ORDER BY ' . subscription_mgmt_q($orderCol) . ' DESC'
+        . ' ORDER BY h.' . subscription_mgmt_q($orderCol) . ' DESC'
         . ' LIMIT ' . (int)$limit;
 
     $stmt = $pdo->prepare($sql);
@@ -476,6 +698,14 @@ try {
             subscriptions_json(true, 'OK', subscriptions_get_dashboard($pdo));
             break;
 
+        case 'dashboard_chart':
+            subscriptions_json(true, 'OK', subscriptions_get_dashboard_chart($pdo));
+            break;
+
+        case 'dashboard_recent_events':
+            subscriptions_json(true, 'OK', ['items' => subscriptions_get_dashboard_recent_events($pdo, subscriptions_to_limit(20, 200))]);
+            break;
+
         case 'list_events':
             subscriptions_json(true, 'OK', subscriptions_get_events($pdo));
             break;
@@ -498,6 +728,15 @@ try {
                 subscriptions_json(false, 'id parametresi zorunlu.', [], 422);
             }
             subscriptions_json(true, 'OK', ['item' => subscriptions_get_event_payload_detail($pdo, $id)]);
+            break;
+        }
+
+        case 'user_timeline': {
+            $userId = trim((string)($_GET['user_id'] ?? $_POST['user_id'] ?? ''));
+            if ($userId === '') {
+                subscriptions_json(false, 'user_id parametresi zorunlu.', [], 422);
+            }
+            subscriptions_json(true, 'OK', subscriptions_get_user_timeline($pdo, $userId));
             break;
         }
 
