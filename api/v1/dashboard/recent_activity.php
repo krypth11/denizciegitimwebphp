@@ -88,14 +88,59 @@ function ra_fetch_daily_quiz_questions(PDO $pdo, string $userId, string $quizDat
     return $result;
 }
 
+function ra_pick_registration_type(string $userType, array $typeSet): ?string
+{
+    if ($userType === 'guest' && isset($typeSet['guest_users'])) {
+        return 'guest_users';
+    }
+    if ($userType === 'registered' && isset($typeSet['registered_users'])) {
+        return 'registered_users';
+    }
+    if (isset($typeSet['registrations'])) {
+        return 'registrations';
+    }
+    return null;
+}
+
+function ra_pick_solved_type(?bool $isCorrect, array $typeSet): ?string
+{
+    if ($isCorrect === true && isset($typeSet['solved_correct'])) {
+        return 'solved_correct';
+    }
+    if ($isCorrect === false && isset($typeSet['solved_wrong'])) {
+        return 'solved_wrong';
+    }
+    if (isset($typeSet['solved_questions'])) {
+        return 'solved_questions';
+    }
+    return null;
+}
+
+function ra_pick_daily_quiz_type(bool $isCompleted, array $typeSet): ?string
+{
+    if ($isCompleted && isset($typeSet['daily_quiz_completed'])) {
+        return 'daily_quiz_completed';
+    }
+    if (isset($typeSet['daily_quiz'])) {
+        return 'daily_quiz';
+    }
+    return null;
+}
+
+function ra_is_registration_type(string $type): bool
+{
+    return in_array($type, ['registrations', 'guest_users', 'registered_users'], true);
+}
+
 try {
     $auth = api_require_auth($pdo);
     if (empty($auth['user']['is_admin'])) {
         api_error('Admin yetkisi gerekli.', 403);
     }
 
-    $allowedTypes = ['registrations', 'daily_quiz', 'solved_questions', 'subscription_started', 'subscription_renewed'];
+    $allowedTypes = dashboard_filter_keys_for_surface('activity');
     $types = stats_parse_types_from_query($allowedTypes);
+    $typeSet = array_flip($types);
     $limit = api_get_int_query('limit', 25, 10, 100);
 
     $rows = [];
@@ -110,7 +155,8 @@ try {
     $uCurrentQualification = ra_first_col($uCols, ['current_qualification_id', 'qualification_id']);
     $uEmailVerified = ra_first_col($uCols, ['email_verified']);
 
-    if (in_array('registrations', $types, true) && $uId && $uCreated && $uEmail) {
+    $registrationTypesRequested = isset($typeSet['registrations']) || isset($typeSet['guest_users']) || isset($typeSet['registered_users']);
+    if ($registrationTypesRequested && $uId && $uCreated && $uEmail) {
         $guestExpr = ra_detect_guest_sql('u.`' . $uEmail . '`', $uFullName ? ('u.`' . $uFullName . '`') : null);
         $sql = 'SELECT u.`' . $uId . '` AS user_id, u.`' . $uEmail . '` AS email, '
             . ($uFullName ? 'u.`' . $uFullName . '`' : "''") . ' AS full_name, '
@@ -124,8 +170,12 @@ try {
 
         $list = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
         foreach ($list as $item) {
+            $mappedType = ra_pick_registration_type((string)($item['user_type'] ?? 'registered'), $typeSet);
+            if ($mappedType === null) {
+                continue;
+            }
             $rows[] = [
-                'type' => 'registrations',
+                'type' => $mappedType,
                 'title' => 'Yeni kullanıcı kaydı',
                 'subtitle' => trim((string)($item['full_name'] ?? '')) !== '' ? (string)$item['full_name'] : (string)($item['email'] ?? ''),
                 'created_at' => $item['created_at'] ?? null,
@@ -146,7 +196,7 @@ try {
         if ($uCurrentQualification) {
             $qualMap = [];
             foreach ($rows as $rowIndex => $rowItem) {
-                if (($rowItem['type'] ?? '') !== 'registrations') {
+                if (!ra_is_registration_type((string)($rowItem['type'] ?? ''))) {
                     continue;
                 }
                 $qid = (string)($list[$rowIndex]['current_qualification_id'] ?? '');
@@ -167,7 +217,7 @@ try {
                 }
 
                 foreach ($rows as $rowIndex => $rowItem) {
-                    if (($rowItem['type'] ?? '') !== 'registrations') {
+                    if (!ra_is_registration_type((string)($rowItem['type'] ?? ''))) {
                         continue;
                     }
                     $qid = (string)($list[$rowIndex]['current_qualification_id'] ?? '');
@@ -175,6 +225,41 @@ try {
                         $rows[$rowIndex]['detail']['qualification_name'] = $nameById[$qid];
                     }
                 }
+            }
+        }
+    }
+
+    if (isset($typeSet['added_questions'])) {
+        $questionCols = get_table_columns($pdo, 'questions');
+        $qIdCol = ra_first_col($questionCols, ['id']);
+        $qCodeCol = ra_first_col($questionCols, ['question_code', 'code']);
+        $qTextCol = ra_first_col($questionCols, ['question', 'question_text', 'text', 'content']);
+        $qCreatedCol = ra_first_col($questionCols, ['created_at', 'updated_at']);
+        if ($qIdCol && $qCreatedCol) {
+            $sql = 'SELECT q.`' . $qIdCol . '` AS question_id, '
+                . ($qCodeCol ? 'q.`' . $qCodeCol . '`' : 'NULL') . ' AS question_code, '
+                . ($qTextCol ? 'q.`' . $qTextCol . '`' : 'NULL') . ' AS question_text, '
+                . 'q.`' . $qCreatedCol . '` AS created_at '
+                . 'FROM `questions` q ORDER BY q.`' . $qCreatedCol . '` DESC LIMIT ' . (int)$limit;
+            $list = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($list as $item) {
+                $rows[] = [
+                    'type' => 'added_questions',
+                    'title' => 'Yeni soru eklendi',
+                    'subtitle' => (string)($item['question_code'] ?? 'Soru kodu yok'),
+                    'created_at' => $item['created_at'] ?? null,
+                    'user' => [
+                        'id' => '',
+                        'email' => '',
+                        'full_name' => 'Sistem',
+                        'user_type' => 'registered',
+                    ],
+                    'detail' => [
+                        'question_id' => (string)($item['question_id'] ?? ''),
+                        'question_code' => $item['question_code'] ?? null,
+                        'question_text' => $item['question_text'] ?? null,
+                    ],
+                ];
             }
         }
     }
@@ -207,7 +292,8 @@ try {
     $qualId = ra_first_col($qualCols, ['id']);
     $qualName = ra_first_col($qualCols, ['name', 'title']);
 
-    if (in_array('solved_questions', $types, true) && $aUserId && $aQuestionId && $aDate && $uId && $uEmail) {
+    $solvedTypesRequested = isset($typeSet['solved_questions']) || isset($typeSet['solved_correct']) || isset($typeSet['solved_wrong']);
+    if ($solvedTypesRequested && $aUserId && $aQuestionId && $aDate && $uId && $uEmail) {
         $guestExpr = ra_detect_guest_sql('u.`' . $uEmail . '`', $uFullName ? ('u.`' . $uFullName . '`') : null);
         $sql = 'SELECT e.`' . $aDate . '` AS created_at, e.`' . $aQuestionId . '` AS question_id, '
             . ($aCorrect ? 'e.`' . $aCorrect . '`' : 'NULL') . ' AS is_correct, '
@@ -235,8 +321,13 @@ try {
         $list = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
         foreach ($list as $item) {
             $correctLabel = isset($item['is_correct']) ? ((int)$item['is_correct'] === 1 ? 'Doğru' : 'Yanlış') : 'Bilinmiyor';
+            $isCorrect = isset($item['is_correct']) ? ((int)$item['is_correct'] === 1) : null;
+            $mappedType = ra_pick_solved_type($isCorrect, $typeSet);
+            if ($mappedType === null) {
+                continue;
+            }
             $rows[] = [
-                'type' => 'solved_questions',
+                'type' => $mappedType,
                 'title' => 'Soru çözüldü (' . $correctLabel . ')',
                 'subtitle' => (string)($item['qualification_name'] ?? '-') . ' / ' . (string)($item['course_name'] ?? '-'),
                 'created_at' => $item['created_at'] ?? null,
@@ -257,7 +348,7 @@ try {
                     'option_e' => $item['option_e'] ?? null,
                     'correct_answer' => $item['correct_answer'] ?? null,
                     'selected_answer' => $item['selected_answer'] ?? null,
-                    'is_correct' => isset($item['is_correct']) ? ((int)$item['is_correct'] === 1) : null,
+                    'is_correct' => $isCorrect,
                     'qualification_name' => (string)($item['qualification_name'] ?? ''),
                     'course_name' => (string)($item['course_name'] ?? ''),
                     'attempted_at' => $item['created_at'] ?? null,
@@ -272,11 +363,14 @@ try {
     $dqCorrect = ra_first_col($dqCols, ['correct_answers', 'correct_count']);
     $dqTotal = ra_first_col($dqCols, ['total_questions', 'question_count']);
     $dqCompleted = ra_first_col($dqCols, ['completed_at', 'updated_at', 'created_at']);
-    if (in_array('daily_quiz', $types, true) && $dqUser && $dqDate && $dqCompleted && $uId && $uEmail) {
+    $dailyQuizTypesRequested = isset($typeSet['daily_quiz']) || isset($typeSet['daily_quiz_completed']);
+    if ($dailyQuizTypesRequested && $dqUser && $dqDate && $dqCompleted && $uId && $uEmail) {
+        $dqCompletedStrictCol = ra_first_col($dqCols, ['completed_at']);
         $guestExpr = ra_detect_guest_sql('u.`' . $uEmail . '`', $uFullName ? ('u.`' . $uFullName . '`') : null);
         $sql = 'SELECT d.`' . $dqCompleted . '` AS created_at, d.`' . $dqDate . '` AS quiz_date, '
             . ($dqCorrect ? 'd.`' . $dqCorrect . '`' : '0') . ' AS correct_count, '
             . ($dqTotal ? 'd.`' . $dqTotal . '`' : '0') . ' AS total_count, '
+            . ($dqCompletedStrictCol ? 'd.`' . $dqCompletedStrictCol . '`' : 'NULL') . ' AS completed_at, '
             . 'u.`' . $uId . '` AS user_id, u.`' . $uEmail . '` AS email, '
             . ($uFullName ? 'u.`' . $uFullName . '`' : "''") . ' AS full_name, '
             . 'CASE WHEN ' . $guestExpr . " THEN 'guest' ELSE 'registered' END AS user_type "
@@ -289,8 +383,13 @@ try {
             $total = (int)($item['total_count'] ?? 0);
             $correct = (int)($item['correct_count'] ?? 0);
             $wrong = max(0, $total - $correct);
+            $isCompleted = $dqCompletedStrictCol ? (($item['completed_at'] ?? null) !== null) : true;
+            $mappedType = ra_pick_daily_quiz_type($isCompleted, $typeSet);
+            if ($mappedType === null) {
+                continue;
+            }
             $rows[] = [
-                'type' => 'daily_quiz',
+                'type' => $mappedType,
                 'title' => 'Daily quiz aktivitesi',
                 'subtitle' => 'Doğru: ' . $correct . ' / Yanlış: ' . $wrong,
                 'created_at' => $item['created_at'] ?? null,
@@ -305,7 +404,7 @@ try {
                     'correct_count' => $correct,
                     'wrong_count' => $wrong,
                     'total_count' => $total,
-                    'completed' => ($item['created_at'] ?? null) !== null,
+                    'completed' => $isCompleted,
                     'questions' => [],
                 ],
             ];
@@ -322,14 +421,23 @@ try {
     $subscriptionTypeMap = [
         'INITIAL_PURCHASE' => 'subscription_started',
         'RENEWAL' => 'subscription_renewed',
+        'EXPIRATION' => 'subscription_expired',
+        'CANCELLATION' => 'subscription_cancelled',
     ];
     $requestedSubscriptionEventTypes = [];
-    if (in_array('subscription_started', $types, true)) {
+    if (isset($typeSet['subscription_started'])) {
         $requestedSubscriptionEventTypes[] = 'INITIAL_PURCHASE';
     }
-    if (in_array('subscription_renewed', $types, true)) {
+    if (isset($typeSet['subscription_renewed'])) {
         $requestedSubscriptionEventTypes[] = 'RENEWAL';
     }
+    if (isset($typeSet['subscription_expired'])) {
+        $requestedSubscriptionEventTypes[] = 'EXPIRATION';
+    }
+    if (isset($typeSet['subscription_cancelled'])) {
+        $requestedSubscriptionEventTypes[] = 'CANCELLATION';
+    }
+    $requestedSubscriptionEventTypes = array_values(array_unique($requestedSubscriptionEventTypes));
 
     if ($subscriptionSchema && !empty($requestedSubscriptionEventTypes) && $uId && $uEmail) {
         $hEventType = $subscriptionSchema['event_type'];
@@ -371,7 +479,7 @@ try {
             foreach ($list as $item) {
                 $rawEventType = strtoupper(trim((string)($item['event_type'] ?? '')));
                 $mappedType = $subscriptionTypeMap[$rawEventType] ?? null;
-                if ($mappedType === null) {
+                if ($mappedType === null || !isset($typeSet[$mappedType])) {
                     continue;
                 }
 
@@ -385,12 +493,22 @@ try {
                 }
 
                 $planTitle = 'Pro';
-                $eventVerb = $mappedType === 'subscription_renewed' ? 'aboneliğini yeniledi' : 'abonelik satın aldı';
+                $eventVerb = match ($mappedType) {
+                    'subscription_renewed' => 'aboneliğini yeniledi',
+                    'subscription_expired' => 'aboneliğinin süresi doldu',
+                    'subscription_cancelled' => 'aboneliğini iptal etti',
+                    default => 'abonelik satın aldı',
+                };
                 $humanSentence = $displayName . ' ' . $planDurationLabel . ' ' . $planTitle . ' ' . $eventVerb . '.';
 
                 $rows[] = [
                     'type' => $mappedType,
-                    'title' => $mappedType === 'subscription_renewed' ? 'Abonelik yenilemesi' : 'Yeni abonelik',
+                    'title' => match ($mappedType) {
+                        'subscription_renewed' => 'Abonelik yenilemesi',
+                        'subscription_expired' => 'Abonelik süresi doldu',
+                        'subscription_cancelled' => 'Abonelik iptali',
+                        default => 'Yeni abonelik',
+                    },
                     'subtitle' => $humanSentence,
                     'created_at' => $item['event_at'] ?? $item['history_created_at'] ?? null,
                     'user' => [

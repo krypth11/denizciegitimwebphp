@@ -101,6 +101,18 @@ function trends_subscription_series_from_plan_code(?string $planCode): ?string
     return null;
 }
 
+function trends_subscription_event_series(?string $eventType): ?string
+{
+    $type = strtoupper(trim((string)$eventType));
+    return match ($type) {
+        'INITIAL_PURCHASE' => 'subscription_started',
+        'RENEWAL' => 'subscription_renewed',
+        'EXPIRATION' => 'subscription_expired',
+        'CANCELLATION' => 'subscription_cancelled',
+        default => null,
+    };
+}
+
 function trends_labels_from_dates(string $startDate, string $endDate): array
 {
     $start = new DateTimeImmutable($startDate);
@@ -129,30 +141,49 @@ if (($_GET['scope'] ?? '') === 'admin') {
             $window = stats_resolve_date_window(['range' => '30d'], 'range', 'start_date', 'end_date', '30d');
         }
 
-        $types = stats_parse_types_from_query([
-            'registrations',
-            'subscription_monthly',
-            'subscription_quarterly',
-            'subscription_semiannual',
-            'subscription_annual',
-        ]);
+        $types = stats_parse_types_from_query(dashboard_filter_keys_for_surface('chart'));
+        $typeSet = array_flip($types);
         [$dateKeys, $labels] = trends_labels_from_dates((string)$window['start_date'], (string)$window['end_date']);
         $dateIndex = array_flip($dateKeys);
 
         $series = [
             'registrations' => trends_series_empty($labels),
+            'guest_users' => trends_series_empty($labels),
+            'registered_users' => trends_series_empty($labels),
+            'solved_questions_daily' => trends_series_empty($labels),
+            'solved_correct' => trends_series_empty($labels),
+            'solved_wrong' => trends_series_empty($labels),
+            'daily_quiz' => trends_series_empty($labels),
+            'daily_quiz_completed' => trends_series_empty($labels),
+            'added_questions_daily' => trends_series_empty($labels),
+            'subscription_started' => trends_series_empty($labels),
+            'subscription_renewed' => trends_series_empty($labels),
             'subscription_monthly' => trends_series_empty($labels),
             'subscription_quarterly' => trends_series_empty($labels),
             'subscription_semiannual' => trends_series_empty($labels),
             'subscription_annual' => trends_series_empty($labels),
+            'subscription_expired' => trends_series_empty($labels),
+            'subscription_cancelled' => trends_series_empty($labels),
         ];
 
         $totals = [
             'registrations' => 0,
+            'guest_users' => 0,
+            'registered_users' => 0,
+            'solved_questions_daily' => 0,
+            'solved_correct' => 0,
+            'solved_wrong' => 0,
+            'daily_quiz' => 0,
+            'daily_quiz_completed' => 0,
+            'added_questions_daily' => 0,
+            'subscription_started' => 0,
+            'subscription_renewed' => 0,
             'subscription_monthly' => 0,
             'subscription_quarterly' => 0,
             'subscription_semiannual' => 0,
             'subscription_annual' => 0,
+            'subscription_expired' => 0,
+            'subscription_cancelled' => 0,
         ];
 
         $uCols = get_table_columns($pdo, 'user_profiles');
@@ -160,7 +191,9 @@ if (($_GET['scope'] ?? '') === 'admin') {
         $uUpdated = trends_first_col($uCols, ['updated_at']);
         $uDeleted = trends_first_col($uCols, ['is_deleted']);
 
-        if (in_array('registrations', $types, true) && $uCreated) {
+        if ((isset($typeSet['registrations']) || isset($typeSet['guest_users']) || isset($typeSet['registered_users'])) && $uCreated) {
+            $uEmail = trends_first_col($uCols, ['email']);
+            $uFullName = trends_first_col($uCols, ['full_name', 'name', 'display_name']);
             $params = [];
             $where = ['DATE(`' . $uCreated . '`) BETWEEN ? AND ?'];
             $params[] = $window['start_date'];
@@ -168,27 +201,134 @@ if (($_GET['scope'] ?? '') === 'admin') {
             if ($uDeleted) {
                 $where[] = '`' . $uDeleted . '` = 0';
             }
-            $sql = 'SELECT DATE(`' . $uCreated . '`) AS d, COUNT(*) AS c FROM `user_profiles` WHERE ' . implode(' AND ', $where) . ' GROUP BY DATE(`' . $uCreated . '`)';
+
+            $guestExpr = null;
+            if ($uEmail) {
+                $nameExpr = $uFullName ? ('LOWER(TRIM(`' . $uFullName . '`))') : "''";
+                $guestExpr = '(LOWER(`' . $uEmail . "`) LIKE '%@guest.local' OR " . $nameExpr . " IN ('misafir kullanıcı','misafir kullanici','guest user'))";
+            }
+
+            $sql = 'SELECT DATE(`' . $uCreated . '`) AS d, COUNT(*) AS c';
+            if ($guestExpr) {
+                $sql .= ', SUM(CASE WHEN ' . $guestExpr . ' THEN 1 ELSE 0 END) AS guest_c'
+                    . ', SUM(CASE WHEN NOT (' . $guestExpr . ') THEN 1 ELSE 0 END) AS registered_c';
+            } else {
+                $sql .= ', 0 AS guest_c, COUNT(*) AS registered_c';
+            }
+            $sql .= ' FROM `user_profiles` WHERE ' . implode(' AND ', $where) . ' GROUP BY DATE(`' . $uCreated . '`)';
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
             foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
                 $d = (string)($row['d'] ?? '');
                 if (!isset($dateIndex[$d])) continue;
                 $v = (int)($row['c'] ?? 0);
-                $series['registrations'][$dateIndex[$d]] = $v;
-                $totals['registrations'] += $v;
+                $guestV = (int)($row['guest_c'] ?? 0);
+                $registeredV = (int)($row['registered_c'] ?? max(0, $v - $guestV));
+                if (isset($typeSet['registrations'])) {
+                    $series['registrations'][$dateIndex[$d]] = $v;
+                    $totals['registrations'] += $v;
+                }
+                if (isset($typeSet['guest_users'])) {
+                    $series['guest_users'][$dateIndex[$d]] = $guestV;
+                    $totals['guest_users'] += $guestV;
+                }
+                if (isset($typeSet['registered_users'])) {
+                    $series['registered_users'][$dateIndex[$d]] = $registeredV;
+                    $totals['registered_users'] += $registeredV;
+                }
             }
         }
 
-        $requestedSubscriptionTypes = array_values(array_intersect([
+        $attemptCols = get_table_columns($pdo, 'question_attempt_events');
+        $attemptDate = trends_first_col($attemptCols, ['attempted_at', 'created_at']);
+        $attemptCorrect = trends_first_col($attemptCols, ['is_correct']);
+        if ((isset($typeSet['solved_questions_daily']) || isset($typeSet['solved_correct']) || isset($typeSet['solved_wrong'])) && $attemptDate) {
+            $sql = 'SELECT DATE(`' . $attemptDate . '`) AS d, COUNT(*) AS c, '
+                . ($attemptCorrect ? 'SUM(CASE WHEN `' . $attemptCorrect . '` = 1 THEN 1 ELSE 0 END)' : '0') . ' AS correct_c, '
+                . ($attemptCorrect ? 'SUM(CASE WHEN `' . $attemptCorrect . '` = 0 THEN 1 ELSE 0 END)' : '0') . ' AS wrong_c '
+                . 'FROM `question_attempt_events` WHERE DATE(`' . $attemptDate . '`) BETWEEN ? AND ? GROUP BY DATE(`' . $attemptDate . '`)';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$window['start_date'], $window['end_date']]);
+            foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
+                $d = (string)($row['d'] ?? '');
+                if (!isset($dateIndex[$d])) continue;
+                $totalV = (int)($row['c'] ?? 0);
+                $correctV = (int)($row['correct_c'] ?? 0);
+                $wrongV = (int)($row['wrong_c'] ?? 0);
+                if (isset($typeSet['solved_questions_daily'])) {
+                    $series['solved_questions_daily'][$dateIndex[$d]] = $totalV;
+                    $totals['solved_questions_daily'] += $totalV;
+                }
+                if (isset($typeSet['solved_correct'])) {
+                    $series['solved_correct'][$dateIndex[$d]] = $correctV;
+                    $totals['solved_correct'] += $correctV;
+                }
+                if (isset($typeSet['solved_wrong'])) {
+                    $series['solved_wrong'][$dateIndex[$d]] = $wrongV;
+                    $totals['solved_wrong'] += $wrongV;
+                }
+            }
+        }
+
+        $dqCols = get_table_columns($pdo, 'daily_quiz_progress');
+        $dqDate = trends_first_col($dqCols, ['quiz_date', 'date']);
+        $dqCompleted = trends_first_col($dqCols, ['completed_at']);
+        if ((isset($typeSet['daily_quiz']) || isset($typeSet['daily_quiz_completed'])) && $dqDate) {
+            $sql = 'SELECT DATE(`' . $dqDate . '`) AS d, COUNT(*) AS c';
+            if ($dqCompleted) {
+                $sql .= ', SUM(CASE WHEN `' . $dqCompleted . '` IS NOT NULL THEN 1 ELSE 0 END) AS completed_c';
+            } else {
+                $sql .= ', COUNT(*) AS completed_c';
+            }
+            $sql .= ' FROM `daily_quiz_progress` WHERE DATE(`' . $dqDate . '`) BETWEEN ? AND ? GROUP BY DATE(`' . $dqDate . '`)';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$window['start_date'], $window['end_date']]);
+            foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
+                $d = (string)($row['d'] ?? '');
+                if (!isset($dateIndex[$d])) continue;
+                $totalV = (int)($row['c'] ?? 0);
+                $completedV = (int)($row['completed_c'] ?? 0);
+                if (isset($typeSet['daily_quiz'])) {
+                    $series['daily_quiz'][$dateIndex[$d]] = $totalV;
+                    $totals['daily_quiz'] += $totalV;
+                }
+                if (isset($typeSet['daily_quiz_completed'])) {
+                    $series['daily_quiz_completed'][$dateIndex[$d]] = $completedV;
+                    $totals['daily_quiz_completed'] += $completedV;
+                }
+            }
+        }
+
+        $questionCols = get_table_columns($pdo, 'questions');
+        $questionCreated = trends_first_col($questionCols, ['created_at', 'updated_at']);
+        if (isset($typeSet['added_questions_daily']) && $questionCreated) {
+            $sql = 'SELECT DATE(`' . $questionCreated . '`) AS d, COUNT(*) AS c FROM `questions` WHERE DATE(`' . $questionCreated . '`) BETWEEN ? AND ? GROUP BY DATE(`' . $questionCreated . '`)';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([$window['start_date'], $window['end_date']]);
+            foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
+                $d = (string)($row['d'] ?? '');
+                if (!isset($dateIndex[$d])) continue;
+                $v = (int)($row['c'] ?? 0);
+                $series['added_questions_daily'][$dateIndex[$d]] = $v;
+                $totals['added_questions_daily'] += $v;
+            }
+        }
+
+        $requestedSubscriptionPlanTypes = array_values(array_intersect([
             'subscription_monthly',
             'subscription_quarterly',
             'subscription_semiannual',
             'subscription_annual',
         ], $types));
+        $requestedSubscriptionEventSeries = array_values(array_intersect([
+            'subscription_started',
+            'subscription_renewed',
+            'subscription_expired',
+            'subscription_cancelled',
+        ], $types));
 
         $sehCols = get_table_columns($pdo, 'subscription_event_history');
-        if (!empty($requestedSubscriptionTypes) && !empty($sehCols)) {
+        if ((!empty($requestedSubscriptionPlanTypes) || !empty($requestedSubscriptionEventSeries)) && !empty($sehCols)) {
             $hEventType = trends_first_col($sehCols, ['event_type']);
             $hPlanCode = trends_first_col($sehCols, ['plan_code']);
             $hEventAt = trends_first_col($sehCols, ['event_at']);
@@ -196,7 +336,7 @@ if (($_GET['scope'] ?? '') === 'admin') {
             $dateCol = $hEventAt ?: $hCreatedAt;
 
             if ($hEventType && $dateCol) {
-                $eventTypes = ['INITIAL_PURCHASE', 'RENEWAL'];
+                $eventTypes = ['INITIAL_PURCHASE', 'RENEWAL', 'EXPIRATION', 'CANCELLATION'];
                 $eventTypePlaceholders = implode(',', array_fill(0, count($eventTypes), '?'));
                 $sql = 'SELECT DATE(`' . $dateCol . '`) AS d, UPPER(TRIM(`' . $hEventType . '`)) AS event_type, '
                     . ($hPlanCode ? '`' . $hPlanCode . '`' : 'NULL') . ' AS plan_code '
@@ -220,6 +360,16 @@ if (($_GET['scope'] ?? '') === 'admin') {
                         continue;
                     }
 
+                    $eventSeries = trends_subscription_event_series($rawType);
+                    if ($eventSeries !== null && in_array($eventSeries, $requestedSubscriptionEventSeries, true)) {
+                        $series[$eventSeries][$dateIndex[$d]] += 1;
+                        $totals[$eventSeries] += 1;
+                    }
+
+                    if (!in_array($rawType, ['INITIAL_PURCHASE', 'RENEWAL'], true)) {
+                        continue;
+                    }
+
                     $planCodeRaw = (string)($row['plan_code'] ?? '');
                     $mappedType = trends_subscription_series_from_plan_code($planCodeRaw);
                     if ($mappedType === null || !isset($series[$mappedType])) {
@@ -230,7 +380,7 @@ if (($_GET['scope'] ?? '') === 'admin') {
                         continue;
                     }
 
-                    if (!in_array($mappedType, $requestedSubscriptionTypes, true)) {
+                    if (!in_array($mappedType, $requestedSubscriptionPlanTypes, true)) {
                         continue;
                     }
 

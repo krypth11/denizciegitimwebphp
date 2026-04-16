@@ -2,6 +2,7 @@
 require_once 'includes/config.php';
 require_once 'includes/auth.php';
 require_once 'includes/functions.php';
+require_once __DIR__ . '/api/v1/dashboard/stats_filters.php';
 
 $user = require_auth();
 $current_page = 'dashboard';
@@ -109,12 +110,10 @@ include 'includes/sidebar.php';
                 <small class="text-muted" id="activityRefreshInfo"><span class="live-dot"></span> Canlı · Son güncelleme: - · Otomatik yenileme: 1sn</small>
             </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
-                <div class="dashboard-chip-group" id="activityTypes">
-                    <button type="button" class="chip active" data-type="registrations">Kaydolan Kullanıcılar</button>
-                    <button type="button" class="chip active" data-type="daily_quiz">Daily Quiz</button>
-                    <button type="button" class="chip active" data-type="solved_questions">Çözülen Sorular</button>
-                    <button type="button" class="chip active" data-type="subscription_started">Yeni Abonelikler</button>
-                    <button type="button" class="chip active" data-type="subscription_renewed">Abonelik Yenilemeleri</button>
+                <div class="dashboard-filter-control" id="activityFilterControl">
+                    <div class="dashboard-chip-group" id="activityTypes"></div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary filter-add-btn" id="activityFilterAddBtn">Filtre Ekle +</button>
+                    <div class="dashboard-filter-panel d-none" id="activityFilterPanel"></div>
                 </div>
                 <select class="form-select form-select-sm w-auto" id="activityLimit">
                     <option value="10">10</option>
@@ -155,12 +154,10 @@ include 'includes/sidebar.php';
             </div>
         </div>
         <div class="card-body">
-            <div class="dashboard-chip-group mb-3" id="chartTypes">
-                <button type="button" class="chip active" data-type="registrations">Kaydolan Kullanıcılar</button>
-                <button type="button" class="chip active" data-type="subscription_monthly">1 Aylık Abonelikler</button>
-                <button type="button" class="chip active" data-type="subscription_quarterly">3 Aylık Abonelikler</button>
-                <button type="button" class="chip active" data-type="subscription_semiannual">6 Aylık Abonelikler</button>
-                <button type="button" class="chip active" data-type="subscription_annual">Yıllık Abonelikler</button>
+            <div class="dashboard-filter-control mb-3" id="chartFilterControl">
+                <div class="dashboard-chip-group" id="chartTypes"></div>
+                <button type="button" class="btn btn-sm btn-outline-secondary filter-add-btn" id="chartFilterAddBtn">Filtre Ekle +</button>
+                <div class="dashboard-filter-panel d-none" id="chartFilterPanel"></div>
             </div>
             <div class="row g-2 mb-3" id="chartTotals"></div>
             <div class="chart-wrap">
@@ -187,12 +184,44 @@ include 'includes/sidebar.php';
 
 <script>
 (() => {
+    const FILTER_CATALOG = <?php echo json_encode(dashboard_filter_catalog_list(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+    const FILTER_DEFAULTS = <?php echo json_encode(dashboard_filter_defaults(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+    const FILTER_CATALOG_MAP = Object.fromEntries(FILTER_CATALOG.map((item) => [item.key, item]));
+    const FILTER_CATEGORY_ORDER = ['Kullanıcı', 'Çalışma', 'Daily Quiz', 'İçerik', 'Abonelik'];
+
+    const isSurfaceSupported = (item, surface) => surface === 'activity' ? !!item.supports_activity : !!item.supports_chart;
+    const catalogForSurface = (surface) => FILTER_CATALOG.filter((item) => isSurfaceSupported(item, surface));
+    const defaultTypesForSurface = (surface) => {
+        const defaults = Array.isArray(FILTER_DEFAULTS?.[surface]?.types) ? FILTER_DEFAULTS[surface].types : [];
+        const allowed = new Set(catalogForSurface(surface).map((item) => item.key));
+        const normalized = defaults.filter((key) => allowed.has(key));
+        if (normalized.length) return normalized;
+        return catalogForSurface(surface).slice(0, 1).map((item) => item.key);
+    };
+
+    const normalizeTypeSelection = (keys, surface) => {
+        const allowed = new Set(catalogForSurface(surface).map((item) => item.key));
+        const unique = [];
+        (Array.isArray(keys) ? keys : []).forEach((key) => {
+            const normalized = String(key || '').trim();
+            if (!normalized || !allowed.has(normalized) || unique.includes(normalized)) return;
+            unique.push(normalized);
+        });
+        if (unique.length) return unique;
+        return defaultTypesForSurface(surface);
+    };
+
     const dashboardState = {
         question: { qualification_id: '', course_id: '' },
         solved: { range: '7d', start_date: '', end_date: '' },
         users: { user_type: 'all' },
-        activity: { types: ['registrations', 'daily_quiz', 'solved_questions', 'subscription_started', 'subscription_renewed'], limit: 25 },
-        chart: { range: '7d', start_date: '', end_date: '', types: ['registrations', 'subscription_monthly', 'subscription_quarterly', 'subscription_semiannual', 'subscription_annual'] },
+        activity: { types: defaultTypesForSurface('activity'), limit: Number(FILTER_DEFAULTS?.activity?.limit || 25) },
+        chart: {
+            range: String(FILTER_DEFAULTS?.chart?.range || '7d'),
+            start_date: String(FILTER_DEFAULTS?.chart?.start_date || ''),
+            end_date: String(FILTER_DEFAULTS?.chart?.end_date || ''),
+            types: defaultTypesForSurface('chart')
+        },
         refs: { qualifications: [], courses: [] },
         polling: { timer: null, interval: 1000 }
     };
@@ -208,6 +237,8 @@ include 'includes/sidebar.php';
     let firstStatsLoaded = false;
     let firstActivitiesLoaded = false;
     let firstChartLoaded = false;
+    let preferenceSaveTimer = null;
+    let preferencesLoaded = false;
 
     const qs = (s) => document.querySelector(s);
     const qsa = (s) => Array.from(document.querySelectorAll(s));
@@ -234,6 +265,21 @@ include 'includes/sidebar.php';
         const query = new URLSearchParams(params);
         const fullUrl = query.toString() ? `${url}?${query}` : url;
         const res = await fetch(fullUrl, { credentials: 'same-origin' });
+        let data = {};
+        try { data = await res.json(); } catch (_) {}
+        if (!res.ok || !data.success) {
+            throw new Error(data.message || 'İstek başarısız');
+        }
+        return data.data || {};
+    }
+
+    async function jsonPost(url, body = {}) {
+        const res = await fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body || {})
+        });
         let data = {};
         try { data = await res.json(); } catch (_) {}
         if (!res.ok || !data.success) {
@@ -344,7 +390,9 @@ include 'includes/sidebar.php';
     }
 
     function initDateFilter(prefix, stateObj, onChange) {
-        applyPresetRange(stateObj, stateObj.range || '7d');
+        if (!stateObj.start_date || !stateObj.end_date) {
+            applyPresetRange(stateObj, stateObj.range || '7d');
+        }
         syncDateFilterUI(prefix, stateObj);
 
         const panel = qs(`#${prefix}DatePanel`);
@@ -385,8 +433,150 @@ include 'includes/sidebar.php';
         });
     }
 
-    function getActiveTypes(containerId) {
-        return qsa(`${containerId} .chip.active`).map(x => x.dataset.type);
+    function groupCatalogByCategory(surface) {
+        const groups = {};
+        catalogForSurface(surface).forEach((item) => {
+            const cat = item.category || 'Diğer';
+            if (!groups[cat]) groups[cat] = [];
+            groups[cat].push(item);
+        });
+        Object.keys(groups).forEach((cat) => {
+            groups[cat].sort((a, b) => Number(a.order || 0) - Number(b.order || 0));
+        });
+        return groups;
+    }
+
+    function renderTypeChips(surface) {
+        const container = qs(surface === 'activity' ? '#activityTypes' : '#chartTypes');
+        if (!container) return;
+        const selected = normalizeTypeSelection(dashboardState[surface].types, surface);
+        dashboardState[surface].types = selected;
+        container.innerHTML = selected.map((key) => {
+            const item = FILTER_CATALOG_MAP[key];
+            const label = item?.label || key;
+            return `<button type="button" class="chip active" data-type="${key}" data-surface="${surface}">${label} <span aria-hidden="true">×</span></button>`;
+        }).join('');
+
+        container.querySelectorAll('.chip').forEach((btn) => {
+            btn.addEventListener('click', async () => {
+                await toggleSurfaceType(surface, btn.dataset.type || '');
+            });
+        });
+    }
+
+    function renderFilterPanel(surface) {
+        const panel = qs(surface === 'activity' ? '#activityFilterPanel' : '#chartFilterPanel');
+        if (!panel) return;
+        const groups = groupCatalogByCategory(surface);
+        const selected = new Set(dashboardState[surface].types);
+        const categories = FILTER_CATEGORY_ORDER.filter((cat) => groups[cat]).concat(Object.keys(groups).filter((cat) => !FILTER_CATEGORY_ORDER.includes(cat)));
+        panel.innerHTML = categories.map((cat) => {
+            const items = groups[cat] || [];
+            return `<div class="filter-panel-section">
+                <div class="filter-panel-title">${cat}</div>
+                ${items.map((item) => `<label class="filter-panel-item">
+                    <input type="checkbox" data-surface="${surface}" data-type="${item.key}" ${selected.has(item.key) ? 'checked' : ''}>
+                    <span>${item.label}</span>
+                </label>`).join('')}
+            </div>`;
+        }).join('');
+
+        panel.querySelectorAll('input[type="checkbox"]').forEach((el) => {
+            el.addEventListener('change', async () => {
+                await toggleSurfaceType(surface, el.dataset.type || '');
+            });
+        });
+    }
+
+    async function toggleSurfaceType(surface, type) {
+        const current = normalizeTypeSelection(dashboardState[surface].types, surface);
+        const has = current.includes(type);
+        let next = has ? current.filter((k) => k !== type) : current.concat(type);
+        next = normalizeTypeSelection(next, surface);
+        if (!next.length) return;
+        dashboardState[surface].types = next;
+        renderTypeChips(surface);
+        renderFilterPanel(surface);
+        schedulePreferencesSave();
+        if (surface === 'activity') {
+            await loadActivities();
+        } else {
+            await loadChart();
+        }
+    }
+
+    function bindFilterPopover(surface) {
+        const addBtn = qs(surface === 'activity' ? '#activityFilterAddBtn' : '#chartFilterAddBtn');
+        const panel = qs(surface === 'activity' ? '#activityFilterPanel' : '#chartFilterPanel');
+        if (!addBtn || !panel) return;
+        addBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            panel.classList.toggle('d-none');
+        });
+        document.addEventListener('click', (e) => {
+            if (panel.classList.contains('d-none')) return;
+            if (panel.contains(e.target) || addBtn.contains(e.target)) return;
+            panel.classList.add('d-none');
+        });
+    }
+
+    function buildPreferencesPayload() {
+        return {
+            activity: {
+                types: normalizeTypeSelection(dashboardState.activity.types, 'activity'),
+                limit: Number(dashboardState.activity.limit || FILTER_DEFAULTS?.activity?.limit || 25)
+            },
+            chart: {
+                types: normalizeTypeSelection(dashboardState.chart.types, 'chart'),
+                range: String(dashboardState.chart.range || FILTER_DEFAULTS?.chart?.range || '7d'),
+                start_date: dashboardState.chart.start_date || null,
+                end_date: dashboardState.chart.end_date || null
+            }
+        };
+    }
+
+    function applyPreferences(preferences) {
+        const p = preferences || {};
+        dashboardState.activity.types = normalizeTypeSelection(p?.activity?.types, 'activity');
+        dashboardState.activity.limit = [10, 25, 50, 100].includes(Number(p?.activity?.limit)) ? Number(p.activity.limit) : Number(FILTER_DEFAULTS?.activity?.limit || 25);
+
+        dashboardState.chart.types = normalizeTypeSelection(p?.chart?.types, 'chart');
+        dashboardState.chart.range = String(p?.chart?.range || FILTER_DEFAULTS?.chart?.range || '7d');
+        dashboardState.chart.start_date = String(p?.chart?.start_date || '');
+        dashboardState.chart.end_date = String(p?.chart?.end_date || '');
+    }
+
+    async function loadPreferences() {
+        try {
+            const data = await jsonGet('/api/v1/dashboard/preferences.php');
+            applyPreferences(data.preferences || {});
+        } catch (_) {
+            applyPreferences({});
+        } finally {
+            preferencesLoaded = true;
+        }
+    }
+
+    function schedulePreferencesSave() {
+        if (!preferencesLoaded) return;
+        if (preferenceSaveTimer) clearTimeout(preferenceSaveTimer);
+        preferenceSaveTimer = setTimeout(async () => {
+            try {
+                await jsonPost('/api/v1/dashboard/preferences.php', buildPreferencesPayload());
+            } catch (_) {}
+        }, 600);
+    }
+
+    function renderFilterUi() {
+        renderTypeChips('activity');
+        renderFilterPanel('activity');
+        renderTypeChips('chart');
+        renderFilterPanel('chart');
+
+        const limitEl = qs('#activityLimit');
+        if (limitEl) {
+            limitEl.value = String(dashboardState.activity.limit || 25);
+        }
     }
 
     async function loadFilters() {
@@ -489,35 +679,52 @@ include 'includes/sidebar.php';
 
     function activityTypeLabel(type) {
         const map = {
-            registrations: 'Kayıt',
+            registrations: 'Kaydolan Kullanıcılar',
+            guest_users: 'Misafir Kullanıcılar',
+            registered_users: 'Kayıtlı Kullanıcılar',
             daily_quiz: 'Daily Quiz',
-            solved_questions: 'Soru Çözümü',
+            daily_quiz_completed: 'Daily Quiz Tamamlayanlar',
+            solved_questions: 'Çözülen Sorular',
+            solved_correct: 'Doğru Çözülen Sorular',
+            solved_wrong: 'Yanlış Çözülen Sorular',
+            added_questions: 'Eklenen Sorular',
             subscription_started: 'Yeni Abonelik',
-            subscription_renewed: 'Abonelik Yenileme'
+            subscription_renewed: 'Abonelik Yenileme',
+            subscription_expired: 'Süresi Dolan Abonelikler',
+            subscription_cancelled: 'İptaller'
         };
-        return map[type] || type;
+        return map[type] || FILTER_CATALOG_MAP[type]?.label || type;
     }
 
     function activityIcon(type) {
         const map = {
             registrations: 'bi-person-plus',
             daily_quiz: 'bi-lightning-charge',
+            daily_quiz_completed: 'bi-check2-circle',
             solved_questions: 'bi-bullseye',
+            solved_correct: 'bi-check-circle',
+            solved_wrong: 'bi-x-circle',
+            guest_users: 'bi-person-dash',
+            registered_users: 'bi-person-check',
+            added_questions: 'bi-plus-square',
             subscription_started: 'bi-gem',
-            subscription_renewed: 'bi-arrow-repeat'
+            subscription_renewed: 'bi-arrow-repeat',
+            subscription_expired: 'bi-hourglass-split',
+            subscription_cancelled: 'bi-x-octagon'
         };
         return map[type] || 'bi-activity';
     }
 
     function activitySentence(item) {
         const name = safe(item.user?.full_name, safe(item.user?.email, 'Kullanıcı'));
-        if (item.type === 'solved_questions') {
+        if (item.type === 'solved_questions' || item.type === 'solved_correct' || item.type === 'solved_wrong') {
             const ok = item.detail?.is_correct === true;
             return `${name} bir soruyu ${ok ? 'doğru' : 'yanlış'} çözdü`;
         }
-        if (item.type === 'registrations') return `Yeni kayıt: ${name}`;
-        if (item.type === 'daily_quiz') return `Daily Quiz tamamlandı: ${item.detail?.correct_count ?? 0}/${item.detail?.total_count ?? 0} doğru`;
-        if (item.type === 'subscription_started' || item.type === 'subscription_renewed') {
+        if (['registrations', 'guest_users', 'registered_users'].includes(item.type)) return `Yeni kayıt: ${name}`;
+        if (item.type === 'daily_quiz' || item.type === 'daily_quiz_completed') return `Daily Quiz tamamlandı: ${item.detail?.correct_count ?? 0}/${item.detail?.total_count ?? 0} doğru`;
+        if (item.type === 'added_questions') return `Yeni soru eklendi: ${safe(item.detail?.question_code, '-')}`;
+        if (['subscription_started', 'subscription_renewed', 'subscription_expired', 'subscription_cancelled'].includes(item.type)) {
             return safe(item.detail?.sentence, safe(item.subtitle, `${name} için abonelik hareketi`));
         }
         return safe(item.title, 'Aktivite');
@@ -725,10 +932,10 @@ include 'includes/sidebar.php';
 
     function renderActivityDetail(activity) {
         if (!activity) return '<div class="activity-detail-modal"><p>Detay bulunamadı.</p></div>';
-        if (activity.type === 'solved_questions') return renderSolvedQuestionDetail(activity);
-        if (activity.type === 'registrations') return renderRegistrationDetail(activity);
-        if (activity.type === 'daily_quiz') return renderDailyQuizDetail(activity);
-        if (activity.type === 'subscription_started' || activity.type === 'subscription_renewed') return renderSubscriptionDetail(activity);
+        if (['solved_questions', 'solved_correct', 'solved_wrong'].includes(activity.type)) return renderSolvedQuestionDetail(activity);
+        if (['registrations', 'guest_users', 'registered_users'].includes(activity.type)) return renderRegistrationDetail(activity);
+        if (['daily_quiz', 'daily_quiz_completed'].includes(activity.type)) return renderDailyQuizDetail(activity);
+        if (['subscription_started', 'subscription_renewed', 'subscription_expired', 'subscription_cancelled'].includes(activity.type)) return renderSubscriptionDetail(activity);
         return `
             <div class="activity-detail-modal">
                 <div class="activity-detail-head"><i class="bi bi-activity"></i><div><h6>Aktivite Detayı</h6><p>Bu aktivite için özel görünüm bulunamadı.</p></div></div>
@@ -831,13 +1038,8 @@ include 'includes/sidebar.php';
 
     function renderChartTotals(totals = {}) {
         const box = qs('#chartTotals');
-        const items = [
-            ['Toplam Kayıt', totals.registrations || 0],
-            ['Toplam 1 Aylık Abonelik', totals.subscription_monthly || 0],
-            ['Toplam 3 Aylık Abonelik', totals.subscription_quarterly || 0],
-            ['Toplam 6 Aylık Abonelik', totals.subscription_semiannual || 0],
-            ['Toplam Yıllık Abonelik', totals.subscription_annual || 0]
-        ];
+        const selected = normalizeTypeSelection(dashboardState.chart.types, 'chart');
+        const items = selected.map((key) => [`Toplam ${activityTypeLabel(key)}`, totals[key] || 0]);
         box.innerHTML = items.map(([k, v]) => `<div class="col-6 col-lg-4"><div class="chart-total-box"><small>${k}</small><strong>${formatNumber(v)}</strong></div></div>`).join('');
     }
 
@@ -867,27 +1069,37 @@ include 'includes/sidebar.php';
             lastChartSignature = signature;
             renderChartTotals(trends.totals || {});
 
-            const datasetsMeta = [
-                { key: 'registrations', label: 'Kayıt Olan Kullanıcılar', color: '#5B9BD5', dash: [] },
-                { key: 'subscription_monthly', label: '1 Aylık Abonelikler', color: '#2F9E44', dash: [] },
-                { key: 'subscription_quarterly', label: '3 Aylık Abonelikler', color: '#D97706', dash: [4, 3] },
-                { key: 'subscription_semiannual', label: '6 Aylık Abonelikler', color: '#8A63D2', dash: [] },
-                { key: 'subscription_annual', label: 'Yıllık Abonelikler', color: '#C89B54', dash: [6, 4] },
-            ];
+            const colorMap = {
+                registrations: '#5B9BD5',
+                guest_users: '#7EAEDB',
+                registered_users: '#376FA8',
+                solved_questions_daily: '#5DADE2',
+                solved_correct: '#2F9E44',
+                solved_wrong: '#E55353',
+                daily_quiz: '#8A63D2',
+                daily_quiz_completed: '#5F3DC4',
+                added_questions_daily: '#D97706',
+                subscription_started: '#2F9E44',
+                subscription_renewed: '#17A2B8',
+                subscription_monthly: '#2F9E44',
+                subscription_quarterly: '#D97706',
+                subscription_semiannual: '#8A63D2',
+                subscription_annual: '#C89B54',
+                subscription_expired: '#6C757D',
+                subscription_cancelled: '#DC3545'
+            };
 
-            const datasets = datasetsMeta
-                .filter(d => dashboardState.chart.types.includes(d.key))
-                .map(d => ({
-                    label: d.label,
-                    data: series[d.key] || [],
-                    borderColor: d.color,
-                    backgroundColor: d.color,
+            const datasets = normalizeTypeSelection(dashboardState.chart.types, 'chart').map((key) => ({
+                    label: activityTypeLabel(key),
+                    data: series[key] || [],
+                    borderColor: colorMap[key] || '#5B9BD5',
+                    backgroundColor: colorMap[key] || '#5B9BD5',
                     borderWidth: 2,
                     fill: false,
                     tension: 0.25,
                     pointRadius: 3,
                     pointHoverRadius: 4,
-                    borderDash: d.dash,
+                    borderDash: ['subscription_quarterly', 'subscription_annual'].includes(key) ? [6, 4] : [],
                 }));
 
             const ctx = qs('#activityLineChart').getContext('2d');
@@ -964,21 +1176,9 @@ include 'includes/sidebar.php';
             });
         });
 
-        qsa('#activityTypes .chip').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                btn.classList.toggle('active');
-                const selected = getActiveTypes('#activityTypes');
-                if (!selected.length) {
-                    btn.classList.add('active');
-                    return;
-                }
-                dashboardState.activity.types = selected;
-                await loadActivities();
-            });
-        });
-
         qs('#activityLimit').addEventListener('change', async (e) => {
             dashboardState.activity.limit = Number(e.target.value);
+            schedulePreferencesSave();
             await loadActivities();
         });
 
@@ -990,24 +1190,17 @@ include 'includes/sidebar.php';
         });
 
         initDateFilter('chart', dashboardState.chart, async () => {
+            schedulePreferencesSave();
             await loadChart();
         });
 
-        qsa('#chartTypes .chip').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                btn.classList.toggle('active');
-                const selected = getActiveTypes('#chartTypes');
-                if (!selected.length) {
-                    btn.classList.add('active');
-                    return;
-                }
-                dashboardState.chart.types = selected;
-                await loadChart();
-            });
-        });
+        bindFilterPopover('activity');
+        bindFilterPopover('chart');
     }
 
     async function init() {
+        await loadPreferences();
+        renderFilterUi();
         bindEvents();
         await loadFilters();
         await Promise.all([

@@ -1223,6 +1223,63 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--text-main);
 }
 
+.dashboard-filter-control {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.filter-add-btn {
+    white-space: nowrap;
+}
+
+.dashboard-filter-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 20;
+    width: min(360px, 92vw);
+    max-height: 360px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-soft);
+    padding: 10px;
+    display: grid;
+    gap: 10px;
+}
+
+.filter-panel-section {
+    display: grid;
+    gap: 6px;
+}
+
+.filter-panel-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-soft);
+}
+
+.filter-panel-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    background: var(--bg-soft);
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--text-main);
+    cursor: pointer;
+}
+
+.filter-panel-item input {
+    margin: 0;
+}
+
 .date-chip-group .chip {
     min-height: 30px;
 }
@@ -1686,5 +1743,12 @@ h1, h2, h3, h4, h5, h6 {
 
     .chart-wrap {
         min-height: 240px;
+    }
+
+    .dashboard-filter-panel {
+        left: 0;
+        right: 0;
+        width: 100%;
+        max-height: 320px;
     }
 }
