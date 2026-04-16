@@ -459,9 +459,56 @@ try {
         'effective_client_is_pro' => $effectiveClientIsPro,
     ]);
 
+    $beforeRowForExpiresCheck = usage_limits_normalize_subscription_row($beforeStatus, $userId);
+    $beforeExpiresAt = usage_limits_normalize_datetime_to_mysql($beforeRowForExpiresCheck['expires_at'] ?? null);
+    $incomingExpiresAt = usage_limits_normalize_datetime_to_mysql($effectiveState['expires_at'] ?? null);
+    $expiresAtUpdateExpected = ($beforeExpiresAt !== $incomingExpiresAt);
+
+    subscription_sync_debug_log('expires_at_update_check_before_write', [
+        'authenticated_user_id' => $userId,
+        'before_expires_at' => $beforeExpiresAt,
+        'incoming_expires_at' => $incomingExpiresAt,
+        'before_is_pro' => !empty($beforeRowForExpiresCheck['is_pro']),
+        'incoming_is_pro' => !empty($effectiveState['is_pro']),
+        'expires_at_update_expected' => $expiresAtUpdateExpected,
+    ]);
+
     usage_limits_upsert_subscription_status($pdo, $userId, $effectiveState);
     $afterStatus = usage_limits_get_user_subscription_status($pdo, $userId);
     $afterRow = usage_limits_normalize_subscription_row($afterStatus, $userId);
+    $afterExpiresAt = usage_limits_normalize_datetime_to_mysql($afterRow['expires_at'] ?? null);
+    $expiresAtUpdated = ($afterExpiresAt === $incomingExpiresAt);
+    $expiresAtMismatchReason = null;
+
+    if ($expiresAtUpdateExpected && !$expiresAtUpdated) {
+        if (empty($afterStatus['exists'])) {
+            $expiresAtMismatchReason = 'missing_row_after_write';
+        } elseif ($incomingExpiresAt === null && $afterExpiresAt !== null) {
+            $expiresAtMismatchReason = 'expected_null_expires_at_but_value_persisted';
+        } elseif ($incomingExpiresAt !== null && $afterExpiresAt === null) {
+            $expiresAtMismatchReason = 'expected_value_expires_at_but_null_persisted';
+        } else {
+            $expiresAtMismatchReason = 'expires_at_not_persisted_as_expected';
+        }
+    }
+
+    subscription_sync_debug_log('expires_at_update_check_after_write', [
+        'authenticated_user_id' => $userId,
+        'before_expires_at' => $beforeExpiresAt,
+        'incoming_expires_at' => $incomingExpiresAt,
+        'after_expires_at' => $afterExpiresAt,
+        'before_is_pro' => !empty($beforeRowForExpiresCheck['is_pro']),
+        'after_is_pro' => !empty($afterRow['is_pro']),
+        'expires_at_update_expected' => $expiresAtUpdateExpected,
+        'expires_at_updated' => $expiresAtUpdated,
+        'expires_at_mismatch_reason' => $expiresAtMismatchReason,
+    ]);
+
+    if ($expiresAtUpdateExpected && !$expiresAtUpdated) {
+        throw new RuntimeException(
+            'Subscription sync sonrası expires_at doğrulaması başarısız: ' . ($expiresAtMismatchReason ?? 'unknown')
+        );
+    }
 
     $expectedRow = [
         'is_pro' => !empty($effectiveState['is_pro']),
