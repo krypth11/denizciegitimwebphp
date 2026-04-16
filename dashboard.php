@@ -135,7 +135,7 @@ include 'includes/sidebar.php';
         <div class="card-header d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-2">
             <div>
                 <h5 class="mb-0">Aktivite Grafiği</h5>
-                <small class="text-muted">Filtreler değişince otomatik güncellenir · Abonelik serileri katkı puanı olarak hesaplanır · <span id="chartRefreshInfo">Son güncelleme: -</span></small>
+                <small class="text-muted">Filtreler değişince otomatik güncellenir · Abonelik serileri plan bazlı adet olarak hesaplanır · <span id="chartRefreshInfo">Son güncelleme: -</span></small>
             </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
                 <div class="dashboard-date-filter" id="chartDateFilter">
@@ -157,11 +157,10 @@ include 'includes/sidebar.php';
         <div class="card-body">
             <div class="dashboard-chip-group mb-3" id="chartTypes">
                 <button type="button" class="chip active" data-type="registrations">Kaydolan Kullanıcılar</button>
-                <button type="button" class="chip active" data-type="solved_questions">Çözülen Sorular</button>
-                <button type="button" class="chip active" data-type="daily_quiz_completed">Daily Quiz Tamamlananlar</button>
-                <button type="button" class="chip active" data-type="added_questions">Eklenen Sorular</button>
-                <button type="button" class="chip active" data-type="subscription_started">Yeni Abonelikler</button>
-                <button type="button" class="chip active" data-type="subscription_renewed">Abonelik Yenilemeleri</button>
+                <button type="button" class="chip active" data-type="subscription_monthly">1 Aylık Abonelikler</button>
+                <button type="button" class="chip active" data-type="subscription_quarterly">3 Aylık Abonelikler</button>
+                <button type="button" class="chip active" data-type="subscription_semiannual">6 Aylık Abonelikler</button>
+                <button type="button" class="chip active" data-type="subscription_annual">Yıllık Abonelikler</button>
             </div>
             <div class="row g-2 mb-3" id="chartTotals"></div>
             <div class="chart-wrap">
@@ -193,7 +192,7 @@ include 'includes/sidebar.php';
         solved: { range: '7d', start_date: '', end_date: '' },
         users: { user_type: 'all' },
         activity: { types: ['registrations', 'daily_quiz', 'solved_questions', 'subscription_started', 'subscription_renewed'], limit: 25 },
-        chart: { range: '7d', start_date: '', end_date: '', types: ['registrations', 'solved_questions', 'daily_quiz_completed', 'added_questions', 'subscription_started', 'subscription_renewed'] },
+        chart: { range: '7d', start_date: '', end_date: '', types: ['registrations', 'subscription_monthly', 'subscription_quarterly', 'subscription_semiannual', 'subscription_annual'] },
         refs: { qualifications: [], courses: [] },
         polling: { timer: null, interval: 1000 }
     };
@@ -304,7 +303,10 @@ include 'includes/sidebar.php';
     }
 
     function toIsoDate(dt) {
-        return dt.toISOString().slice(0, 10);
+        const year = dt.getFullYear();
+        const month = String(dt.getMonth() + 1).padStart(2, '0');
+        const day = String(dt.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
     }
 
     function applyPresetRange(stateObj, range) {
@@ -705,7 +707,6 @@ include 'includes/sidebar.php';
                 <div class="activity-badges">
                     <span class="activity-stat-pill">${isRenewal ? 'Yenileme' : 'Yeni Abonelik'}</span>
                     <span class="activity-stat-pill">Plan: ${planLabel}</span>
-                    <span class="activity-stat-pill">Katkı Puanı: ${formatNumber(activity.detail?.weight_score || 1)}</span>
                 </div>
                 ${buildInfoGrid([
                     ['Kullanıcı', safe(activity.user?.full_name)],
@@ -715,7 +716,6 @@ include 'includes/sidebar.php';
                     ['Entitlement', safe(activity.detail?.entitlement_id)],
                     ['Olay Tipi', eventTypeLabel],
                     ['Tarih', formatDateTime(activity.detail?.event_at || activity.created_at)],
-                    ['Katkı Puanı', formatNumber(activity.detail?.weight_score || 1)],
                     ['Provider', safe(activity.detail?.provider)],
                     ['Source', safe(activity.detail?.source)],
                     ['Plan Kodu', safe(activity.detail?.plan_code)]
@@ -833,11 +833,10 @@ include 'includes/sidebar.php';
         const box = qs('#chartTotals');
         const items = [
             ['Toplam Kayıt', totals.registrations || 0],
-            ['Toplam Çözülen Soru', totals.solved_questions || 0],
-            ['Toplam Daily Quiz', totals.daily_quiz_completed || 0],
-            ['Toplam Eklenen Soru', totals.added_questions || 0],
-            ['Yeni Abonelik Katkı Puanı', totals.subscription_started || 0],
-            ['Yenileme Katkı Puanı', totals.subscription_renewed || 0]
+            ['Toplam 1 Aylık Abonelik', totals.subscription_monthly || 0],
+            ['Toplam 3 Aylık Abonelik', totals.subscription_quarterly || 0],
+            ['Toplam 6 Aylık Abonelik', totals.subscription_semiannual || 0],
+            ['Toplam Yıllık Abonelik', totals.subscription_annual || 0]
         ];
         box.innerHTML = items.map(([k, v]) => `<div class="col-6 col-lg-4"><div class="chart-total-box"><small>${k}</small><strong>${formatNumber(v)}</strong></div></div>`).join('');
     }
@@ -869,12 +868,11 @@ include 'includes/sidebar.php';
             renderChartTotals(trends.totals || {});
 
             const datasetsMeta = [
-                { key: 'registrations', label: 'Kayıt', color: '#5B9BD5', dash: [] },
-                { key: 'solved_questions', label: 'Çözülen Sorular', color: '#6AA786', dash: [] },
-                { key: 'daily_quiz_completed', label: 'Daily Quiz', color: '#C89B54', dash: [6, 4] },
-                { key: 'added_questions', label: 'Eklenen Sorular', color: '#8A63D2', dash: [] },
-                { key: 'subscription_started', label: 'Yeni Abonelikler (Katkı)', color: '#2F9E44', dash: [] },
-                { key: 'subscription_renewed', label: 'Abonelik Yenilemeleri (Katkı)', color: '#D97706', dash: [4, 3] },
+                { key: 'registrations', label: 'Kayıt Olan Kullanıcılar', color: '#5B9BD5', dash: [] },
+                { key: 'subscription_monthly', label: '1 Aylık Abonelikler', color: '#2F9E44', dash: [] },
+                { key: 'subscription_quarterly', label: '3 Aylık Abonelikler', color: '#D97706', dash: [4, 3] },
+                { key: 'subscription_semiannual', label: '6 Aylık Abonelikler', color: '#8A63D2', dash: [] },
+                { key: 'subscription_annual', label: 'Yıllık Abonelikler', color: '#C89B54', dash: [6, 4] },
             ];
 
             const datasets = datasetsMeta

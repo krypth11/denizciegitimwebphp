@@ -42,6 +42,65 @@ function trends_series_empty(array $labels): array
     return array_fill(0, count($labels), 0);
 }
 
+function trends_normalize_plan_code(?string $planCode): string
+{
+    $value = trim((string)$planCode);
+    if ($value === '') {
+        return '';
+    }
+
+    if (function_exists('mb_strtolower')) {
+        $value = mb_strtolower($value, 'UTF-8');
+    } else {
+        $value = strtolower($value);
+    }
+
+    $value = strtr($value, [
+        'ı' => 'i',
+        'İ' => 'i',
+        'ş' => 's',
+        'Ş' => 's',
+        'ğ' => 'g',
+        'Ğ' => 'g',
+        'ü' => 'u',
+        'Ü' => 'u',
+        'ö' => 'o',
+        'Ö' => 'o',
+        'ç' => 'c',
+        'Ç' => 'c',
+    ]);
+
+    $value = preg_replace('/[\s_\-]+/u', '', $value) ?? $value;
+    $value = preg_replace('/[^a-z0-9]/u', '', $value) ?? $value;
+
+    return $value;
+}
+
+function trends_subscription_series_from_plan_code(?string $planCode): ?string
+{
+    $normalized = trends_normalize_plan_code($planCode);
+    if ($normalized === '') {
+        return null;
+    }
+
+    $seriesTokens = [
+        'subscription_annual' => ['annual', 'yearly', '12month', '12ay', 'yillik'],
+        'subscription_semiannual' => ['semiannual', '6month', '6ay', '6aylik'],
+        'subscription_quarterly' => ['quarterly', '3month', '3ay', '3aylik'],
+        'subscription_monthly' => ['monthly', '1month', '1ay', 'aylik'],
+    ];
+
+    foreach ($seriesTokens as $seriesKey => $tokens) {
+        foreach ($tokens as $token) {
+            if (strpos($normalized, $token) !== false) {
+                return $seriesKey;
+            }
+        }
+    }
+
+    return null;
+}
+
 function trends_labels_from_dates(string $startDate, string $endDate): array
 {
     $start = new DateTimeImmutable($startDate);
@@ -70,26 +129,30 @@ if (($_GET['scope'] ?? '') === 'admin') {
             $window = stats_resolve_date_window(['range' => '30d'], 'range', 'start_date', 'end_date', '30d');
         }
 
-        $types = stats_parse_types_from_query(['registrations', 'solved_questions', 'daily_quiz_completed', 'added_questions', 'subscription_started', 'subscription_renewed']);
+        $types = stats_parse_types_from_query([
+            'registrations',
+            'subscription_monthly',
+            'subscription_quarterly',
+            'subscription_semiannual',
+            'subscription_annual',
+        ]);
         [$dateKeys, $labels] = trends_labels_from_dates((string)$window['start_date'], (string)$window['end_date']);
         $dateIndex = array_flip($dateKeys);
 
         $series = [
             'registrations' => trends_series_empty($labels),
-            'solved_questions' => trends_series_empty($labels),
-            'daily_quiz_completed' => trends_series_empty($labels),
-            'added_questions' => trends_series_empty($labels),
-            'subscription_started' => trends_series_empty($labels),
-            'subscription_renewed' => trends_series_empty($labels),
+            'subscription_monthly' => trends_series_empty($labels),
+            'subscription_quarterly' => trends_series_empty($labels),
+            'subscription_semiannual' => trends_series_empty($labels),
+            'subscription_annual' => trends_series_empty($labels),
         ];
 
         $totals = [
             'registrations' => 0,
-            'solved_questions' => 0,
-            'daily_quiz_completed' => 0,
-            'added_questions' => 0,
-            'subscription_started' => 0,
-            'subscription_renewed' => 0,
+            'subscription_monthly' => 0,
+            'subscription_quarterly' => 0,
+            'subscription_semiannual' => 0,
+            'subscription_annual' => 0,
         ];
 
         $uCols = get_table_columns($pdo, 'user_profiles');
@@ -117,104 +180,69 @@ if (($_GET['scope'] ?? '') === 'admin') {
             }
         }
 
-        $aCols = get_table_columns($pdo, 'question_attempt_events');
-        $aDate = trends_first_col($aCols, ['attempted_at', 'created_at']);
-        if (in_array('solved_questions', $types, true) && $aDate) {
-            $sql = 'SELECT DATE(`' . $aDate . '`) AS d, COUNT(*) AS c FROM `question_attempt_events` WHERE DATE(`' . $aDate . '`) BETWEEN ? AND ? GROUP BY DATE(`' . $aDate . '`)';
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$window['start_date'], $window['end_date']]);
-            foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
-                $d = (string)($row['d'] ?? '');
-                if (!isset($dateIndex[$d])) continue;
-                $v = (int)($row['c'] ?? 0);
-                $series['solved_questions'][$dateIndex[$d]] = $v;
-                $totals['solved_questions'] += $v;
-            }
-        }
+        $requestedSubscriptionTypes = array_values(array_intersect([
+            'subscription_monthly',
+            'subscription_quarterly',
+            'subscription_semiannual',
+            'subscription_annual',
+        ], $types));
 
-        $dqCols = get_table_columns($pdo, 'daily_quiz_progress');
-        $dqCompleted = trends_first_col($dqCols, ['completed_at']);
-        $dqDate = trends_first_col($dqCols, ['quiz_date', 'date']);
-        if (in_array('daily_quiz_completed', $types, true) && ($dqCompleted || $dqDate)) {
-            $dateCol = $dqCompleted ?: $dqDate;
-            $where = 'DATE(`' . $dateCol . '`) BETWEEN ? AND ?';
-            if ($dqCompleted) {
-                $where .= ' AND `' . $dqCompleted . '` IS NOT NULL';
-            }
-            $sql = 'SELECT DATE(`' . $dateCol . '`) AS d, COUNT(*) AS c FROM `daily_quiz_progress` WHERE ' . $where . ' GROUP BY DATE(`' . $dateCol . '`)';
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$window['start_date'], $window['end_date']]);
-            foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
-                $d = (string)($row['d'] ?? '');
-                if (!isset($dateIndex[$d])) continue;
-                $v = (int)($row['c'] ?? 0);
-                $series['daily_quiz_completed'][$dateIndex[$d]] = $v;
-                $totals['daily_quiz_completed'] += $v;
-            }
-        }
-
-        $qCols = get_table_columns($pdo, 'questions');
-        $qCreated = trends_first_col($qCols, ['created_at']);
-        if (in_array('added_questions', $types, true) && $qCreated) {
-            $sql = 'SELECT DATE(`' . $qCreated . '`) AS d, COUNT(*) AS c FROM `questions` WHERE DATE(`' . $qCreated . '`) BETWEEN ? AND ? GROUP BY DATE(`' . $qCreated . '`)';
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$window['start_date'], $window['end_date']]);
-            foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
-                $d = (string)($row['d'] ?? '');
-                if (!isset($dateIndex[$d])) continue;
-                $v = (int)($row['c'] ?? 0);
-                $series['added_questions'][$dateIndex[$d]] = $v;
-                $totals['added_questions'] += $v;
-            }
-        }
-
-        $subscriptionSchema = subscription_mgmt_history_schema($pdo);
-        $requestedSubscriptionTypes = array_values(array_intersect(['subscription_started', 'subscription_renewed'], $types));
-        if ($subscriptionSchema && !empty($requestedSubscriptionTypes)) {
-            $hEventType = $subscriptionSchema['event_type'];
-            $hPlanCode = $subscriptionSchema['plan_code'];
-            $hEventAt = $subscriptionSchema['event_at'];
-            $hCreatedAt = $subscriptionSchema['created_at'];
+        $sehCols = get_table_columns($pdo, 'subscription_event_history');
+        if (!empty($requestedSubscriptionTypes) && !empty($sehCols)) {
+            $hEventType = trends_first_col($sehCols, ['event_type']);
+            $hPlanCode = trends_first_col($sehCols, ['plan_code']);
+            $hEventAt = trends_first_col($sehCols, ['event_at']);
+            $hCreatedAt = trends_first_col($sehCols, ['created_at']);
             $dateCol = $hEventAt ?: $hCreatedAt;
 
             if ($hEventType && $dateCol) {
-                $rawEventTypeMap = [];
-                if (in_array('subscription_started', $requestedSubscriptionTypes, true)) {
-                    $rawEventTypeMap['INITIAL_PURCHASE'] = 'subscription_started';
-                }
-                if (in_array('subscription_renewed', $requestedSubscriptionTypes, true)) {
-                    $rawEventTypeMap['RENEWAL'] = 'subscription_renewed';
-                }
+                $eventTypes = ['INITIAL_PURCHASE', 'RENEWAL'];
+                $eventTypePlaceholders = implode(',', array_fill(0, count($eventTypes), '?'));
+                $sql = 'SELECT DATE(`' . $dateCol . '`) AS d, UPPER(TRIM(`' . $hEventType . '`)) AS event_type, '
+                    . ($hPlanCode ? '`' . $hPlanCode . '`' : 'NULL') . ' AS plan_code '
+                    . 'FROM `subscription_event_history` '
+                    . 'WHERE DATE(`' . $dateCol . '`) BETWEEN ? AND ? '
+                    . 'AND UPPER(TRIM(`' . $hEventType . '`)) IN (' . $eventTypePlaceholders . ')';
 
-                if (!empty($rawEventTypeMap)) {
-                    $eventTypes = array_keys($rawEventTypeMap);
-                    $eventTypePlaceholders = implode(',', array_fill(0, count($eventTypes), '?'));
-                    $sql = 'SELECT DATE(`' . $dateCol . '`) AS d, UPPER(TRIM(`' . $hEventType . '`)) AS event_type, '
-                        . ($hPlanCode ? '`' . $hPlanCode . '`' : 'NULL') . ' AS plan_code '
-                        . 'FROM `' . $subscriptionSchema['table'] . '` '
-                        . 'WHERE DATE(`' . $dateCol . '`) BETWEEN ? AND ? '
-                        . 'AND UPPER(TRIM(`' . $hEventType . '`)) IN (' . $eventTypePlaceholders . ')';
+                $params = array_merge([$window['start_date'], $window['end_date']], $eventTypes);
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($params);
 
-                    $params = array_merge([$window['start_date'], $window['end_date']], $eventTypes);
-                    $stmt = $pdo->prepare($sql);
-                    $stmt->execute($params);
-
-                    foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
-                        $d = (string)($row['d'] ?? '');
-                        if (!isset($dateIndex[$d])) {
-                            continue;
-                        }
-
-                        $rawType = strtoupper(trim((string)($row['event_type'] ?? '')));
-                        $mappedType = $rawEventTypeMap[$rawType] ?? null;
-                        if ($mappedType === null) {
-                            continue;
-                        }
-
-                        $weightScore = subscription_mgmt_plan_duration_weight((string)($row['plan_code'] ?? ''));
-                        $series[$mappedType][$dateIndex[$d]] += $weightScore;
-                        $totals[$mappedType] += $weightScore;
+                $unknownPlanCodes = [];
+                foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
+                    $d = (string)($row['d'] ?? '');
+                    if (!isset($dateIndex[$d])) {
+                        continue;
                     }
+
+                    $rawType = strtoupper(trim((string)($row['event_type'] ?? '')));
+                    if (!in_array($rawType, $eventTypes, true)) {
+                        continue;
+                    }
+
+                    $planCodeRaw = (string)($row['plan_code'] ?? '');
+                    $mappedType = trends_subscription_series_from_plan_code($planCodeRaw);
+                    if ($mappedType === null || !isset($series[$mappedType])) {
+                        $normalizedPlanCode = trim($planCodeRaw);
+                        if ($normalizedPlanCode !== '') {
+                            $unknownPlanCodes[$normalizedPlanCode] = true;
+                        }
+                        continue;
+                    }
+
+                    if (!in_array($mappedType, $requestedSubscriptionTypes, true)) {
+                        continue;
+                    }
+
+                    $series[$mappedType][$dateIndex[$d]] += 1;
+                    $totals[$mappedType] += 1;
+                }
+
+                if (!empty($unknownPlanCodes)) {
+                    trends_dbg('Eşleşmeyen plan_code nedeniyle bazı abonelik kayıtları grafiğe dahil edilmedi.', [
+                        'plan_codes' => array_keys($unknownPlanCodes),
+                        'count' => count($unknownPlanCodes),
+                    ]);
                 }
             }
         }
