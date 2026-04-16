@@ -35,6 +35,10 @@ $eventId = subscription_mgmt_derive_event_id($event, $rawBody);
 $eventTimestamp = subscription_mgmt_extract_datetime($event);
 $appUserId = trim((string)($event['app_user_id'] ?? ''));
 $originalAppUserId = trim((string)($event['original_app_user_id'] ?? ''));
+$store = trim((string)($event['store'] ?? ''));
+$productId = trim((string)($event['product_id'] ?? $event['product_identifier'] ?? ''));
+$entitlementId = trim((string)($event['entitlement_id'] ?? ''));
+$rcAppUserId = $appUserId !== '' ? $appUserId : ($originalAppUserId !== '' ? $originalAppUserId : null);
 $aliases = subscription_mgmt_extract_aliases($event);
 $environment = trim((string)($event['environment'] ?? ''));
 $provider = 'revenuecat';
@@ -51,7 +55,7 @@ if ($existing) {
             'app_user_id' => $appUserId !== '' ? $appUserId : null,
             'original_app_user_id' => $originalAppUserId !== '' ? $originalAppUserId : null,
             'aliases_json' => subscription_mgmt_safe_json($aliases),
-            'rc_app_user_id' => $appUserId !== '' ? $appUserId : ($originalAppUserId !== '' ? $originalAppUserId : null),
+            'rc_app_user_id' => $rcAppUserId,
             'is_matched' => 0,
             'is_duplicate' => 1,
             'process_status' => 'duplicate',
@@ -133,20 +137,30 @@ try {
         subscription_mgmt_insert_history($pdo, [
             'user_id' => $matchedUserId,
             'webhook_event_id' => $eventRowId,
+            'source_event_id' => $eventId,
             'event_id' => $eventId,
             'event_type' => $eventType,
             'plan_code' => $nextState['plan_code'] ?? null,
             'provider' => $provider,
-            'store' => trim((string)($event['store'] ?? '')) ?: null,
-            'entitlement_id' => $nextState['entitlement_id'] ?? null,
+            'store' => $store !== '' ? $store : null,
+            'entitlement_id' => ($nextState['entitlement_id'] ?? null) ?: ($entitlementId !== '' ? $entitlementId : null),
             'old_value' => !empty(usage_limits_is_subscription_active($beforeStatus)) ? 'premium_active' : 'free',
             'new_value' => !empty(usage_limits_is_subscription_active($afterStatus)) ? 'premium_active' : 'free',
             'source' => 'revenuecat.webhook',
+            'event_at' => $eventTimestamp,
+            'event_title' => $eventType,
+            'product_id' => ($nextState['plan_code'] ?? null) ?: ($productId !== '' ? $productId : null),
+            'rc_app_user_id' => ($nextState['rc_app_user_id'] ?? null) ?: $rcAppUserId,
             'meta_json' => subscription_mgmt_safe_json([
                 'matched_via' => $matchedVia,
                 'event_type_raw' => $eventTypeRaw,
                 'event_type' => $eventType,
                 'rc_candidates' => $rcCandidates,
+                'source_event_id' => $eventId,
+                'store' => $store !== '' ? $store : null,
+                'product_id' => $productId !== '' ? $productId : null,
+                'entitlement_id' => $entitlementId !== '' ? $entitlementId : null,
+                'environment' => $environment !== '' ? $environment : null,
                 'before' => usage_limits_normalize_subscription_row($beforeStatus, $matchedUserId),
                 'after' => usage_limits_normalize_subscription_row($afterStatus, $matchedUserId),
             ]),
@@ -167,7 +181,7 @@ try {
             'app_user_id' => $appUserId !== '' ? $appUserId : null,
             'original_app_user_id' => $originalAppUserId !== '' ? $originalAppUserId : null,
             'aliases_json' => subscription_mgmt_safe_json($aliases),
-            'rc_app_user_id' => $appUserId !== '' ? $appUserId : ($originalAppUserId !== '' ? $originalAppUserId : null),
+            'rc_app_user_id' => $rcAppUserId,
             'user_id' => null,
             'is_matched' => 0,
             'is_duplicate' => 0,
@@ -216,7 +230,7 @@ try {
             'app_user_id' => $appUserId !== '' ? $appUserId : null,
             'original_app_user_id' => $originalAppUserId !== '' ? $originalAppUserId : null,
             'aliases_json' => subscription_mgmt_safe_json($aliases),
-            'rc_app_user_id' => $appUserId !== '' ? $appUserId : ($originalAppUserId !== '' ? $originalAppUserId : null),
+            'rc_app_user_id' => $rcAppUserId,
             'user_id' => null,
             'is_matched' => 0,
             'is_duplicate' => 0,

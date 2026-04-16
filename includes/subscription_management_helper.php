@@ -32,13 +32,18 @@ function subscription_mgmt_pick_column(array $columns, array $candidates, bool $
 
 function subscription_mgmt_webhook_schema(PDO $pdo): ?array
 {
-    $cols = get_table_columns($pdo, 'subscription_webhook_events');
+    $table = 'revenuecat_webhook_events';
+    $cols = get_table_columns($pdo, $table);
+    if (empty($cols)) {
+        $table = 'subscription_webhook_events';
+        $cols = get_table_columns($pdo, $table);
+    }
     if (empty($cols)) {
         return null;
     }
 
     return [
-        'table' => 'subscription_webhook_events',
+        'table' => $table,
         'id' => subscription_mgmt_pick_column($cols, ['id'], false),
         'provider' => subscription_mgmt_pick_column($cols, ['provider'], false),
         'event_id' => subscription_mgmt_pick_column($cols, ['event_id'], true),
@@ -49,12 +54,12 @@ function subscription_mgmt_webhook_schema(PDO $pdo): ?array
         'original_app_user_id' => subscription_mgmt_pick_column($cols, ['original_app_user_id'], false),
         'aliases_json' => subscription_mgmt_pick_column($cols, ['aliases_json'], false),
         'rc_app_user_id' => subscription_mgmt_pick_column($cols, ['rc_app_user_id'], false),
-        'user_id' => subscription_mgmt_pick_column($cols, ['user_id'], false),
+        'user_id' => subscription_mgmt_pick_column($cols, ['matched_user_id', 'user_id'], false),
         'is_matched' => subscription_mgmt_pick_column($cols, ['is_matched'], false),
         'is_duplicate' => subscription_mgmt_pick_column($cols, ['is_duplicate'], false),
-        'process_status' => subscription_mgmt_pick_column($cols, ['process_status', 'status'], false),
-        'error_message' => subscription_mgmt_pick_column($cols, ['error_message', 'error'], false),
-        'payload_json' => subscription_mgmt_pick_column($cols, ['payload_json', 'raw_payload_json'], false),
+        'process_status' => subscription_mgmt_pick_column($cols, ['processing_status', 'process_status', 'status'], false),
+        'error_message' => subscription_mgmt_pick_column($cols, ['processing_error', 'error_message', 'error'], false),
+        'payload_json' => subscription_mgmt_pick_column($cols, ['raw_payload_json', 'payload_json'], false),
         'headers_json' => subscription_mgmt_pick_column($cols, ['headers_json', 'request_headers_json'], false),
         'source_ip' => subscription_mgmt_pick_column($cols, ['source_ip', 'ip_address'], false),
         'event_timestamp' => subscription_mgmt_pick_column($cols, ['event_timestamp', 'event_at'], false),
@@ -66,19 +71,24 @@ function subscription_mgmt_webhook_schema(PDO $pdo): ?array
 
 function subscription_mgmt_history_schema(PDO $pdo): ?array
 {
-    $cols = get_table_columns($pdo, 'subscription_history');
+    $table = 'subscription_event_history';
+    $cols = get_table_columns($pdo, $table);
+    if (empty($cols)) {
+        $table = 'subscription_history';
+        $cols = get_table_columns($pdo, $table);
+    }
     if (empty($cols)) {
         return null;
     }
 
     return [
-        'table' => 'subscription_history',
+        'table' => $table,
         'id' => subscription_mgmt_pick_column($cols, ['id'], false),
         'user_id' => subscription_mgmt_pick_column($cols, ['user_id'], false),
         'webhook_event_id' => subscription_mgmt_pick_column($cols, ['webhook_event_id'], false),
-        'event_id' => subscription_mgmt_pick_column($cols, ['event_id'], false),
+        'event_id' => subscription_mgmt_pick_column($cols, ['source_event_id', 'event_id'], false),
         'event_type' => subscription_mgmt_pick_column($cols, ['event_type'], false),
-        'plan_code' => subscription_mgmt_pick_column($cols, ['plan_code', 'product_id'], false),
+        'plan_code' => subscription_mgmt_pick_column($cols, ['plan_code'], false),
         'provider' => subscription_mgmt_pick_column($cols, ['provider'], false),
         'store' => subscription_mgmt_pick_column($cols, ['store'], false),
         'entitlement_id' => subscription_mgmt_pick_column($cols, ['entitlement_id'], false),
@@ -86,7 +96,12 @@ function subscription_mgmt_history_schema(PDO $pdo): ?array
         'new_value' => subscription_mgmt_pick_column($cols, ['new_value'], false),
         'source' => subscription_mgmt_pick_column($cols, ['source'], false),
         'meta_json' => subscription_mgmt_pick_column($cols, ['meta_json'], false),
+        'event_title' => subscription_mgmt_pick_column($cols, ['event_title'], false),
+        'product_id' => subscription_mgmt_pick_column($cols, ['product_id'], false),
+        'rc_app_user_id' => subscription_mgmt_pick_column($cols, ['rc_app_user_id'], false),
+        'event_at' => subscription_mgmt_pick_column($cols, ['event_at'], false),
         'created_at' => subscription_mgmt_pick_column($cols, ['created_at'], false),
+        'updated_at' => subscription_mgmt_pick_column($cols, ['updated_at'], false),
     ];
 }
 
@@ -423,9 +438,9 @@ function subscription_mgmt_insert_webhook_event(PDO $pdo, array $payload): ?stri
     $append($schema['user_id'], $payload['user_id'] ?? null);
     $append($schema['is_matched'], $payload['is_matched'] ?? 0);
     $append($schema['is_duplicate'], $payload['is_duplicate'] ?? 0);
-    $append($schema['process_status'], $payload['process_status'] ?? 'received');
-    $append($schema['error_message'], $payload['error_message'] ?? null);
-    $append($schema['payload_json'], $payload['payload_json'] ?? null);
+    $append($schema['process_status'], $payload['processing_status'] ?? ($payload['process_status'] ?? 'received'));
+    $append($schema['error_message'], $payload['processing_error'] ?? ($payload['error_message'] ?? null));
+    $append($schema['payload_json'], $payload['raw_payload_json'] ?? ($payload['payload_json'] ?? null));
     $append($schema['headers_json'], $payload['headers_json'] ?? null);
     $append($schema['source_ip'], $payload['source_ip'] ?? null);
     $append($schema['event_timestamp'], $payload['event_timestamp'] ?? null);
@@ -478,9 +493,18 @@ function subscription_mgmt_insert_history(PDO $pdo, array $historyPayload): void
     if ($schema['id']) {
         $append($schema['id'], generate_uuid());
     }
+
+    $sourceEventId = $historyPayload['source_event_id'] ?? ($historyPayload['event_id'] ?? null);
+    $eventAt = usage_limits_normalize_datetime_to_mysql(
+        $historyPayload['event_at']
+        ?? $historyPayload['event_timestamp']
+        ?? $historyPayload['created_at']
+        ?? null
+    );
+
     $append($schema['user_id'], $historyPayload['user_id'] ?? null);
     $append($schema['webhook_event_id'], $historyPayload['webhook_event_id'] ?? null);
-    $append($schema['event_id'], $historyPayload['event_id'] ?? null);
+    $append($schema['event_id'], $sourceEventId);
     $append($schema['event_type'], $historyPayload['event_type'] ?? null);
     $append($schema['plan_code'], $historyPayload['plan_code'] ?? null);
     $append($schema['provider'], $historyPayload['provider'] ?? 'revenuecat');
@@ -490,9 +514,17 @@ function subscription_mgmt_insert_history(PDO $pdo, array $historyPayload): void
     $append($schema['new_value'], $historyPayload['new_value'] ?? null);
     $append($schema['source'], $historyPayload['source'] ?? 'revenuecat.webhook');
     $append($schema['meta_json'], $historyPayload['meta_json'] ?? null);
+    $append($schema['event_title'], $historyPayload['event_title'] ?? null);
+    $append($schema['product_id'], $historyPayload['product_id'] ?? null);
+    $append($schema['rc_app_user_id'], $historyPayload['rc_app_user_id'] ?? null);
+    $append($schema['event_at'], $eventAt);
 
     if ($schema['created_at']) {
         $cols[] = subscription_mgmt_q($schema['created_at']);
+        $holders[] = 'NOW()';
+    }
+    if ($schema['updated_at']) {
+        $cols[] = subscription_mgmt_q($schema['updated_at']);
         $holders[] = 'NOW()';
     }
 
