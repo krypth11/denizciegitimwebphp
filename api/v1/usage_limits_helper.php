@@ -472,21 +472,30 @@ function usage_limits_fetch_revenuecat_subscription_truth(string $rcAppUserId, ?
 
 function usage_limits_normalize_datetime_to_mysql($value, bool $allowNull = true): ?string
 {
+    $tz = new DateTimeZone('Europe/Istanbul');
+
     if ($value === null) {
         return $allowNull ? null : '';
     }
 
     if ($value instanceof DateTimeInterface) {
         $dt = DateTimeImmutable::createFromInterface($value)
-            ->setTimezone(new DateTimeZone('UTC'));
+            ->setTimezone($tz);
+
         return $dt->format('Y-m-d H:i:s');
     }
 
-    if (is_int($value) || (is_string($value) && preg_match('/^\d{10}(?:\d{3})?$/', trim($value)))) {
+    if (
+        is_int($value) ||
+        (is_string($value) && preg_match('/^\d{10}(?:\d{3})?$/', trim($value)))
+    ) {
         $raw = (string)$value;
         $seconds = strlen($raw) > 10 ? ((int)$raw / 1000) : (int)$raw;
+
         try {
-            $dt = (new DateTimeImmutable('@' . (string)$seconds))->setTimezone(new DateTimeZone('UTC'));
+            $dt = (new DateTimeImmutable('@' . (string)$seconds))
+                ->setTimezone($tz);
+
             return $dt->format('Y-m-d H:i:s');
         } catch (Throwable $e) {
             return null;
@@ -494,20 +503,26 @@ function usage_limits_normalize_datetime_to_mysql($value, bool $allowNull = true
     }
 
     $text = trim((string)$value);
-    if ($text === '' || $text === '0000-00-00' || $text === '0000-00-00 00:00:00') {
+
+    if (
+        $text === '' ||
+        $text === '0000-00-00' ||
+        $text === '0000-00-00 00:00:00'
+    ) {
         return $allowNull ? null : '';
     }
 
     try {
-        $dt = new DateTimeImmutable($text);
-        return $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+        $dt = new DateTimeImmutable($text, $tz);
+        return $dt->format('Y-m-d H:i:s');
     } catch (Throwable $e) {
         $ts = strtotime($text);
+
         if ($ts === false) {
             return null;
         }
 
-        return gmdate('Y-m-d H:i:s', $ts);
+        return date('Y-m-d H:i:s', $ts);
     }
 }
 
