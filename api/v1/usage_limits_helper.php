@@ -1405,11 +1405,20 @@ function usage_limits_get_summary(PDO $pdo, string $userId, string $qualificatio
 {
     $usageDateTr = usage_limits_tr_date();
     $subscription = usage_limits_get_user_subscription_status($pdo, $userId);
-    $isPro = usage_limits_is_subscription_active($subscription);
+    $isActive = usage_limits_is_subscription_active($subscription);
+    $isPro = $isActive;
+    $normalizedSubscription = usage_limits_normalize_subscription_row($subscription, $userId);
+    $planCode = $isActive ? ($normalizedSubscription['plan_code'] ?? null) : null;
+    $expiresAt = $isActive
+        ? usage_limits_normalize_datetime_to_mysql($normalizedSubscription['expires_at'] ?? null)
+        : null;
 
     return [
         'is_pro' => $isPro,
+        'is_active' => $isActive,
         'state' => $isPro ? 'premium' : 'free',
+        'plan_code' => $planCode,
+        'expires_at' => $expiresAt,
         'qualification_id' => $qualificationId,
         'usage_date_tr' => $usageDateTr,
         'study' => usage_limits_build_feature_summary(
