@@ -607,6 +607,7 @@ try {
     $response = [
         'success' => true,
         'computed_is_pro' => $computedIsPro,
+        'is_pro' => $computedIsPro,
         'verification_mode' => $verificationMode,
         'resolved_rc_app_user_id' => $resolvedRcAppUserId,
         'after_row' => $afterRow,

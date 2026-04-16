@@ -1384,9 +1384,10 @@ function usage_limits_build_feature_summary(
             'feature_key' => $featureKey,
             'daily_limit' => $dailyLimit,
             'used_count' => $usedCount,
-            'remaining_count' => null,
-            'remainingCount' => null,
+            'remaining_count' => -1,
+            'remainingCount' => -1,
             'state' => 'premium',
+            'is_unlimited' => true,
         ];
     }
 
@@ -1419,6 +1420,8 @@ function usage_limits_get_summary(PDO $pdo, string $userId, string $qualificatio
         'state' => $isPro ? 'premium' : 'free',
         'plan_code' => $planCode,
         'expires_at' => $expiresAt,
+        'subscription_expires_at' => $expiresAt,
+        'subscription_is_active' => $isActive,
         'qualification_id' => $qualificationId,
         'usage_date_tr' => $usageDateTr,
         'study' => usage_limits_build_feature_summary(

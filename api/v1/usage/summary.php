@@ -40,6 +40,10 @@ try {
         ];
     }
 
+    // is_pro ve isPro her ikisi de response'ta olmalı
+    $summary['isPro'] = $computedIsPro;
+    $summary['is_pro'] = $computedIsPro;
+
     api_success('Kullanım özeti getirildi.', $summary);
 } catch (Throwable $e) {
     usage_limits_log_exception('usage_summary_failed', $e, [
