@@ -774,6 +774,39 @@ h1, h2, h3, h4, h5, h6 {
     padding: 7px 10px 7px 30px;
 }
 
+/* Pusula AI */
+.pusula-ai-page .pusula-ai-card {
+    border-radius: 14px;
+    border-color: var(--border-soft);
+    box-shadow: 0 6px 20px rgba(66, 78, 110, 0.06);
+}
+
+.pusula-ai-page .card-header,
+.pusula-ai-page .card-footer {
+    background: linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-soft) 100%) !important;
+}
+
+.pusula-ai-page .form-check.form-switch {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px 10px 42px;
+    background: var(--bg-soft);
+    min-height: 44px;
+}
+
+.pusula-ai-page .form-check-input {
+    cursor: pointer;
+}
+
+.pusula-ai-page .form-check-label {
+    cursor: pointer;
+    font-weight: 500;
+}
+
+[data-theme="dark"] .pusula-ai-page .pusula-ai-card {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
 @media (max-width: 1199.98px) {
     .main-content {
         padding: 18px;
