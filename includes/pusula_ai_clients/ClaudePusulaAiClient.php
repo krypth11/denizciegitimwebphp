@@ -44,6 +44,21 @@ class ClaudePusulaAiClient implements PusulaAiClientInterface
         ], $payload, $timeout, $provider, $model);
     }
 
+    public function generateChatReply(array $messages, array $options = []): array
+    {
+        unset($messages, $options);
+
+        return [
+            'success' => false,
+            'reply' => '',
+            'input_tokens' => 0,
+            'output_tokens' => 0,
+            'raw' => null,
+            'error_code' => 'unsupported_provider',
+            'error_message' => 'Claude sohbet çağrısı bu sürümde etkin değil.',
+        ];
+    }
+
     private function postJson(string $url, array $headers, array $payload, int $timeout, string $provider, string $model): array
     {
         $ch = curl_init($url);
