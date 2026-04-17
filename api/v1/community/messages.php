@@ -132,10 +132,11 @@ try {
         $avatarType = api_profile_resolve_avatar_type($r['user_avatar_type_raw'] ?? null);
         $avatarId = api_profile_normalize_avatar_id($r['user_avatar_id_raw'] ?? null);
         $profilePhotoUrl = api_profile_normalize_photo_url($r['user_profile_photo_url_raw'] ?? null);
-        $isPremium = usage_limits_is_subscription_active([
+        $isPremiumActive = usage_limits_is_subscription_active([
             'is_pro' => (int)($r['subscription_is_pro'] ?? 0),
             'expires_at' => $r['subscription_expires_at'] ?? null,
         ]);
+        $isPremium = $isPremiumActive ? 1 : 0;
 
         return [
             'id' => (string)$r['id'],
