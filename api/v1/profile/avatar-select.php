@@ -11,12 +11,26 @@ try {
     $userId = (string)$auth['user']['id'];
 
     $payload = api_get_request_data();
-    $avatarId = api_profile_normalize_avatar_id($payload['avatar_id'] ?? null);
+    $rawAvatarId = $payload['avatar_id'] ?? null;
+    $avatarId = api_profile_normalize_avatar_id($rawAvatarId);
+    $isAllowedAvatar = ($avatarId !== null) && api_profile_is_allowed_avatar_id($avatarId);
+    $avatarDebugEnabled = ((string)($payload['debug_avatar_flow'] ?? '0') === '1');
+
+    // Geçici debug: sadece debug_avatar_flow=1 gönderildiğinde log basar.
+    if ($avatarDebugEnabled) {
+        error_log('[avatar_select] ' . json_encode([
+            'user_id' => $userId,
+            'raw_avatar_id' => is_scalar($rawAvatarId) ? (string)$rawAvatarId : gettype($rawAvatarId),
+            'normalized_avatar_id' => $avatarId,
+            'allowed' => $isAllowedAvatar,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    }
+
     if ($avatarId === null) {
         api_error('Geçersiz avatar seçimi. Lütfen izin verilen avatarlardan birini seçin.', 422);
     }
 
-    if (!api_profile_is_allowed_avatar_id($avatarId)) {
+    if (!$isAllowedAvatar) {
         api_error('Geçersiz avatar seçimi. Lütfen izin verilen avatarlardan birini seçin.', 422);
     }
 
