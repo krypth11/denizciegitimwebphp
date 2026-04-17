@@ -11,9 +11,9 @@ try {
     $userId = (string)$auth['user']['id'];
 
     $payload = api_get_request_data();
-    $avatarId = trim((string)($payload['avatar_id'] ?? ''));
-    if ($avatarId === '') {
-        api_error('avatar_id alanı zorunludur.', 422);
+    $avatarId = api_profile_normalize_avatar_id($payload['avatar_id'] ?? null);
+    if ($avatarId === null) {
+        api_error('Geçersiz avatar seçimi. Lütfen izin verilen avatarlardan birini seçin.', 422);
     }
 
     if (!api_profile_is_allowed_avatar_id($avatarId)) {

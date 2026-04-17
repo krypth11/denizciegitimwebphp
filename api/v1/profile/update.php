@@ -13,7 +13,7 @@ try {
     $hasFullName = array_key_exists('full_name', $payload);
     $fullName = trim((string)($payload['full_name'] ?? ''));
     $hasAvatarId = array_key_exists('avatar_id', $payload);
-    $avatarId = trim((string)($payload['avatar_id'] ?? ''));
+    $avatarId = null;
 
     if (!$hasFullName && !$hasAvatarId) {
         api_error('Güncellenecek alan bulunamadı. full_name veya avatar_id gönderilmelidir.', 422);
@@ -40,6 +40,11 @@ try {
     }
 
     if ($hasAvatarId) {
+        $avatarId = api_profile_normalize_avatar_id($payload['avatar_id'] ?? null);
+        if ($avatarId === null) {
+            api_error('Geçersiz avatar seçimi. Lütfen izin verilen avatarlardan birini seçin.', 422);
+        }
+
         api_profile_assert_avatar_schema_supported($profileSchema);
         $profileBeforeUpdate = api_find_profile_by_user_id($pdo, $userId);
         if (!$profileBeforeUpdate) {

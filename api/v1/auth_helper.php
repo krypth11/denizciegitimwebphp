@@ -515,8 +515,8 @@ function api_profile_default_avatar_ids(): array
 
     $normalized = [];
     foreach ($configured as $item) {
-        $id = trim((string)$item);
-        if ($id !== '') {
+        $id = api_profile_normalize_avatar_id($item);
+        if ($id !== null) {
             $normalized[$id] = true;
         }
     }
@@ -530,20 +530,38 @@ function api_profile_default_avatar_ids(): array
     return array_keys($normalized);
 }
 
-function api_profile_is_allowed_avatar_id(string $avatarId): bool
+function api_profile_is_allowed_avatar_id($avatarId): bool
 {
-    $avatarId = trim($avatarId);
-    if ($avatarId === '') {
+    $normalizedAvatarId = api_profile_normalize_avatar_id($avatarId);
+    if ($normalizedAvatarId === null) {
         return false;
     }
 
-    return in_array($avatarId, api_profile_default_avatar_ids(), true);
+    return in_array($normalizedAvatarId, api_profile_default_avatar_ids(), true);
 }
 
 function api_profile_normalize_avatar_id($avatarId): ?string
 {
-    $value = trim((string)$avatarId);
-    return $value !== '' ? $value : null;
+    if ($avatarId === null) {
+        return null;
+    }
+
+    $value = strtolower(trim((string)$avatarId));
+    if ($value === '') {
+        return null;
+    }
+
+    $value = preg_replace('/^avatar[\s_-]*/i', '', $value);
+    if (!is_string($value) || $value === '' || !preg_match('/^\d+$/', $value)) {
+        return null;
+    }
+
+    $numericId = (int)$value;
+    if ($numericId < 1 || $numericId > 20) {
+        return null;
+    }
+
+    return (string)$numericId;
 }
 
 function api_profile_resolve_avatar_type($avatarType): string
