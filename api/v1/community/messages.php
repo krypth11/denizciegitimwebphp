@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once dirname(__DIR__) . '/usage_limits_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/community_helper.php';
 
 api_require_method('GET');
@@ -19,6 +20,7 @@ try {
     $room = community_room_schema($pdo);
     $msg = community_message_schema($pdo);
     $profile = community_profile_schema($pdo);
+    $subscription = community_subscription_schema($pdo);
 
     $roomSql = "SELECT `{$room['id']}` AS id, `{$room['is_active']}` AS is_active, `{$room['type']}` AS type"
         . ($room['qualification_id'] ? ", `{$room['qualification_id']}` AS qualification_id" : ', NULL AS qualification_id')
@@ -56,13 +58,47 @@ try {
     }
 
     $fullNameExpr = $profile['full_name'] ? "u.`{$profile['full_name']}`" : "''";
+    $isGuestExpr = $profile['is_guest'] ? "u.`{$profile['is_guest']}`" : 'NULL';
+    $avatarTypeExpr = $profile['avatar_type'] ? "u.`{$profile['avatar_type']}`" : 'NULL';
+    $avatarIdExpr = $profile['avatar_id'] ? "u.`{$profile['avatar_id']}`" : 'NULL';
+    $profilePhotoUrlExpr = $profile['profile_photo_url'] ? "u.`{$profile['profile_photo_url']}`" : 'NULL';
+
+    $subscriptionJoinSql = '';
+    $subscriptionSelectSql = '0 AS subscription_is_pro, NULL AS subscription_expires_at';
+    if (!empty($subscription['exists']) && $subscription['id'] && $subscription['user_id'] && $subscription['is_pro']) {
+        $orderCols = [];
+        if ($subscription['updated_at']) {
+            $orderCols[] = "s.`{$subscription['updated_at']}` DESC";
+        }
+        if ($subscription['created_at']) {
+            $orderCols[] = "s.`{$subscription['created_at']}` DESC";
+        }
+        if ($subscription['id']) {
+            $orderCols[] = "s.`{$subscription['id']}` DESC";
+        }
+        if (!$orderCols) {
+            $orderCols[] = '1 DESC';
+        }
+
+        $subscriptionJoinSql = " LEFT JOIN `{$subscription['table']}` us ON us.`{$subscription['id']}` = ("
+            . "SELECT s.`{$subscription['id']}` FROM `{$subscription['table']}` s"
+            . " WHERE s.`{$subscription['user_id']}` = m.`{$msg['user_id']}`"
+            . ' ORDER BY ' . implode(', ', $orderCols)
+            . ' LIMIT 1)';
+
+        $subscriptionSelectSql = "COALESCE(us.`{$subscription['is_pro']}`, 0) AS subscription_is_pro, "
+            . ($subscription['expires_at'] ? "us.`{$subscription['expires_at']}` AS subscription_expires_at" : 'NULL AS subscription_expires_at');
+    }
 
     $sql = "SELECT m.`{$msg['id']}` AS id, m.`{$msg['room_id']}` AS room_id, m.`{$msg['user_id']}` AS user_id, m.`{$msg['message_text']}` AS message_text, "
         . "m.`{$msg['is_deleted']}` AS is_deleted, "
         . ($msg['deleted_at'] ? "m.`{$msg['deleted_at']}` AS deleted_at, " : 'NULL AS deleted_at, ')
-        . "m.`{$msg['created_at']}` AS created_at, {$fullNameExpr} AS user_full_name, u.`{$profile['email']}` AS user_email "
+        . "m.`{$msg['created_at']}` AS created_at, {$fullNameExpr} AS user_full_name, u.`{$profile['email']}` AS user_email, "
+        . "{$isGuestExpr} AS user_is_guest_raw, {$avatarTypeExpr} AS user_avatar_type_raw, {$avatarIdExpr} AS user_avatar_id_raw, "
+        . "{$profilePhotoUrlExpr} AS user_profile_photo_url_raw, {$subscriptionSelectSql} "
         . "FROM `{$msg['table']}` m "
         . "LEFT JOIN `{$profile['table']}` u ON u.`{$profile['id']}` = m.`{$msg['user_id']}` "
+        . $subscriptionJoinSql
         . "WHERE m.`{$msg['room_id']}` = ? ORDER BY m.`{$msg['created_at']}` DESC LIMIT 50";
 
     $stmt = $pdo->prepare($sql);
@@ -82,11 +118,36 @@ try {
         }
 
         $displayName = $fullName !== '' ? $fullName : ($emailPrefix !== '' ? $emailPrefix : 'Kullanıcı');
+        $resolvedIsGuest = null;
+        if (($r['user_is_guest_raw'] ?? null) !== null) {
+            $resolvedIsGuest = ((int)($r['user_is_guest_raw'] ?? 0) === 1);
+        }
+        if ($resolvedIsGuest === null) {
+            $emailLower = strtolower($email);
+            $fullNameLower = strtolower($fullName);
+            $resolvedIsGuest = ($emailLower !== '' && str_ends_with($emailLower, '@guest.local'))
+                || in_array($fullNameLower, ['misafir kullanıcı', 'misafir kullanici', 'guest user'], true);
+        }
+
+        $avatarType = api_profile_resolve_avatar_type($r['user_avatar_type_raw'] ?? null);
+        $avatarId = api_profile_normalize_avatar_id($r['user_avatar_id_raw'] ?? null);
+        $profilePhotoUrl = api_profile_normalize_photo_url($r['user_profile_photo_url_raw'] ?? null);
+        $isPremium = usage_limits_is_subscription_active([
+            'is_pro' => (int)($r['subscription_is_pro'] ?? 0),
+            'expires_at' => $r['subscription_expires_at'] ?? null,
+        ]);
 
         return [
             'id' => (string)$r['id'],
             'room_id' => (string)$r['room_id'],
             'user_id' => (string)$r['user_id'],
+            'full_name' => $displayName,
+            'is_guest' => $resolvedIsGuest ? 1 : 0,
+            'is_premium' => $isPremium,
+            'is_pro' => $isPremium,
+            'avatar_type' => $avatarType,
+            'avatar_id' => $avatarId,
+            'profile_photo_url' => $profilePhotoUrl,
             'user_full_name' => $displayName,
             'user_name' => $displayName,
             'user_display_name' => $displayName,

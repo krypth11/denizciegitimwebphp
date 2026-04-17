@@ -67,6 +67,39 @@ if (!function_exists('community_profile_schema')) {
             'email' => community_pick_col($cols, ['email']),
             'is_guest' => community_pick_col($cols, ['is_guest', 'guest'], false),
             'current_qualification_id' => community_pick_col($cols, ['current_qualification_id', 'qualification_id'], false),
+            'avatar_type' => community_pick_col($cols, ['avatar_type'], false),
+            'avatar_id' => community_pick_col($cols, ['avatar_id'], false),
+            'profile_photo_url' => community_pick_col($cols, ['profile_photo_url'], false),
+        ];
+    }
+}
+
+if (!function_exists('community_subscription_schema')) {
+    function community_subscription_schema(PDO $pdo): array
+    {
+        $cols = community_columns($pdo, 'user_subscription_status');
+        if (!$cols) {
+            return [
+                'table' => 'user_subscription_status',
+                'exists' => false,
+                'id' => null,
+                'user_id' => null,
+                'is_pro' => null,
+                'expires_at' => null,
+                'created_at' => null,
+                'updated_at' => null,
+            ];
+        }
+
+        return [
+            'table' => 'user_subscription_status',
+            'exists' => true,
+            'id' => community_pick_col($cols, ['id'], false),
+            'user_id' => community_pick_col($cols, ['user_id'], false),
+            'is_pro' => community_pick_col($cols, ['is_pro'], false),
+            'expires_at' => community_pick_col($cols, ['expires_at'], false),
+            'created_at' => community_pick_col($cols, ['created_at'], false),
+            'updated_at' => community_pick_col($cols, ['updated_at'], false),
         ];
     }
 }

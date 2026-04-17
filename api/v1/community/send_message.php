@@ -16,7 +16,7 @@ try {
     }
 
     if ((int)($profile['is_guest'] ?? 0) === 1) {
-        api_error('Mesaj göndermek için kayıtlı kullanıcı olmalısınız.', 403);
+        api_error('Toplulukta yazmak için kayıtlı kullanıcı olmalısınız.', 403);
     }
 
     $payload = api_get_request_data();
