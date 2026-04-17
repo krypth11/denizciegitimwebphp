@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__, 2) . '/includes/auth.php';
 require_once dirname(__DIR__, 2) . '/includes/user_lifecycle_helper.php';
+require_once dirname(__DIR__, 2) . '/includes/upload_helper.php';
 
 function api_get_all_headers_safe(): array
 {
@@ -420,6 +421,9 @@ function api_get_profile_schema(PDO $pdo): array
         'email_verified' => $pick(['email_verified'], false),
         'email_verified_at' => $pick(['email_verified_at'], false),
         'pending_email' => $pick(['pending_email'], false),
+        'avatar_type' => $pick(['avatar_type'], false),
+        'avatar_id' => $pick(['avatar_id'], false),
+        'profile_photo_url' => $pick(['profile_photo_url'], false),
         'created_at' => $pick(['created_at', 'created_on'], false),
         'updated_at' => $pick(['updated_at', 'updated_on'], false),
     ];
@@ -441,6 +445,9 @@ function api_find_profile_by_user_id(PDO $pdo, string $userId): ?array
         $schema['email_verified'] ? "`{$schema['email_verified']}` AS email_verified" : '0 AS email_verified',
         $schema['email_verified_at'] ? "`{$schema['email_verified_at']}` AS email_verified_at" : 'NULL AS email_verified_at',
         $schema['pending_email'] ? "`{$schema['pending_email']}` AS pending_email" : 'NULL AS pending_email',
+        $schema['avatar_type'] ? "`{$schema['avatar_type']}` AS avatar_type" : "'default' AS avatar_type",
+        $schema['avatar_id'] ? "`{$schema['avatar_id']}` AS avatar_id" : 'NULL AS avatar_id',
+        $schema['profile_photo_url'] ? "`{$schema['profile_photo_url']}` AS profile_photo_url" : 'NULL AS profile_photo_url',
         $schema['created_at'] ? "`{$schema['created_at']}` AS created_at" : 'NULL AS created_at',
         $schema['updated_at'] ? "`{$schema['updated_at']}` AS updated_at" : 'NULL AS updated_at',
     ];
@@ -491,10 +498,91 @@ function api_find_profile_by_user_id(PDO $pdo, string $userId): ?array
         'email_verified' => ((int)($row['email_verified'] ?? 0) === 1),
         'email_verified_at' => $row['email_verified_at'] ?? null,
         'pending_email' => $row['pending_email'] ?? null,
+        'avatar_type' => api_profile_resolve_avatar_type($row['avatar_type'] ?? null),
+        'avatar_id' => api_profile_normalize_avatar_id($row['avatar_id'] ?? null),
+        'profile_photo_url' => api_profile_normalize_photo_url($row['profile_photo_url'] ?? null),
         'created_at' => $row['created_at'] ?? null,
         'updated_at' => $row['updated_at'] ?? null,
         'current_qualification_name' => $currentName,
     ];
+}
+
+function api_profile_default_avatar_ids(): array
+{
+    $configured = defined('PROFILE_DEFAULT_AVATAR_IDS') && is_array(PROFILE_DEFAULT_AVATAR_IDS)
+        ? PROFILE_DEFAULT_AVATAR_IDS
+        : [];
+
+    $normalized = [];
+    foreach ($configured as $item) {
+        $id = trim((string)$item);
+        if ($id !== '') {
+            $normalized[$id] = true;
+        }
+    }
+
+    if (empty($normalized)) {
+        for ($i = 1; $i <= 20; $i++) {
+            $normalized[(string)$i] = true;
+        }
+    }
+
+    return array_keys($normalized);
+}
+
+function api_profile_is_allowed_avatar_id(string $avatarId): bool
+{
+    $avatarId = trim($avatarId);
+    if ($avatarId === '') {
+        return false;
+    }
+
+    return in_array($avatarId, api_profile_default_avatar_ids(), true);
+}
+
+function api_profile_normalize_avatar_id($avatarId): ?string
+{
+    $value = trim((string)$avatarId);
+    return $value !== '' ? $value : null;
+}
+
+function api_profile_resolve_avatar_type($avatarType): string
+{
+    $value = strtolower(trim((string)$avatarType));
+    if ($value === 'uploaded') {
+        return 'uploaded';
+    }
+
+    return 'default';
+}
+
+function api_profile_normalize_photo_url($urlOrPath): ?string
+{
+    $value = trim((string)$urlOrPath);
+    if ($value === '') {
+        return null;
+    }
+
+    $relative = upload_extract_relative_path_from_url_or_path($value);
+    if ($relative === '') {
+        return $value;
+    }
+
+    return upload_build_public_url($relative);
+}
+
+function api_profile_assert_avatar_schema_supported(array $profileSchema): void
+{
+    if (!$profileSchema['avatar_type'] || !$profileSchema['avatar_id']) {
+        api_error('Avatar alanları bu sistemde desteklenmiyor.', 400);
+    }
+}
+
+function api_profile_assert_photo_schema_supported(array $profileSchema): void
+{
+    if (!$profileSchema['avatar_type'] || !$profileSchema['profile_photo_url']) {
+        api_error('Profil fotoğrafı alanları bu sistemde desteklenmiyor.', 400);
+    }
 }
 
 function api_update_profile_fields(PDO $pdo, string $userId, array $updates): void

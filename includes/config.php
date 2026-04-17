@@ -21,6 +21,14 @@ define('STORY_PUBLIC_BASE_URL', getenv('STORY_PUBLIC_BASE_URL') ?: '');
 define('SHARED_UPLOADS_ROOT', getenv('SHARED_UPLOADS_ROOT') ?: '/home/u2621168/shared_uploads');
 define('STORY_UPLOAD_ROOT', getenv('STORY_UPLOAD_ROOT') ?: SHARED_UPLOADS_ROOT);
 define('UPLOADS_PUBLIC_PREFIX', getenv('UPLOADS_PUBLIC_PREFIX') ?: 'uploads');
+define('PROFILE_PHOTOS_UPLOAD_MODULE', getenv('PROFILE_PHOTOS_UPLOAD_MODULE') ?: 'profile-photos');
+define('PROFILE_PHOTO_MAX_BYTES', (int)(getenv('PROFILE_PHOTO_MAX_BYTES') ?: (5 * 1024 * 1024)));
+define('PROFILE_DEFAULT_AVATAR_IDS', [
+    '1', '2', '3', '4', '5',
+    '6', '7', '8', '9', '10',
+    '11', '12', '13', '14', '15',
+    '16', '17', '18', '19', '20',
+]);
 
 // Firebase (FCM HTTP v1)
 define('FIREBASE_SERVICE_ACCOUNT_PATH', getenv('FIREBASE_SERVICE_ACCOUNT_PATH') ?: '/home/u2621168/firebase/denizci-egitim-firebase-adminsdk-fbsvc-e2454f0564.json');

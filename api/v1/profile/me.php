@@ -15,6 +15,10 @@ try {
         api_error('Profil bulunamadı.', 404);
     }
 
+    $profile['avatar_type'] = api_profile_resolve_avatar_type($profile['avatar_type'] ?? null);
+    $profile['avatar_id'] = api_profile_normalize_avatar_id($profile['avatar_id'] ?? null);
+    $profile['profile_photo_url'] = api_profile_normalize_photo_url($profile['profile_photo_url'] ?? null);
+
     api_qualification_access_log('current qualification resolved', [
         'context' => 'profile.me',
         'requested user id' => $userId,
