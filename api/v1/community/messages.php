@@ -67,6 +67,17 @@ try {
     $subscriptionSelectSql = '0 AS subscription_is_pro, NULL AS subscription_expires_at';
     if (!empty($subscription['exists']) && $subscription['id'] && $subscription['user_id'] && $subscription['is_pro']) {
         $orderCols = [];
+        $isProCol = "COALESCE(s.`{$subscription['is_pro']}`, 0)";
+
+        if ($subscription['expires_at']) {
+            $expiresAtCol = "s.`{$subscription['expires_at']}`";
+            $activeExpr = "CASE WHEN {$isProCol} = 1 AND ({$expiresAtCol} IS NULL OR {$expiresAtCol} = '' OR {$expiresAtCol} = '0000-00-00' OR {$expiresAtCol} = '0000-00-00 00:00:00' OR {$expiresAtCol} > NOW()) THEN 1 ELSE 0 END";
+            $orderCols[] = $activeExpr . ' DESC';
+            $orderCols[] = "CASE WHEN {$isProCol} = 1 THEN {$expiresAtCol} ELSE NULL END DESC";
+        } else {
+            $orderCols[] = "CASE WHEN {$isProCol} = 1 THEN 1 ELSE 0 END DESC";
+        }
+
         if ($subscription['updated_at']) {
             $orderCols[] = "s.`{$subscription['updated_at']}` DESC";
         }
@@ -137,6 +148,15 @@ try {
             'expires_at' => $r['subscription_expires_at'] ?? null,
         ]);
         $isPremium = $isPremiumActive ? 1 : 0;
+
+        if (usage_limits_subscription_debug_enabled()) {
+            usage_limits_subscription_debug_log('community_message_premium_resolve', [
+                'message_user_id' => (string)($r['user_id'] ?? ''),
+                'subscription_is_pro' => (int)($r['subscription_is_pro'] ?? 0),
+                'subscription_expires_at' => $r['subscription_expires_at'] ?? null,
+                'final_is_premium' => $isPremium,
+            ]);
+        }
 
         return [
             'id' => (string)$r['id'],
