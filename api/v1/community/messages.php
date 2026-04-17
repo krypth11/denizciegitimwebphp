@@ -65,7 +65,7 @@ try {
 
     $subscriptionJoinSql = '';
     $subscriptionSelectSql = '0 AS subscription_is_pro, NULL AS subscription_expires_at';
-    if (!empty($subscription['exists']) && $subscription['id'] && $subscription['user_id'] && $subscription['is_pro']) {
+    if (!empty($subscription['exists']) && $subscription['user_id'] && $subscription['is_pro']) {
         $orderCols = [];
         $isProCol = "COALESCE(s.`{$subscription['is_pro']}`, 0)";
 
@@ -91,14 +91,97 @@ try {
             $orderCols[] = '1 DESC';
         }
 
-        $subscriptionJoinSql = " LEFT JOIN `{$subscription['table']}` us ON us.`{$subscription['id']}` = ("
-            . "SELECT s.`{$subscription['id']}` FROM `{$subscription['table']}` s"
-            . " WHERE s.`{$subscription['user_id']}` = m.`{$msg['user_id']}`"
-            . ' ORDER BY ' . implode(', ', $orderCols)
-            . ' LIMIT 1)';
+        if ($subscription['id']) {
+            $subscriptionJoinSql = " LEFT JOIN `{$subscription['table']}` us ON us.`{$subscription['id']}` = ("
+                . "SELECT s.`{$subscription['id']}` FROM `{$subscription['table']}` s"
+                . " WHERE s.`{$subscription['user_id']}` = m.`{$msg['user_id']}`"
+                . ' ORDER BY ' . implode(', ', $orderCols)
+                . ' LIMIT 1)';
 
-        $subscriptionSelectSql = "COALESCE(us.`{$subscription['is_pro']}`, 0) AS subscription_is_pro, "
-            . ($subscription['expires_at'] ? "us.`{$subscription['expires_at']}` AS subscription_expires_at" : 'NULL AS subscription_expires_at');
+            $subscriptionSelectSql = "COALESCE(us.`{$subscription['is_pro']}`, 0) AS subscription_is_pro, "
+                . ($subscription['expires_at'] ? "us.`{$subscription['expires_at']}` AS subscription_expires_at" : 'NULL AS subscription_expires_at');
+        } else {
+            $activeExprS = '';
+            $activeExprS2 = '';
+            if ($subscription['expires_at']) {
+                $activeExprS = "CASE WHEN COALESCE(s.`{$subscription['is_pro']}`, 0) = 1"
+                    . " AND (s.`{$subscription['expires_at']}` IS NULL"
+                    . " OR s.`{$subscription['expires_at']}` = ''"
+                    . " OR s.`{$subscription['expires_at']}` = '0000-00-00'"
+                    . " OR s.`{$subscription['expires_at']}` = '0000-00-00 00:00:00'"
+                    . " OR s.`{$subscription['expires_at']}` > NOW())"
+                    . ' THEN 1 ELSE 0 END';
+                $activeExprS2 = "CASE WHEN COALESCE(s2.`{$subscription['is_pro']}`, 0) = 1"
+                    . " AND (s2.`{$subscription['expires_at']}` IS NULL"
+                    . " OR s2.`{$subscription['expires_at']}` = ''"
+                    . " OR s2.`{$subscription['expires_at']}` = '0000-00-00'"
+                    . " OR s2.`{$subscription['expires_at']}` = '0000-00-00 00:00:00'"
+                    . " OR s2.`{$subscription['expires_at']}` > NOW())"
+                    . ' THEN 1 ELSE 0 END';
+            } else {
+                $activeExprS = "CASE WHEN COALESCE(s.`{$subscription['is_pro']}`, 0) = 1 THEN 1 ELSE 0 END";
+                $activeExprS2 = "CASE WHEN COALESCE(s2.`{$subscription['is_pro']}`, 0) = 1 THEN 1 ELSE 0 END";
+            }
+
+            $comparisonPairs = [
+                [$activeExprS2, $activeExprS],
+            ];
+
+            if ($subscription['expires_at']) {
+                $comparisonPairs[] = [
+                    "CASE WHEN COALESCE(s2.`{$subscription['is_pro']}`, 0) = 1 THEN COALESCE(s2.`{$subscription['expires_at']}`, '') ELSE '' END",
+                    "CASE WHEN COALESCE(s.`{$subscription['is_pro']}`, 0) = 1 THEN COALESCE(s.`{$subscription['expires_at']}`, '') ELSE '' END",
+                ];
+            }
+            if ($subscription['updated_at']) {
+                $comparisonPairs[] = [
+                    "COALESCE(s2.`{$subscription['updated_at']}`, '')",
+                    "COALESCE(s.`{$subscription['updated_at']}`, '')",
+                ];
+            }
+            if ($subscription['created_at']) {
+                $comparisonPairs[] = [
+                    "COALESCE(s2.`{$subscription['created_at']}`, '')",
+                    "COALESCE(s.`{$subscription['created_at']}`, '')",
+                ];
+            }
+
+            $betterConditions = [];
+            $equalPrefix = [];
+            foreach ($comparisonPairs as $pair) {
+                [$leftExpr, $rightExpr] = $pair;
+                $condition = [];
+                if (!empty($equalPrefix)) {
+                    $condition[] = '(' . implode(' AND ', $equalPrefix) . ')';
+                }
+                $condition[] = '(' . $leftExpr . ' > ' . $rightExpr . ')';
+                $betterConditions[] = '(' . implode(' AND ', $condition) . ')';
+                $equalPrefix[] = '(' . $leftExpr . ' = ' . $rightExpr . ')';
+            }
+
+            if (!$betterConditions) {
+                $betterConditions[] = '0 = 1';
+            }
+
+            $pickedSelect = "SELECT s.`{$subscription['user_id']}` AS user_id, COALESCE(s.`{$subscription['is_pro']}`, 0) AS subscription_is_pro, "
+                . ($subscription['expires_at'] ? "s.`{$subscription['expires_at']}` AS subscription_expires_at" : 'NULL AS subscription_expires_at')
+                . " FROM `{$subscription['table']}` s"
+                . ' WHERE NOT EXISTS ('
+                . "SELECT 1 FROM `{$subscription['table']}` s2"
+                . " WHERE s2.`{$subscription['user_id']}` = s.`{$subscription['user_id']}`"
+                . ' AND (' . implode(' OR ', $betterConditions) . ')'
+                . ')';
+
+            $subscriptionJoinSql = ' LEFT JOIN ('
+                . 'SELECT picked.user_id, MAX(picked.subscription_is_pro) AS subscription_is_pro, '
+                . 'MAX(picked.subscription_expires_at) AS subscription_expires_at '
+                . 'FROM (' . $pickedSelect . ') picked '
+                . 'GROUP BY picked.user_id'
+                . ') us ON us.user_id = m.`' . $msg['user_id'] . '`';
+
+            $subscriptionSelectSql = 'COALESCE(us.subscription_is_pro, 0) AS subscription_is_pro, '
+                . 'us.subscription_expires_at AS subscription_expires_at';
+        }
     }
 
     $sql = "SELECT m.`{$msg['id']}` AS id, m.`{$msg['room_id']}` AS room_id, m.`{$msg['user_id']}` AS user_id, m.`{$msg['message_text']}` AS message_text, "
