@@ -523,7 +523,7 @@ function api_profile_default_avatar_ids(): array
 
     if (empty($normalized)) {
         for ($i = 1; $i <= 20; $i++) {
-            $normalized[(string)$i] = true;
+            $normalized[sprintf('avatar_%02d', $i)] = true;
         }
     }
 
@@ -532,12 +532,7 @@ function api_profile_default_avatar_ids(): array
 
 function api_profile_is_allowed_avatar_id($avatarId): bool
 {
-    $normalizedAvatarId = api_profile_normalize_avatar_id($avatarId);
-    if ($normalizedAvatarId === null) {
-        return false;
-    }
-
-    return in_array($normalizedAvatarId, api_profile_default_avatar_ids(), true);
+    return api_profile_normalize_avatar_id($avatarId) !== null;
 }
 
 function api_profile_normalize_avatar_id($avatarId): ?string
@@ -551,17 +546,16 @@ function api_profile_normalize_avatar_id($avatarId): ?string
         return null;
     }
 
-    $value = preg_replace('/^avatar[\s_-]*/i', '', $value);
-    if (!is_string($value) || $value === '' || !preg_match('/^\d+$/', $value)) {
+    if (!preg_match('/^(?:avatar[\s_-]*)?(\d{1,2})$/', $value, $matches)) {
         return null;
     }
 
-    $numericId = (int)$value;
+    $numericId = (int)$matches[1];
     if ($numericId < 1 || $numericId > 20) {
         return null;
     }
 
-    return (string)$numericId;
+    return sprintf('avatar_%02d', $numericId);
 }
 
 function api_profile_resolve_avatar_type($avatarType): string
