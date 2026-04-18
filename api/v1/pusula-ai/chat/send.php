@@ -82,9 +82,16 @@ try {
     }
 
     $userContext = pusula_ai_chat_fetch_user_context($pdo, $userId);
+    $normalizedIntent = detectIntent($message);
+    if ($userIntent === '') {
+        $userIntent = $normalizedIntent;
+    }
+
     $systemPrompt = pusula_ai_chat_build_system_prompt($mode, $userContext, [
         'user_intent' => $userIntent,
         'moderation_reason' => (string)($moderation['reason'] ?? ''),
+        'user_message_length' => mb_strlen($message, 'UTF-8'),
+        'user_wants_detailed' => pusula_ai_chat_user_wants_detailed_reply($message),
     ]);
 
     $recent = pusula_ai_chat_fetch_recent_messages($pdo, $conversationId, 8);

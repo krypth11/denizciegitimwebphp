@@ -124,6 +124,72 @@ function pusula_ai_chat_contains_any(string $text, array $terms): bool
     return false;
 }
 
+function pusula_ai_chat_detect_intent(string $message): string
+{
+    $text = mb_strtolower(trim($message), 'UTF-8');
+    if ($text === '') {
+        return 'casual_followup';
+    }
+
+    $intentMap = [
+        'greeting' => [
+            'merhaba', 'selam', 'selamlar', 'günaydın', 'iyi akşamlar', 'iyi günler', 'nasılsın', 'hoş bulduk'
+        ],
+        'study_plan' => [
+            'bugün ne çalışayım', 'bugün ne çalışmalıyım', 'çalışma planı', 'plan yap', 'program yap', 'nasıl çalışayım', 'çalışma programı'
+        ],
+        'weakness_analysis' => [
+            'eksiğim ne', 'eksiklerim ne', 'hangi konuda eksiğim', 'zayıf konularım', 'zayıf yönlerim', 'eksik alanlarım', 'nerede eksik'
+        ],
+        'motivation' => [
+            'moralim bozuk', 'iyi değilim', 'motivasyon', 'beni motive et', 'çok geride kaldım', 'yetişemiyorum', 'kaygılıyım', 'stresliyim'
+        ],
+        'exam_review' => [
+            'son denemem kötü geçti', 'son denememi yorumla', 'denememi yorumla', 'deneme analizi', 'yanlışlarımı yorumla', 'netlerim düştü'
+        ],
+        'explanation' => [
+            'anlat', 'açıkla', 'nedir', 'nasıl çalışır', 'örnek ver', 'colreg anlat', 'konu anlat'
+        ],
+        'quick_help' => [
+            'yardım', 'kısaca', 'hızlıca', 'ne yapayım', 'nasıl başlayayım', 'başlayalım', 'hazırım', 'teşekkür ederim', 'sağ ol'
+        ],
+    ];
+
+    foreach ($intentMap as $intent => $terms) {
+        if (pusula_ai_chat_contains_any($text, $terms)) {
+            return $intent;
+        }
+    }
+
+    if (preg_match('/\b(colreg|seyir|gmdss|çatışma|vardiya|deneme|sınav|çalışma)\b/u', $text) === 1) {
+        return 'explanation';
+    }
+
+    return 'casual_followup';
+}
+
+function detectIntent(string $message): string
+{
+    return pusula_ai_chat_detect_intent($message);
+}
+
+function pusula_ai_chat_user_wants_detailed_reply(string $message): bool
+{
+    $text = mb_strtolower(trim($message), 'UTF-8');
+    if ($text === '') {
+        return false;
+    }
+
+    $detailTerms = [
+        'detaylı', 'detay ver', 'ayrıntılı', 'uzun anlat', 'adım adım', 'analiz et', 'yorumla', 'karşılaştır', 'hepsini anlat'
+    ];
+    if (pusula_ai_chat_contains_any($text, $detailTerms)) {
+        return true;
+    }
+
+    return mb_strlen($text, 'UTF-8') >= 120;
+}
+
 function pusula_ai_chat_detect_hard_block_reason(string $text): ?string
 {
     $blocked = [
@@ -225,22 +291,32 @@ function pusula_ai_chat_moderate_message(string $message): array
         return ['allowed' => false, 'reason' => $hardBlockReason, 'reply' => pusula_ai_chat_rejection_text($hardBlockReason)];
     }
 
-    $greetingIntent = pusula_ai_chat_detect_greeting_intent($text);
-    if ($greetingIntent !== null) {
-        return ['allowed' => true, 'reason' => 'allowed_greeting', 'intent' => $greetingIntent, 'reply' => ''];
-    }
-
-    $educationIntent = pusula_ai_chat_detect_education_intent($text);
-    if ($educationIntent !== null) {
-        return ['allowed' => true, 'reason' => 'allowed_education', 'intent' => $educationIntent, 'reply' => ''];
-    }
-
     if (pusula_ai_chat_is_clear_off_topic($text)) {
         return ['allowed' => false, 'reason' => 'out_of_scope', 'reply' => pusula_ai_chat_rejection_text('out_of_scope')];
     }
 
+    $intent = pusula_ai_chat_detect_intent($text);
+
+    if ($intent === 'casual_followup') {
+        $greetingIntent = pusula_ai_chat_detect_greeting_intent($text);
+        if ($greetingIntent !== null) {
+            return ['allowed' => true, 'reason' => 'allowed_greeting', 'intent' => 'greeting', 'reply' => ''];
+        }
+
+        $educationIntent = pusula_ai_chat_detect_education_intent($text);
+        if ($educationIntent !== null) {
+            $normalizedIntentMap = [
+                'topic_explanation' => 'explanation',
+                'education_general' => 'quick_help',
+                'app_help' => 'quick_help',
+            ];
+            $normalizedIntent = $normalizedIntentMap[$educationIntent] ?? $educationIntent;
+            return ['allowed' => true, 'reason' => 'allowed_education', 'intent' => $normalizedIntent, 'reply' => ''];
+        }
+    }
+
     // Gri alan: hard-block veya net kapsam dışı değilse modele gönder.
-    return ['allowed' => true, 'reason' => 'gray_allowed', 'intent' => 'general', 'reply' => ''];
+    return ['allowed' => true, 'reason' => 'gray_allowed', 'intent' => $intent, 'reply' => ''];
 }
 
 function pusula_ai_chat_today_window(): array
@@ -672,6 +748,14 @@ function pusula_ai_chat_fetch_user_context(PDO $pdo, string $userId): array
 
 function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, array $meta = []): string
 {
+    $intent = trim((string)($meta['user_intent'] ?? ''));
+    if ($intent === '') {
+        $intent = 'casual_followup';
+    }
+    $userMessageLength = max(0, (int)($meta['user_message_length'] ?? 0));
+    $wantsDetailed = !empty($meta['user_wants_detailed']);
+    $isShortUserMessage = $userMessageLength > 0 && $userMessageLength <= 45;
+
     $lines = [
         'Sen Pusula Ai’sin.',
         'Denizci Eğitim uygulamasının premium kişisel koçusun.',
@@ -685,6 +769,17 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
         'Asla uydurma bilgi verme. Emin değilsen açıkça belirt.',
         'Kullanıcının durumuna göre kişisel yönlendirme yap.',
         'Gerektiğinde mini çalışma planı öner.',
+        'Her mesaja rapor gibi cevap verme.',
+        'Kullanıcının mesajı kısa ise sen de kısa cevap ver.',
+        'Gereksiz maddeli liste ve gereksiz uzun açıklama yapma.',
+        'Önce sohbet et, sonra yönlendir.',
+        'Sıcak ama profesyonel ol; robotik kurumsal dil kullanma.',
+        'Türkçeyi doğal konuşma diline yakın kullan.',
+        'Kullanıcı üzgün veya stresliyse önce duyguyu anlayıp kısa destek ver, sonra çözüm öner.',
+        'Gereksiz klişe kişisel gelişim cümleleri kurma.',
+        'Asla her cevabı plan/liste/paragraf duvarına çevirme.',
+        'Asla “premium kişisel koçunuzum” gibi kalıp cümleler kurma.',
+        'Emoji kullanımı çok hafif olsun; özellikle greeting/motivation yanıtlarında nadiren kullan.',
     ];
 
     $ctx = [];
@@ -701,16 +796,50 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
         $ctx[] = 'Zayıf konular: ' . implode(', ', array_slice($userContext['weak_topics'], 0, 3));
     }
 
-    if ($ctx) {
+    $allowContextDump = in_array($intent, ['study_plan', 'weakness_analysis', 'exam_review', 'explanation'], true);
+    if ($allowContextDump && $ctx) {
         $lines[] = 'Kullanıcı özeti:';
         foreach ($ctx as $line) {
             $lines[] = '- ' . $line;
         }
     }
 
-    $intent = trim((string)($meta['user_intent'] ?? ''));
-    if ($intent !== '') {
-        $lines[] = 'Kullanıcı niyeti: ' . $intent;
+    $lines[] = 'Kullanıcı niyeti: ' . $intent;
+
+    if ($isShortUserMessage && !$wantsDetailed) {
+        $lines[] = 'Kullanıcı kısa yazdı; cevabı kısa tut (genelde 1-4 cümle).';
+    }
+    if ($wantsDetailed) {
+        $lines[] = 'Kullanıcı detay talep ediyor; bu durumda konuya göre orta/detaylı cevap verilebilir.';
+    }
+
+    switch ($intent) {
+        case 'greeting':
+            $lines[] = 'Yanıt biçimi: 1-2 kısa, sıcak cümle; gerekirse tek bir soru ile devam et.';
+            $lines[] = 'Selamlaşmada asla uzun plan, zayıf konu dökümü veya paragraf analiz verme.';
+            break;
+        case 'quick_help':
+            $lines[] = 'Yanıt biçimi: 2-4 cümle, hızlı ve net yardım.';
+            break;
+        case 'study_plan':
+            $lines[] = 'Yanıt biçimi: kısa yönlendirme + mini plan. Liste gerekiyorsa en fazla 2-3 madde.';
+            break;
+        case 'weakness_analysis':
+            $lines[] = 'Yanıt biçimi: kısa analiz + bir sonraki adım. Gereksiz uzun rapordan kaçın.';
+            break;
+        case 'motivation':
+            $lines[] = 'Yanıt biçimi: önce empati, sonra kısa destek ve uygulanabilir küçük adım.';
+            break;
+        case 'explanation':
+            $lines[] = 'Yanıt biçimi: orta uzunlukta, sade ve anlaşılır anlatım.';
+            break;
+        case 'exam_review':
+            $lines[] = 'Yanıt biçimi: orta uzunlukta değerlendirme, 2-3 net çıkarım ve devam adımı.';
+            break;
+        case 'casual_followup':
+        default:
+            $lines[] = 'Yanıt biçimi: sohbet odaklı, kısa ve doğal.';
+            break;
     }
 
     switch ($mode) {
