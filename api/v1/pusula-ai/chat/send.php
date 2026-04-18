@@ -133,15 +133,25 @@ try {
         'intent' => $userIntent,
         'debug' => true,
     ]);
-    if ($userIntent === 'navigation_request' && is_array($navigationResolution['target'] ?? null) && !is_array($actionPayload)) {
+    if ($userIntent === 'navigation_request' && is_array($navigationResolution['target'] ?? null)) {
+        $resolvedNavigationTarget = (string)(($navigationResolution['target']['target'] ?? '') ?: '');
+
+        // navigation_request + target çözüldüyse payload zorunlu akış.
         $actionPayload = is_array($navigationResolution['payload'] ?? null)
             ? $navigationResolution['payload']
             : null;
 
+        pusula_ai_chat_debug_trace('navigation_request_resolution', [
+            'navigation_request_target' => $resolvedNavigationTarget,
+            'navigation_payload_generated' => is_array($actionPayload),
+            'navigation_fell_back_to_info' => false,
+            'source' => 'send_enforcement',
+        ]);
+
         if (!is_array($actionPayload)) {
             pusula_ai_chat_debug_trace('navigation_payload_missing_unexpected', [
                 'intent' => $userIntent,
-                'target' => (string)(($navigationResolution['target']['target'] ?? '') ?: ''),
+                'target' => $resolvedNavigationTarget,
                 'source' => 'send_enforcement',
             ]);
         }

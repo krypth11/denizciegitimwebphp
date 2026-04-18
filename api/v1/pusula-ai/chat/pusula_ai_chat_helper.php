@@ -207,6 +207,21 @@ function pusula_ai_chat_navigation_target_definitions(): array
     ];
 }
 
+function pusula_ai_chat_navigation_supported_targets(): array
+{
+    return [
+        'study',
+        'statistics',
+        'community',
+        'offline',
+        'maritime_english',
+        'word_game',
+        'card_game',
+        'exams',
+        'pusula_ai',
+    ];
+}
+
 function pusula_ai_chat_navigation_guess_target_from_text(string $text): ?string
 {
     $haystack = mb_strtolower(trim($text), 'UTF-8');
@@ -333,13 +348,13 @@ function pusula_ai_chat_build_navigation_reply_from_target(?array $target): stri
 
     $resolvedTarget = trim((string)($target['target'] ?? ''));
     $map = [
-        'study' => 'Çalışma alanına geçebilirsin.',
-        'statistics' => 'İstatistikler bölümünü açabilirim.',
-        'community' => 'Seni topluluk alanına yönlendirebilirim.',
+        'study' => 'Çalışma alanını açabilirim.',
+        'statistics' => 'İstatistikler bölümüne gidebilirsin.',
+        'community' => 'Topluluk alanına geçebilirsin.',
         'offline' => 'Offline içerikler bölümüne geçebilirsin.',
         'maritime_english' => 'Maritime English alanına geçebilirsin.',
-        'word_game' => 'Seni Kelime Oyunu alanına yönlendirebilirim.',
-        'card_game' => 'Seni Kart Oyunu alanına yönlendirebilirim.',
+        'word_game' => 'Kelime Oyununa geçebilirsin.',
+        'card_game' => 'Kart Oyununa geçebilirsin.',
         'exams' => 'Deneme alanına geçebilirsin.',
         'pusula_ai' => 'Pusula Ai ekranını açabilirim.',
     ];
@@ -405,6 +420,14 @@ function pusula_ai_chat_resolve_navigation_action(string $message, array $knowle
                 ]);
             }
         }
+
+        if ($debug) {
+            pusula_ai_chat_debug_trace('navigation_request_resolution', [
+                'navigation_request_target' => $resolvedTarget,
+                'navigation_payload_generated' => is_array($payload),
+                'navigation_fell_back_to_info' => false,
+            ]);
+        }
     }
 
     return [
@@ -431,6 +454,11 @@ function pusula_ai_chat_build_navigation_payload(string $target): ?array
 {
     $target = trim($target);
     if ($target === '') {
+        return null;
+    }
+
+    $supportedTargets = pusula_ai_chat_navigation_supported_targets();
+    if (!in_array($target, $supportedTargets, true)) {
         return null;
     }
 
@@ -504,6 +532,25 @@ function pusula_ai_chat_detect_intent(string $message, array $knowledgeBundle = 
 
     if (pusula_ai_chat_is_navigation_request($text, $knowledgeBundle)) {
         return 'navigation_request';
+    }
+
+    $isFeatureInfoAsk = (
+        pusula_ai_chat_contains_any($text, ['nedir', 'ne işe yarar', 'nasıl çalışır', 'özelliği nedir', 'ne demek'])
+        && pusula_ai_chat_contains_any($text, [
+            'word game', 'word_game', 'kelime oyunu',
+            'kart oyunu', 'card game', 'card_game',
+            'çalışma alanı', 'calisma alani', 'study',
+            'istatistik', 'statistics',
+            'topluluk', 'community',
+            'offline', 'çevrimdışı', 'cevrimdisi',
+            'maritime english', 'maritime_english',
+            'pusula ai', 'pusula_ai',
+            'deneme alanı', 'exams',
+        ])
+        && !pusula_ai_chat_message_has_navigation_verb($text)
+    );
+    if ($isFeatureInfoAsk) {
+        return 'app_info';
     }
 
     $isShort = mb_strlen($text, 'UTF-8') <= 22;
@@ -634,6 +681,24 @@ function pusula_ai_chat_detect_education_intent(string $text): ?string
 {
     if (pusula_ai_chat_is_navigation_request($text)) {
         return 'navigation_request';
+    }
+
+    if (
+        pusula_ai_chat_contains_any($text, ['nedir', 'ne işe yarar', 'nasıl çalışır', 'özelliği nedir', 'ne demek'])
+        && pusula_ai_chat_contains_any($text, [
+            'word game', 'word_game', 'kelime oyunu',
+            'kart oyunu', 'card game', 'card_game',
+            'çalışma alanı', 'calisma alani', 'study',
+            'istatistik', 'statistics',
+            'topluluk', 'community',
+            'offline', 'çevrimdışı', 'cevrimdisi',
+            'maritime english', 'maritime_english',
+            'pusula ai', 'pusula_ai',
+            'deneme alanı', 'exams',
+        ])
+        && !pusula_ai_chat_message_has_navigation_verb($text)
+    ) {
+        return 'app_info';
     }
 
     $intentMap = [
