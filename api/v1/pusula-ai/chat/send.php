@@ -38,12 +38,24 @@ try {
     $knowledgeBundle = pusula_ai_chat_get_knowledge_bundle($pdo);
 
     $conversationId = pusula_ai_chat_resolve_conversation($pdo, $userId, $conversationId, $mode, $message);
-    $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle);
+    $actionPayload = null;
 
     $moderation = pusula_ai_chat_moderate_message($message);
     $userIntent = trim((string)($moderation['intent'] ?? ''));
+    $normalizedIntent = detectIntent($message);
+    if ($userIntent === '') {
+        $userIntent = $normalizedIntent;
+    }
+
+    $userContext = pusula_ai_chat_fetch_user_context($pdo, $userId);
+    $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle, [
+        'intent' => $userIntent,
+        'user_context' => $userContext,
+    ]);
+
     if (empty($moderation['allowed'])) {
         $reply = (string)($moderation['reply'] ?? pusula_ai_chat_rejection_text());
+        $actionPayload = null;
 
         $pdo->beginTransaction();
         try {
@@ -80,12 +92,6 @@ try {
             'created_at' => date('c'),
             'action_payload' => $actionPayload,
         ]);
-    }
-
-    $userContext = pusula_ai_chat_fetch_user_context($pdo, $userId);
-    $normalizedIntent = detectIntent($message);
-    if ($userIntent === '') {
-        $userIntent = $normalizedIntent;
     }
 
     $systemPrompt = pusula_ai_chat_build_system_prompt($mode, $userContext, [
