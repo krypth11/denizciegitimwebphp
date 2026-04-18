@@ -25,6 +25,7 @@ include '../includes/sidebar.php';
     <div class="card">
         <div class="card-body pb-2">
             <ul class="nav nav-tabs knowledge-tabs" id="knowledgeTabs" role="tablist">
+                <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-master-context" type="button">Ana Bilgi Metni</button></li>
                 <li class="nav-item" role="presentation"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-general" type="button">Genel Bilgi</button></li>
                 <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-features" type="button">Özellikler</button></li>
                 <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-rules" type="button">Davranış</button></li>
@@ -35,6 +36,40 @@ include '../includes/sidebar.php';
             </ul>
 
             <div class="tab-content pt-3">
+                <div class="tab-pane fade" id="tab-master-context">
+                    <div class="card soft-card"><div class="card-body">
+                        <h6 class="mb-3">Ana Bilgi Metni</h6>
+                        <p class="text-muted mb-3">Buraya Pusula Ai’nin uygulamayı tanıması için tek parça ana bilgi metnini yaz. Başlıklar ve paragraflar halinde yazabilirsin. Pusula Ai, uygun durumlarda bu metni prompt içinde kullanır.</p>
+                        <form id="formMasterContext" class="row g-3">
+                            <div class="col-12">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" name="master_context_enabled" value="1" id="masterContextEnabled">
+                                    <label class="form-check-label" for="masterContextEnabled">Ana bilgi metnini prompt içinde kullan</label>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label" for="masterContextText">master_context_text</label>
+                                <textarea class="form-control" id="masterContextText" name="master_context_text" rows="18" placeholder="Denizci Eğitim uygulaması nedir ve ne işe yarar?
+Denizci Eğitim, gemiadamı sınavlarına hazırlık için geliştirilmiş bir mobil eğitim uygulamasıdır.
+
+Uygulamada neler yapılabilir?
+Çalışma alanında soru çözülür.
+Deneme alanında deneme sınavı çözülür.
+Word Game alanında kelime oyunu oynanır.
+Kart Oyunu alanında kart kaydırma oyunu oynanır.
+Offline içerikler indirilebilir.
+Topluluk alanında kullanıcı etkileşimi sağlanır.
+
+Pusula Ai nasıl davranmalı?
+Kısa, doğal, samimi ve güvenilir cevap vermeli.
+Uygulama bilgisi sorulursa önce bu metni temel almalı.
+Asla uydurma link vermemeli.
+Asla finans, siyaset, sağlık tavsiyesi vermemeli."></textarea>
+                            </div>
+                        </form>
+                    </div></div>
+                </div>
+
                 <div class="tab-pane fade show active" id="tab-general">
                     <div class="card soft-card"><div class="card-body">
                         <h6 class="mb-3">A. Genel Bilgi</h6>
@@ -253,6 +288,7 @@ $(function () {
 
         const knowledge = res.data?.knowledge || {};
         const tools = res.data?.tools || {};
+        fillForm($('#formMasterContext'), knowledge);
         fillForm($('#formGeneral'), knowledge);
         fillForm($('#formFeatures'), knowledge);
         fillForm($('#formRules'), knowledge);
@@ -266,6 +302,7 @@ $(function () {
 
     async function saveSectionByTab(tabId) {
         const map = {
+            '#tab-master-context': { action: 'save_master_context', form: '#formMasterContext', ok: 'Ana bilgi metni kaydedildi.' },
             '#tab-general': { action: 'save_general', form: '#formGeneral', ok: 'Genel bilgi kaydedildi.' },
             '#tab-features': { action: 'save_features', form: '#formFeatures', ok: 'Özellikler kaydedildi.' },
             '#tab-rules': { action: 'save_rules', form: '#formRules', ok: 'Davranış kuralları kaydedildi.' },

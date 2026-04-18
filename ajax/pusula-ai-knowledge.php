@@ -64,6 +64,16 @@ try {
         ]);
     }
 
+    if ($action === 'save_master_context') {
+        pusula_ai_save_knowledge_section($pdo, 'master_context', pusula_ai_knowledge_post_payload([
+            'master_context_enabled', 'master_context_text',
+        ]));
+
+        pusula_ai_knowledge_json_response(true, 'Ana bilgi metni kaydedildi.', [
+            'knowledge' => pusula_ai_get_knowledge($pdo),
+        ]);
+    }
+
     if ($action === 'save_features') {
         pusula_ai_save_knowledge_section($pdo, 'features', pusula_ai_knowledge_post_payload([
             'app_features_text', 'premium_features_text', 'offline_features_text', 'community_features_text', 'exam_features_text',

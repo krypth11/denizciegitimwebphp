@@ -49,6 +49,8 @@ try {
         $status = 422;
         if (in_array($errorCode, ['feature_disabled', 'premium_required'], true)) {
             $status = 403;
+        } elseif ($errorCode === 'daily_limit_reached') {
+            $status = 429;
         }
         pusula_ai_exam_api_error($errorCode, (string)($startResult['message'] ?? 'Deneme başlatılamadı.'), $status);
     }

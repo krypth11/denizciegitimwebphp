@@ -281,6 +281,76 @@ function pusula_ai_start_recommended_exam(PDO $pdo, string $userId, array $paylo
         ];
     }
 
+    $qualificationId = trim((string)($blueprint['qualification_id'] ?? ''));
+    if ($qualificationId === '') {
+        return [
+            'success' => false,
+            'error_code' => 'cannot_start_exam',
+            'message' => 'Deneme başlatılamadı.',
+        ];
+    }
+
+    $activeDetail = mock_exam_fetch_active_attempt_detail($pdo, $userId);
+    if ($activeDetail) {
+        $activeQualificationId = trim((string)(($activeDetail['attempt']['qualification_id'] ?? null) ?: ''));
+        if ($activeQualificationId !== '' && $activeQualificationId !== $qualificationId) {
+            $activeDetail = null;
+        }
+    }
+
+    if ($activeDetail) {
+        $activeQuestions = $activeDetail['questions'] ?? [];
+        if (empty($activeQuestions)) {
+            return [
+                'success' => false,
+                'error_code' => 'cannot_start_exam',
+                'message' => 'Deneme başlatılamadı.',
+            ];
+        }
+
+        $activeAttempt = is_array($activeDetail['attempt'] ?? null) ? $activeDetail['attempt'] : [];
+        $activeAttemptId = trim((string)($activeAttempt['id'] ?? ''));
+        if ($activeAttemptId === '') {
+            return [
+                'success' => false,
+                'error_code' => 'cannot_start_exam',
+                'message' => 'Deneme başlatılamadı.',
+            ];
+        }
+
+        $effectiveMode = (string)($blueprint['pool_mode'] ?? 'mixed_review');
+
+        return [
+            'success' => true,
+            'attempt_id' => $activeAttemptId,
+            'exam_mode' => $effectiveMode,
+            'question_count' => (int)($activeAttempt['actual_question_count'] ?? $activeAttempt['requested_question_count'] ?? $blueprint['question_count'] ?? count($activeQuestions)),
+            'title' => pusula_ai_exam_mode_title($effectiveMode),
+            'started_at' => (string)($activeAttempt['started_at'] ?? date('c')),
+            'navigation_target' => 'exam_session',
+            'attempt' => $activeAttempt,
+            'blueprint' => $blueprint,
+            'message' => 'Aktif deneme bulundu.',
+        ];
+    }
+
+    $consume = usage_limits_consume(
+        $pdo,
+        $userId,
+        $qualificationId,
+        USAGE_LIMIT_FEATURE_MOCK_EXAM_START,
+        1
+    );
+
+    if (empty($consume['consumed']) && empty($consume['is_pro'])) {
+        return [
+            'success' => false,
+            'error_code' => 'daily_limit_reached',
+            'message' => 'Günlük deneme hakkın doldu.',
+            'summary' => $consume['summary'] ?? null,
+        ];
+    }
+
     $mockPayload = pusula_ai_exam_map_blueprint_to_mock_payload($pdo, $userId, $blueprint);
 
     try {

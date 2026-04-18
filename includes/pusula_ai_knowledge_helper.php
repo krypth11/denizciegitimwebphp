@@ -21,6 +21,9 @@ function pusula_ai_knowledge_defaults(): array
         'target_users' => '',
         'tone_of_voice' => '',
 
+        'master_context_enabled' => 0,
+        'master_context_text' => '',
+
         'app_features_text' => '',
         'premium_features_text' => '',
         'offline_features_text' => '',
@@ -63,6 +66,10 @@ function pusula_ai_tool_settings_defaults(): array
 function pusula_ai_knowledge_sections(): array
 {
     return [
+        'master_context' => [
+            'master_context_enabled',
+            'master_context_text',
+        ],
         'general' => [
             'app_name',
             'assistant_name',
@@ -105,6 +112,7 @@ function pusula_ai_knowledge_sections(): array
 function pusula_ai_knowledge_bool_fields(): array
 {
     return [
+        'master_context_enabled',
         'action_exam_enabled',
         'action_plan_enabled',
         'tool_stats_enabled',
@@ -121,7 +129,14 @@ function pusula_ai_knowledge_text_fields(): array
 {
     $all = pusula_ai_knowledge_defaults();
     return array_values(array_filter(array_keys($all), static function ($k) {
-        return !in_array($k, ['action_exam_enabled', 'action_plan_enabled', 'action_exam_default_question_count', 'action_exam_default_mode'], true);
+        return !in_array($k, [
+            'master_context_enabled',
+            'master_context_text',
+            'action_exam_enabled',
+            'action_plan_enabled',
+            'action_exam_default_question_count',
+            'action_exam_default_mode',
+        ], true);
     }));
 }
 
@@ -141,6 +156,35 @@ function pusula_ai_knowledge_trim_text($value, int $maxLen = 12000): string
     if ($text === '') {
         return '';
     }
+
+    if (function_exists('mb_substr')) {
+        return mb_substr($text, 0, $maxLen, 'UTF-8');
+    }
+
+    return substr($text, 0, $maxLen);
+}
+
+function pusula_ai_knowledge_normalize_multiline_text($value, int $maxLen = 60000): string
+{
+    $text = (string)$value;
+    if ($text === '') {
+        return '';
+    }
+
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $lines = explode("\n", $text);
+    foreach ($lines as &$line) {
+        $line = rtrim((string)$line);
+    }
+    unset($line);
+
+    $text = implode("\n", $lines);
+    $text = trim($text);
+    if ($text === '') {
+        return '';
+    }
+
+    $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
 
     if (function_exists('mb_substr')) {
         return mb_substr($text, 0, $maxLen, 'UTF-8');
@@ -199,6 +243,9 @@ function pusula_ai_knowledge_normalize_base(array $data): array
             $merged[$field] = pusula_ai_knowledge_trim_text($merged[$field], 12000);
         }
     }
+
+    $merged['master_context_enabled'] = pusula_ai_knowledge_to_bool_int($merged['master_context_enabled'] ?? 0);
+    $merged['master_context_text'] = pusula_ai_knowledge_normalize_multiline_text($merged['master_context_text'] ?? '', 60000);
 
     $merged['action_exam_enabled'] = pusula_ai_knowledge_to_bool_int($merged['action_exam_enabled'] ?? 1);
     $merged['action_plan_enabled'] = pusula_ai_knowledge_to_bool_int($merged['action_plan_enabled'] ?? 1);

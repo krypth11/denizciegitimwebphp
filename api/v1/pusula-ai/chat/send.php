@@ -40,6 +40,49 @@ try {
     $conversationId = pusula_ai_chat_resolve_conversation($pdo, $userId, $conversationId, $mode, $message);
     $actionPayload = null;
 
+    $policyHardBlock = pusula_ai_chat_detect_policy_hard_block($message);
+    if (is_array($policyHardBlock)) {
+        $reply = (string)($policyHardBlock['reply'] ?? pusula_ai_chat_policy_hard_block_reply());
+
+        $pdo->beginTransaction();
+        try {
+            pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'user', $message, null, 0, 0);
+            $assistantMessageId = pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'assistant', $reply, null, 0, 0);
+            $pdo->commit();
+        } catch (Throwable $txe) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $txe;
+        }
+
+        pusula_ai_chat_log_usage($pdo, $userId, [
+            'conversation_id' => $conversationId,
+            'provider' => (string)($settings['provider'] ?? ''),
+            'model' => (string)($settings['model'] ?? ''),
+            'token_in' => 0,
+            'token_out' => 0,
+            'estimated_cost' => 0,
+            'success' => true,
+            'error_code' => 'policy_hard_block',
+            'error_message' => (string)($policyHardBlock['category'] ?? 'policy_hard_block'),
+        ]);
+
+        $remainingAfter = max(0, $remainingBefore - 1);
+
+        api_success('Mesaj işlendi.', [
+            'conversation_id' => $conversationId,
+            'reply' => $reply,
+            'mode' => $mode,
+            'provider' => (string)($settings['provider'] ?? ''),
+            'model' => (string)($settings['model'] ?? ''),
+            'remaining_limit' => $remainingAfter,
+            'message_id' => $assistantMessageId,
+            'created_at' => date('c'),
+            'action_payload' => null,
+        ]);
+    }
+
     $moderation = pusula_ai_chat_moderate_message($message);
     $userIntent = trim((string)($moderation['intent'] ?? ''));
     $normalizedIntent = detectIntent($message);
@@ -118,6 +161,8 @@ try {
 
     if (is_string($intentSafeReply) && trim($intentSafeReply) !== '') {
         $reply = pusula_ai_chat_enforce_reply_style($userIntent, $intentSafeReply, $trustedContext);
+        $reply = pusula_ai_chat_sanitize_reply_links($userIntent, $reply, $trustedContext);
+        $reply = pusula_ai_chat_enforce_action_card_language($userIntent, $reply, is_array($actionPayload));
         $inputTokens = 0;
         $outputTokens = 0;
 
@@ -168,6 +213,7 @@ try {
 
     $systemPrompt = pusula_ai_chat_build_system_prompt($mode, $userContext, [
         'user_intent' => $userIntent,
+        'user_message' => $message,
         'moderation_reason' => (string)($moderation['reason'] ?? ''),
         'user_message_length' => mb_strlen($message, 'UTF-8'),
         'user_wants_detailed' => pusula_ai_chat_user_wants_detailed_reply($message),
@@ -222,6 +268,8 @@ try {
 
     $reply = trim((string)($providerResult['reply'] ?? ''));
     $reply = pusula_ai_chat_enforce_reply_style($userIntent, $reply, $trustedContext);
+    $reply = pusula_ai_chat_sanitize_reply_links($userIntent, $reply, $trustedContext);
+    $reply = pusula_ai_chat_enforce_action_card_language($userIntent, $reply, is_array($actionPayload));
     if ($reply === '') {
         pusula_ai_chat_log_usage($pdo, $userId, [
             'conversation_id' => $conversationId,

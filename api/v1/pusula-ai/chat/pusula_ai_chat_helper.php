@@ -126,6 +126,49 @@ function pusula_ai_chat_contains_any(string $text, array $terms): bool
     return false;
 }
 
+function pusula_ai_chat_policy_hard_block_reply(): string
+{
+    return 'Pusula Ai yalnızca denizcilik eğitimi, sınav hazırlığı ve uygulama kullanımı konularında yardımcı olabilir.';
+}
+
+function pusula_ai_chat_policy_hard_block_terms(): array
+{
+    return [
+        'finance' => ['coin', 'bitcoin', 'altcoin', 'yatırım', 'hisse', 'borsa', 'trade', 'kripto'],
+        'politics' => ['seçim', 'cumhurbaşkanı', 'parti', 'siyasi', 'oy ver'],
+        'health' => ['hastalık', 'ilaç', 'tedavi', 'reçete'],
+        'abuse' => ['küfür et', 'hakaret et', 'söv'],
+        'illegal' => ['hackle', 'crackle', 'dolandır', 'yasa dışı'],
+    ];
+}
+
+function pusula_ai_chat_detect_policy_hard_block(string $message): ?array
+{
+    $text = mb_strtolower(trim($message), 'UTF-8');
+    if ($text === '') {
+        return null;
+    }
+
+    $categories = pusula_ai_chat_policy_hard_block_terms();
+    foreach ($categories as $category => $terms) {
+        foreach ($terms as $term) {
+            $needle = mb_strtolower(trim((string)$term), 'UTF-8');
+            if ($needle === '') {
+                continue;
+            }
+            if (mb_strpos($text, $needle, 0, 'UTF-8') !== false) {
+                return [
+                    'category' => $category,
+                    'term' => $needle,
+                    'reply' => pusula_ai_chat_policy_hard_block_reply(),
+                ];
+            }
+        }
+    }
+
+    return null;
+}
+
 function pusula_ai_chat_detect_intent(string $message): string
 {
     $text = mb_strtolower(trim($message), 'UTF-8');
@@ -1061,11 +1104,26 @@ function pusula_ai_chat_build_exam_request_reply(array $trustedContext): string
 
 function pusula_ai_chat_build_app_info_reply(array $trustedContext, array $knowledgeBundle = []): string
 {
+    $knowledge = is_array($knowledgeBundle['knowledge'] ?? null)
+        ? $knowledgeBundle['knowledge']
+        : pusula_ai_knowledge_defaults();
+
+    $masterContextEnabled = (int)($knowledge['master_context_enabled'] ?? 0) === 1;
+    $masterContextText = trim((string)($knowledge['master_context_text'] ?? ''));
+    if ($masterContextEnabled && $masterContextText !== '') {
+        $paragraphs = preg_split('/\n\s*\n/u', $masterContextText) ?: [$masterContextText];
+        $paragraphs = array_values(array_filter(array_map('trim', $paragraphs), static fn($p) => $p !== ''));
+        if (!empty($paragraphs)) {
+            $picked = implode(' ', array_slice($paragraphs, 0, 2));
+            $picked = function_exists('mb_substr') ? mb_substr($picked, 0, 550, 'UTF-8') : substr($picked, 0, 550);
+            if (trim($picked) !== '') {
+                return trim($picked);
+            }
+        }
+    }
+
     $appInfo = is_array($trustedContext['app_info'] ?? null) ? $trustedContext['app_info'] : [];
     if (empty($appInfo)) {
-        $knowledge = is_array($knowledgeBundle['knowledge'] ?? null)
-            ? $knowledgeBundle['knowledge']
-            : pusula_ai_knowledge_defaults();
         $appInfo = [
             'app_summary' => (string)($knowledge['app_summary'] ?? ''),
             'app_features_text' => (string)($knowledge['app_features_text'] ?? ''),
@@ -1119,6 +1177,118 @@ function pusula_ai_chat_build_intent_safe_reply(string $intent, array $trustedCo
     return null;
 }
 
+function pusula_ai_chat_intent_requires_strict_link_sanitizer(string $intent): bool
+{
+    return in_array($intent, ['exam_request', 'app_info', 'stats_summary'], true);
+}
+
+function pusula_ai_chat_remove_markdown_links(string $text): string
+{
+    return preg_replace('/\[([^\]]+)\]\(([^)]+)\)/u', '$1', $text) ?? $text;
+}
+
+function pusula_ai_chat_remove_url_like_tokens(string $text): string
+{
+    $clean = $text;
+
+    // http/https veya www ile başlayan açık linkleri kaldır.
+    $clean = preg_replace('/\b(?:https?:\/\/|www\.)\S+/iu', '', $clean) ?? $clean;
+
+    // E-posta hariç domain benzeri (foo.com, bar.net/path vb.) token'ları kaldır.
+    $clean = preg_replace('/\b(?!\S+@\S+)(?:[a-z0-9-]+\.)+(?:com|net|org|io|co|ai|app|dev|info|xyz|edu|gov|me|tr)\b(?:\/\S*)?/iu', '', $clean) ?? $clean;
+
+    return $clean;
+}
+
+function pusula_ai_chat_contains_url_like_content(string $text): bool
+{
+    if (preg_match('/\b(?:https?:\/\/|www\.)\S+/iu', $text) === 1) {
+        return true;
+    }
+
+    if (preg_match('/\b(?!\S+@\S+)(?:[a-z0-9-]+\.)+(?:com|net|org|io|co|ai|app|dev|info|xyz|edu|gov|me|tr)\b(?:\/\S*)?/iu', $text) === 1) {
+        return true;
+    }
+
+    if (preg_match('/\[[^\]]+\]\(([^)]+)\)/u', $text) === 1) {
+        return true;
+    }
+
+    return false;
+}
+
+function pusula_ai_chat_safe_short_reply_for_intent(string $intent, array $trustedContext = []): string
+{
+    if ($intent === 'exam_request') {
+        return pusula_ai_chat_build_exam_request_reply($trustedContext);
+    }
+    if ($intent === 'app_info') {
+        return 'Uygulama içindeki özellikleri kısaca anlatabilirim ve gerekirse seni ilgili akışa yönlendirebilirim.';
+    }
+    if ($intent === 'stats_summary') {
+        return 'İstersen mevcut verine göre kısa bir istatistik özeti paylaşabilirim.';
+    }
+
+    return 'İstersen bunu uygulama içinden güvenli şekilde birlikte ilerletebiliriz.';
+}
+
+function pusula_ai_chat_sanitize_reply_links(string $intent, string $reply, array $trustedContext = []): string
+{
+    $safeReply = trim($reply);
+    if ($safeReply === '') {
+        return $safeReply;
+    }
+
+    if (!pusula_ai_chat_intent_requires_strict_link_sanitizer($intent)) {
+        return $safeReply;
+    }
+
+    // trusted backend context içinde açıkça izinli link listesi varsa tutulabilir.
+    $allowedLinks = is_array($trustedContext['allowed_links'] ?? null) ? $trustedContext['allowed_links'] : [];
+    if (!empty($allowedLinks)) {
+        return $safeReply;
+    }
+
+    if (!pusula_ai_chat_contains_url_like_content($safeReply)) {
+        return $safeReply;
+    }
+
+    $clean = pusula_ai_chat_remove_markdown_links($safeReply);
+    $clean = pusula_ai_chat_remove_url_like_tokens($clean);
+    $clean = preg_replace('/\s{2,}/u', ' ', $clean) ?? $clean;
+    $clean = preg_replace('/\s+([,.;:!?])/u', '$1', $clean) ?? $clean;
+    $clean = trim($clean);
+
+    if ($clean === '' || pusula_ai_chat_contains_url_like_content($clean)) {
+        return pusula_ai_chat_safe_short_reply_for_intent($intent, $trustedContext);
+    }
+
+    return pusula_ai_chat_trim_to_sentence_count($clean, 2);
+}
+
+function pusula_ai_chat_enforce_action_card_language(string $intent, string $reply, bool $hasActionPayload): string
+{
+    $safeReply = trim($reply);
+    if ($safeReply === '') {
+        return $safeReply;
+    }
+
+    if (!$hasActionPayload) {
+        return $safeReply;
+    }
+
+    // Action kartı varken dış linke tıklatma dili kullanma.
+    $safeReply = preg_replace('/\b(aşağıdaki\s+linke\s+tıklayın|linke\s+tıkla(?:yın)?|buradan\s+git|siteye\s+git)\b/iu', 'uygulama içinden devam edebilirsin', $safeReply) ?? $safeReply;
+    $safeReply = preg_replace('/\s{2,}/u', ' ', $safeReply) ?? $safeReply;
+    $safeReply = trim($safeReply);
+
+    if ($intent === 'exam_request') {
+        return pusula_ai_chat_trim_to_sentence_count($safeReply, 2);
+    }
+
+    return pusula_ai_chat_trim_to_sentence_count($safeReply, 3);
+}
+
 function pusula_ai_chat_trim_to_sentence_count(string $text, int $maxSentences): string
 {
     $text = trim($text);
@@ -1167,6 +1337,8 @@ function pusula_ai_chat_enforce_reply_style(string $intent, string $reply, array
         if (pusula_ai_chat_reply_has_exam_question_text($safeReply)) {
             return pusula_ai_chat_build_exam_request_reply($trustedContext);
         }
+        // Exam request'te URL/link yönlendirmesi ve uzun metin yasak.
+        $safeReply = pusula_ai_chat_sanitize_reply_links($intent, $safeReply, $trustedContext);
         return pusula_ai_chat_trim_to_sentence_count($safeReply, 2);
     }
 
@@ -1331,6 +1503,7 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
     $userMessageLength = max(0, (int)($meta['user_message_length'] ?? 0));
     $wantsDetailed = !empty($meta['user_wants_detailed']);
     $isShortUserMessage = $userMessageLength > 0 && $userMessageLength <= 45;
+    $userMessage = trim((string)($meta['user_message'] ?? ''));
 
     $lines = [];
 
@@ -1346,13 +1519,32 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
         }
     }
 
-    $lines[] = '[A_IDENTITY]';
+    $lines[] = '[A_HARD_SAFETY_RULES]';
+    $lines[] = 'Sadece denizcilik eğitimi, sınav hazırlığı, çalışma yönlendirmesi, motivasyon ve Denizci Eğitim uygulama kullanımı konularında yardımcı ol.';
+    $lines[] = 'Finans, siyaset, sağlık teşhis/tedavi, yatırım, gündem, illegal içerik, hakaret/küfür taleplerinde içerik üretme.';
+    $lines[] = 'Asla URL/link uydurma, asla var olmayan sayfa/modül/özellik uydurma.';
+    $lines[] = 'Uygulama hakkında yanıt verirken önce MASTER_CONTEXT_DOCUMENT ve Bilgi Bankası alanlarını temel al.';
+    $lines[] = 'MASTER_CONTEXT_DOCUMENT ve Bilgi Bankası kaynaklarında olmayan bir özelliği gerçekmiş gibi yazma.';
+    $lines[] = '“Uygulamada ne yapabilirim?” gibi sorularda genel internet cevabı verme; yalnızca Denizci Eğitim uygulamasını anlat.';
+
+    $masterContextEnabled = (int)($knowledge['master_context_enabled'] ?? 0) === 1;
+    $masterContextText = trim((string)($knowledge['master_context_text'] ?? ''));
+    if ($masterContextEnabled && $masterContextText !== '') {
+        $lines[] = '[B_MASTER_CONTEXT_DOCUMENT]';
+        $lines[] = 'Bu belge uygulama bilgisinde yüksek öncelikli kaynaktır.';
+        $lines[] = 'Kullanıcı uygulama, özellikler, modüller, premium, offline, topluluk, oyunlar veya uygulama işleyişini sorarsa önce bu belgeyi temel al.';
+        $lines[] = 'Belgede cevap varsa önceliği bu belgeye ver. Belge dışında kalan bilgileri gerçekmiş gibi uydurma.';
+        $lines[] = 'MASTER_CONTEXT_DOCUMENT:';
+        $lines[] = $masterContextText;
+    }
+
+    $lines[] = '[C_IDENTITY]';
     $lines[] = 'Asistan adı: ' . trim((string)($knowledge['assistant_name'] ?? 'Pusula Ai'));
     $lines[] = 'Uygulama adı: ' . trim((string)($knowledge['app_name'] ?? 'Denizci Eğitim'));
     $tone = trim((string)($knowledge['tone_of_voice'] ?? 'Samimi, profesyonel, kısa ve insan gibi.'));
     $lines[] = 'Ton: ' . ($tone !== '' ? $tone : 'Samimi, profesyonel, kısa ve insan gibi.');
 
-    $lines[] = '[B_APP_KNOWLEDGE_GENERAL]';
+    $lines[] = '[D_KNOWLEDGE_BASE]';
     $summary = trim((string)($knowledge['app_summary'] ?? ''));
     if ($summary !== '') {
         $lines[] = 'Uygulama özeti: ' . $summary;
@@ -1362,7 +1554,7 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
         $lines[] = 'Hedef kullanıcılar: ' . $targets;
     }
 
-    $lines[] = '[C_APP_FEATURES]';
+    $lines[] = '[D_APP_FEATURES]';
     foreach (['app_features_text', 'premium_features_text', 'offline_features_text', 'community_features_text', 'exam_features_text'] as $field) {
         $val = trim((string)($knowledge[$field] ?? ''));
         if ($val !== '') {
@@ -1384,13 +1576,13 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
         $lines[] = $field . ': ' . ($val !== '' ? $val : $defaultText);
     }
 
-    $lines[] = '[E_SYSTEM_PROMPT_LAYERS]';
+    $lines[] = '[D_SYSTEM_PROMPT_LAYERS]';
     $systemLayerDefaults = [
         'system_prompt_base' => 'Sadece güvenilir backend bağlamına dayan. Bilgi uydurma.',
-        'system_prompt_behavior' => 'Yanıtı niyete göre uyarla, kısa mesajlarda kısa kal.',
-        'system_prompt_app_knowledge' => 'Uygulama bilgisi yanıtlarında sadece Denizci Eğitim bilgi bankası içeriğini kullan.',
-        'system_prompt_stats_behavior' => 'Trusted istatistik yoksa performans analizi yapma; açık fallback ver.',
-        'system_prompt_exam_behavior' => 'Deneme isteğinde soru metni üretme; kısa öneri + action odaklı kal.',
+        'system_prompt_behavior' => 'Yanıtı niyete göre uyarla, kısa mesajlarda kısa kal. Dış link/URL verme; app içi aksiyonları doğal kısa cümleyle anlat.',
+        'system_prompt_app_knowledge' => 'Uygulama bilgisi yanıtlarında sadece Denizci Eğitim bilgi bankası içeriğini kullan. Dış web yönlendirmesi ve link üretimi yapma.',
+        'system_prompt_stats_behavior' => 'Trusted istatistik yoksa performans analizi yapma; açık fallback ver. URL/link üretme.',
+        'system_prompt_exam_behavior' => 'Deneme isteğinde soru metni üretme; kısa öneri + action odaklı kal. URL/link kesinlikle verme.',
     ];
     foreach ($systemLayerDefaults as $field => $defaultText) {
         $val = trim((string)($knowledge[$field] ?? ''));
@@ -1398,7 +1590,7 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
     }
 
     if (!empty($examples)) {
-        $lines[] = '[F_ACTIVE_EXAMPLE_CONVERSATIONS]';
+        $lines[] = '[E_ACTIVE_EXAMPLE_CONVERSATIONS]';
         foreach ($examples as $example) {
             $tag = trim((string)($example['conversation_tag'] ?? 'general'));
             $u = trim((string)($example['user_message'] ?? ''));
@@ -1412,7 +1604,7 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
         }
     }
 
-    $lines[] = '[G_TOOL_PERMISSIONS]';
+    $lines[] = '[F_TOOL_PERMISSIONS]';
     foreach (['tool_stats_enabled', 'tool_exam_recommendation_enabled', 'tool_app_info_enabled', 'tool_action_payload_enabled', 'tool_weak_topics_enabled', 'tool_last_exam_enabled'] as $toolField) {
         $lines[] = $toolField . ': ' . (((int)($tools[$toolField] ?? 0) === 1) ? '1' : '0');
     }
@@ -1435,12 +1627,22 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
     $lines[] = '"Son 5 denemede %70" gibi ifadeleri trusted veri olmadan ASLA kurma.';
     $lines[] = 'exam_request niyetinde düz metin soru, şık veya test içeriği üretmek YASAK.';
     $lines[] = 'Kullanıcı deneme istediğinde yalnızca kısa öneri + action payload odaklı kal.';
+    $lines[] = 'Asla URL uydurma, asla link verme, asla web sayfası adı uydurma.';
+    $lines[] = 'Asla “aşağıdaki linke tıklayın” veya benzeri bir yönlendirme yazma.';
+    $lines[] = 'Backend tarafından özellikle ve güvenilir şekilde sağlanmadıkça hiçbir URL yazma.';
+    $lines[] = 'Markdown link üretme; http:// veya https:// ile başlayan metin üretme.';
+    $lines[] = 'Uygulama içinde aksiyon gerekiyorsa yalnızca kısa doğal açıklama + action_payload yaklaşımı kullan.';
 
-    $lines[] = '[TRUSTED_USER_CONTEXT]';
+    $lines[] = '[G_TRUSTED_USER_CONTEXT]';
     if (!empty($trustedContext)) {
         $lines[] = pusula_ai_chat_json_encode($trustedContext);
     } else {
         $lines[] = '{"available":false,"note":"Şu an elimde net veri görünmüyor."}';
+    }
+
+    if ($userMessage !== '') {
+        $lines[] = '[H_USER_MESSAGE]';
+        $lines[] = $userMessage;
     }
 
     $lines[] = 'Kullanıcı niyeti: ' . $intent;
@@ -1476,6 +1678,7 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
             $lines[] = 'Öncelikle app_features_text/premium_features_text/offline_features_text/community_features_text/exam_features_text alanlarını temel al.';
             $lines[] = 'Genel eğitim tavsiyesi üretip uygulama bilgisinden kopma.';
             $lines[] = 'App info cevabını yalnızca app_summary, app_features_text, premium_features_text, offline_features_text, community_features_text, exam_features_text alanlarından kur.';
+            $lines[] = 'Dış site/link/URL verme; app içi işlemleri doğal cümleyle anlat.';
             break;
         case 'study_plan':
             $lines[] = 'Yanıt biçimi: kısa yönlendirme + mini plan. Liste gerekiyorsa en fazla 2-3 madde.';
@@ -1491,6 +1694,7 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
             $lines[] = 'Yanıt biçimi: kısa doğal öneri ver; soru listesi veya düz metin soru üretme.';
             $lines[] = 'Deneme isteğinde odak: uygun deneme modunu öner (weak_topics, last_exam_mistakes, mixed_review, motivation_warmup, one_week_focus).';
             $lines[] = 'exam_request için yalnızca kısa öneri + action mantığı uygula; soru metni yazma.';
+            $lines[] = 'exam_request içinde link, URL, yönlendirme adresi, markdown link, web sitesi adı yazma.';
             break;
         case 'motivation':
             $lines[] = 'Yanıt biçimi: önce empati, sonra kısa destek ve uygulanabilir küçük adım.';
