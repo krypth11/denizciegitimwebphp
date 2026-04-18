@@ -40,6 +40,7 @@ try {
     $actionPayload = pusula_ai_chat_detect_action_payload($message);
 
     $moderation = pusula_ai_chat_moderate_message($message);
+    $userIntent = trim((string)($moderation['intent'] ?? ''));
     if (empty($moderation['allowed'])) {
         $reply = (string)($moderation['reply'] ?? pusula_ai_chat_rejection_text());
 
@@ -81,7 +82,10 @@ try {
     }
 
     $userContext = pusula_ai_chat_fetch_user_context($pdo, $userId);
-    $systemPrompt = pusula_ai_chat_build_system_prompt($mode, $userContext);
+    $systemPrompt = pusula_ai_chat_build_system_prompt($mode, $userContext, [
+        'user_intent' => $userIntent,
+        'moderation_reason' => (string)($moderation['reason'] ?? ''),
+    ]);
 
     $recent = pusula_ai_chat_fetch_recent_messages($pdo, $conversationId, 8);
     $messages = [

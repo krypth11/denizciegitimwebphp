@@ -59,9 +59,31 @@ function pusula_ai_chat_validate_request(array $payload): array
     ];
 }
 
-function pusula_ai_chat_rejection_text(): string
+function pusula_ai_chat_rejection_text(?string $reason = null): string
 {
-    return 'Pusula Ai şu anda yalnızca denizcilik eğitimi, sınav hazırlığı ve uygulama içi konularda yardımcı olabilir.';
+    $templates = [
+        'default' => [
+            'Pusula Ai şu anda denizcilik eğitimi, sınav hazırlığı ve uygulama içi konularda yardımcı olabilir.',
+            'Bu alanda yardımcı olamıyorum. Denizcilik eğitimi, çalışma planı ve sınav hazırlığı konularında destek verebilirim.',
+        ],
+        'safety' => [
+            'Bu içerik için yardımcı olamam. Denizcilik eğitimi, sınav hazırlığı ve uygulama kullanımı konularında destek olabilirim.',
+            'Bu isteğe yanıt veremem. İstersen denizcilik eğitimi ve çalışma planı tarafında yardımcı olayım.',
+        ],
+        'out_of_scope' => [
+            'Pusula Ai şu anda denizcilik eğitimi, sınav hazırlığı ve uygulama içi konularda yardımcı olabilir.',
+            'Bu konu kapsam dışında. Denizcilik eğitimi, deneme analizi ve çalışma planı konularında destek verebilirim.',
+        ],
+    ];
+
+    $bucket = in_array((string)$reason, ['küfür', 'hakaret', 'siyaset', 'cinsellik', 'illegal', 'spam'], true)
+        ? 'safety'
+        : ((string)$reason === 'out_of_scope' ? 'out_of_scope' : 'default');
+
+    $choices = $templates[$bucket] ?? $templates['default'];
+    $index = (int)(abs(crc32((string)$reason)) % max(1, count($choices)));
+
+    return (string)($choices[$index] ?? $templates['default'][0]);
 }
 
 function pusula_ai_chat_is_spam_text(string $text): bool
@@ -88,47 +110,137 @@ function pusula_ai_chat_is_spam_text(string $text): bool
     return false;
 }
 
-function pusula_ai_chat_moderate_message(string $message): array
+function pusula_ai_chat_contains_any(string $text, array $terms): bool
 {
-    $text = mb_strtolower(trim($message), 'UTF-8');
-    if ($text === '') {
-        return ['allowed' => false, 'reason' => 'empty', 'reply' => pusula_ai_chat_rejection_text()];
+    foreach ($terms as $term) {
+        if ($term === '') {
+            continue;
+        }
+        if (mb_strpos($text, $term, 0, 'UTF-8') !== false) {
+            return true;
+        }
     }
 
+    return false;
+}
+
+function pusula_ai_chat_detect_hard_block_reason(string $text): ?string
+{
     $blocked = [
-        'küfür' => ['amk', 'aq', 'orospu', 'piç', 'siktir', 'göt', 'ibne', 'yarak'],
-        'hakaret' => ['aptal', 'gerizekalı', 'salak', 'mal', 'şerefsiz', 'haysiyetsiz'],
+        'küfür' => ['amk', 'aq', 'orospu', 'piç', 'siktir', 'göt', 'ibne', 'yarak', 'küfür et'],
+        'hakaret' => ['aptal', 'gerizekalı', 'salak', 'mal', 'şerefsiz', 'haysiyetsiz', 'hakaret et'],
         'siyaset' => ['seçim', 'cumhurbaşkanı', 'milletvekili', 'parti', 'iktidar', 'muhalefet', 'oy ver'],
         'cinsellik' => ['seks', 'porno', 'çıplak', 'erotik', 'yetişkin içerik'],
         'illegal' => ['hack', 'şifre kır', 'dolandır', 'uyuşturucu', 'sahte belge', 'silah yapımı'],
-        'off_topic' => ['bitcoin', 'kripto', 'maç sonucu', 'iddaa', 'kız tavlama', 'burç yorumu', 'gündem'],
     ];
 
     foreach ($blocked as $reason => $terms) {
-        foreach ($terms as $term) {
-            if ($term !== '' && mb_strpos($text, $term, 0, 'UTF-8') !== false) {
-                return ['allowed' => false, 'reason' => $reason, 'reply' => pusula_ai_chat_rejection_text()];
-            }
+        if (pusula_ai_chat_contains_any($text, $terms)) {
+            return $reason;
         }
     }
 
     if (pusula_ai_chat_is_spam_text($text)) {
-        return ['allowed' => false, 'reason' => 'spam', 'reply' => pusula_ai_chat_rejection_text()];
+        return 'spam';
     }
 
-    $allowKeywords = [
-        'deniz', 'gemi', 'gemi adamı', 'colreg', 'seyir', 'ehliyet', 'sınav', 'deneme', 'soru',
-        'çalışma planı', 'çalışayım', 'performans', 'yanlışım', 'eksik', 'uygulama', 'pusula ai',
-        'motivasyon', 'tekrar', 'konu', 'kurs', 'yeterlilik'
+    return null;
+}
+
+function pusula_ai_chat_detect_greeting_intent(string $text): ?string
+{
+    $greetingTerms = [
+        'merhaba', 'selam', 'selamlar', 'iyi akşamlar', 'günaydın', 'iyi günler', 'nasılsın'
+    ];
+    if (pusula_ai_chat_contains_any($text, $greetingTerms)) {
+        return 'greeting';
+    }
+
+    $onboardingTerms = [
+        'ne yapabiliyorsun', 'bana nasıl yardımcı olursun', 'nasıl yardımcı olursun',
+        'başlayalım', 'hazırım', 'nasıl çalışıyoruz', 'yardımcı olur musun'
+    ];
+    if (pusula_ai_chat_contains_any($text, $onboardingTerms)) {
+        return 'onboarding';
+    }
+
+    return null;
+}
+
+function pusula_ai_chat_detect_education_intent(string $text): ?string
+{
+    $intentMap = [
+        'study_plan' => [
+            'bugün ne çalışmalıyım', 'çalışma planı', 'bana plan yap', 'plan yap', 'çalışma önerisi', 'program yap', 'nasıl çalışayım'
+        ],
+        'weakness_analysis' => [
+            'eksik alanlarım', 'eksik alanım', 'eksiklerim', 'zayıf konularım', 'zayıf yönlerim', 'hangi konuda eksiğim'
+        ],
+        'exam_review' => [
+            'son denememi yorumla', 'denememi yorumla', 'deneme yorumu', 'deneme analizi', 'yanlışlarımı yorumla'
+        ],
+        'motivation' => [
+            'beni motive et', 'motivasyon', 'sınav kaygısı', 'moralim bozuk', 'motive et'
+        ],
+        'topic_explanation' => [
+            'konu anlat', 'konu anlatımı', 'konuyu açıkla', 'anlatır mısın'
+        ],
+        'app_help' => [
+            'uygulamayı nasıl kullanırım', 'uygulama kullanımı', 'uygulamada', 'pusula ai', 'nasıl kullanılır'
+        ],
+        'education_general' => [
+            'çalışma', 'ders', 'sınav', 'deneme', 'soru', 'performans', 'eksik', 'tekrar', 'konu',
+            'deniz', 'gemi', 'gemi adamı', 'colreg', 'seyir', 'ehliyet', 'kurs', 'yeterlilik'
+        ],
     ];
 
-    foreach ($allowKeywords as $keyword) {
-        if (mb_strpos($text, $keyword, 0, 'UTF-8') !== false) {
-            return ['allowed' => true, 'reason' => 'allowed', 'reply' => ''];
+    foreach ($intentMap as $intent => $terms) {
+        if (pusula_ai_chat_contains_any($text, $terms)) {
+            return $intent;
         }
     }
 
-    return ['allowed' => false, 'reason' => 'out_of_scope', 'reply' => pusula_ai_chat_rejection_text()];
+    return null;
+}
+
+function pusula_ai_chat_is_clear_off_topic(string $text): bool
+{
+    $offTopicTerms = [
+        'coin öner', 'bitcoin', 'kripto', 'seçimde kim kazanır', 'maç tahmini', 'maç sonucu', 'iddaa',
+        'sevgili tavsiyesi', 'kız tavlama', 'burç yorumu', 'sağlık teşhisi', 'teşhis koy', 'gündem'
+    ];
+
+    return pusula_ai_chat_contains_any($text, $offTopicTerms);
+}
+
+function pusula_ai_chat_moderate_message(string $message): array
+{
+    $text = mb_strtolower(trim($message), 'UTF-8');
+    if ($text === '') {
+        return ['allowed' => false, 'reason' => 'empty', 'reply' => pusula_ai_chat_rejection_text('out_of_scope')];
+    }
+
+    $hardBlockReason = pusula_ai_chat_detect_hard_block_reason($text);
+    if ($hardBlockReason !== null) {
+        return ['allowed' => false, 'reason' => $hardBlockReason, 'reply' => pusula_ai_chat_rejection_text($hardBlockReason)];
+    }
+
+    $greetingIntent = pusula_ai_chat_detect_greeting_intent($text);
+    if ($greetingIntent !== null) {
+        return ['allowed' => true, 'reason' => 'allowed_greeting', 'intent' => $greetingIntent, 'reply' => ''];
+    }
+
+    $educationIntent = pusula_ai_chat_detect_education_intent($text);
+    if ($educationIntent !== null) {
+        return ['allowed' => true, 'reason' => 'allowed_education', 'intent' => $educationIntent, 'reply' => ''];
+    }
+
+    if (pusula_ai_chat_is_clear_off_topic($text)) {
+        return ['allowed' => false, 'reason' => 'out_of_scope', 'reply' => pusula_ai_chat_rejection_text('out_of_scope')];
+    }
+
+    // Gri alan: hard-block veya net kapsam dışı değilse modele gönder.
+    return ['allowed' => true, 'reason' => 'gray_allowed', 'intent' => 'general', 'reply' => ''];
 }
 
 function pusula_ai_chat_today_window(): array
@@ -558,13 +670,16 @@ function pusula_ai_chat_fetch_user_context(PDO $pdo, string $userId): array
     return $context;
 }
 
-function pusula_ai_chat_build_system_prompt(string $mode, array $userContext): string
+function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, array $meta = []): string
 {
     $lines = [
         'Sen Pusula Ai’sin.',
         'Denizci Eğitim uygulamasının premium kişisel koçusun.',
         'Sadece denizcilik eğitimi, sınav hazırlığı, çalışma yönlendirmesi, motivasyon ve uygulama kullanımı konularında yardımcı ol.',
         'Finans, siyaset, gündem, sağlık teşhis ve alakasız genel sorulara cevap verme.',
+        'Kullanıcı kısa veya genel bir eğitim mesajı yazarsa bunu eğitim niyeti olarak yorumla.',
+        'Selamlaşma ve başlangıç mesajlarında kısa bir tanıtım yapıp hangi konularda yardımcı olabileceğini nazikçe belirt.',
+        'Kullanıcıyı gereksiz yere kapsam dışı sayma; yalnızca net alakasız veya yasak içeriklerde reddet.',
         'Kısa, net, güvenilir ve motive edici Türkçe cevap ver.',
         'Asla küfür, hakaret, uygunsuz veya illegal içerik üretme.',
         'Asla uydurma bilgi verme. Emin değilsen açıkça belirt.',
@@ -591,6 +706,11 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext): s
         foreach ($ctx as $line) {
             $lines[] = '- ' . $line;
         }
+    }
+
+    $intent = trim((string)($meta['user_intent'] ?? ''));
+    if ($intent !== '') {
+        $lines[] = 'Kullanıcı niyeti: ' . $intent;
     }
 
     switch ($mode) {
