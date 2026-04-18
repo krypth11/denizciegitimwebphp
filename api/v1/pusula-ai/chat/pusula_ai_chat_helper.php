@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/bootstrap.php';
 require_once dirname(__DIR__, 4) . '/includes/pusula_ai_knowledge_helper.php';
+require_once dirname(__DIR__) . '/tools/pusula_ai_tools_helper.php';
 
 if (!defined('PUSULA_AI_CHAT_MAX_MESSAGE_LEN')) {
     define('PUSULA_AI_CHAT_MAX_MESSAGE_LEN', 1500);
@@ -922,6 +923,400 @@ function pusula_ai_chat_get_knowledge_bundle(PDO $pdo): array
     ];
 }
 
+function pusula_ai_chat_json_encode($data): string
+{
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+    return is_string($json) ? $json : '{}';
+}
+
+function pusula_ai_chat_trusted_context_is_empty($value): bool
+{
+    if (!is_array($value)) {
+        return true;
+    }
+
+    foreach ($value as $item) {
+        if (is_array($item)) {
+            if (!pusula_ai_chat_trusted_context_is_empty($item)) {
+                return false;
+            }
+            continue;
+        }
+
+        if ($item !== null && $item !== '' && $item !== false) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function pusula_ai_chat_has_meaningful_last_exam($lastExam): bool
+{
+    if (!is_array($lastExam)) {
+        return false;
+    }
+
+    $questionCount = max(0, (int)($lastExam['question_count'] ?? 0));
+    $scorePercent = $lastExam['score_percent'] ?? $lastExam['success_rate'] ?? null;
+    $scorePercent = ($scorePercent !== null && $scorePercent !== '' && is_numeric($scorePercent))
+        ? (float)$scorePercent
+        : null;
+
+    if ($questionCount > 0) {
+        return true;
+    }
+
+    return $scorePercent !== null;
+}
+
+function pusula_ai_chat_has_meaningful_stats_data(array $trustedContext): bool
+{
+    $userStats = is_array($trustedContext['user_stats'] ?? null) ? $trustedContext['user_stats'] : [];
+    $weakTopics = is_array($trustedContext['weak_topics'] ?? null) ? $trustedContext['weak_topics'] : [];
+    $strongTopics = is_array($trustedContext['strong_topics'] ?? null) ? $trustedContext['strong_topics'] : [];
+
+    if (!empty($weakTopics) || !empty($strongTopics)) {
+        return true;
+    }
+
+    if (!$userStats) {
+        return false;
+    }
+
+    $numericFields = [
+        'total_questions_solved',
+        'total_correct',
+        'total_wrong',
+        'last_7_days_questions',
+        'last_30_days_questions',
+        'active_days_last_7',
+        'active_days_last_30',
+    ];
+    foreach ($numericFields as $field) {
+        if ((int)($userStats[$field] ?? 0) > 0) {
+            return true;
+        }
+    }
+
+    if (($userStats['accuracy_percent'] ?? null) !== null && $userStats['accuracy_percent'] !== '') {
+        return true;
+    }
+
+    if (pusula_ai_chat_has_meaningful_last_exam($userStats['last_exam'] ?? null)) {
+        return true;
+    }
+
+    return false;
+}
+
+function pusula_ai_chat_has_meaningful_exam_review_data(array $trustedContext): bool
+{
+    return pusula_ai_chat_has_meaningful_last_exam($trustedContext['last_exam'] ?? null);
+}
+
+function pusula_ai_chat_intent_fallback_text(string $intent): ?string
+{
+    switch ($intent) {
+        case 'stats_summary':
+        case 'weakness_analysis':
+            return 'Şu an elimde net bir istatistik özeti çıkaracak kadar veri görünmüyor. Biraz daha soru veya deneme verisi oluştukça daha anlamlı analiz yapabilirim.';
+        case 'exam_review':
+            return 'Şu an son denemene ait yeterli veri görünmüyor. Yeni bir deneme tamamladığında daha net yorum yapabilirim.';
+        case 'exam_request':
+            return 'İstersen sana uygun bir deneme önerebilirim. Verin arttıkça bunu daha kişisel hale getirebilirim.';
+        default:
+            return null;
+    }
+}
+
+function pusula_ai_chat_build_exam_request_reply(array $trustedContext): string
+{
+    $recommended = is_array($trustedContext['recommended_exam'] ?? null)
+        ? $trustedContext['recommended_exam']
+        : null;
+
+    if (!$recommended) {
+        return (string)(pusula_ai_chat_intent_fallback_text('exam_request') ?? 'İstersen sana uygun bir deneme önerebilirim.');
+    }
+
+    $examMode = trim((string)($recommended['exam_mode'] ?? 'mixed_review'));
+    $questionCount = max(1, (int)($recommended['question_count'] ?? 20));
+
+    if ($examMode === 'weak_topics') {
+        return 'İstersen seni son dönemde zorlandığın alanlara odaklı ' . $questionCount . ' soruluk bir denemeye yönlendirebilirim.';
+    }
+    if ($examMode === 'last_exam_mistakes') {
+        return 'İstersen son denemendeki hatalara odaklanan ' . $questionCount . ' soruluk bir denemeye yönlendirebilirim.';
+    }
+    if ($examMode === 'motivation_warmup') {
+        return 'İstersen ritim kazanman için hafif tempolu ' . $questionCount . ' soruluk bir denemeye yönlendirebilirim.';
+    }
+    if ($examMode === 'one_week_focus') {
+        return 'İstersen son haftadaki çalışma akışına göre ' . $questionCount . ' soruluk bir denemeye yönlendirebilirim.';
+    }
+
+    return 'İstersen seviyene uygun ' . $questionCount . ' soruluk bir denemeye yönlendirebilirim.';
+}
+
+function pusula_ai_chat_build_app_info_reply(array $trustedContext, array $knowledgeBundle = []): string
+{
+    $appInfo = is_array($trustedContext['app_info'] ?? null) ? $trustedContext['app_info'] : [];
+    if (empty($appInfo)) {
+        $knowledge = is_array($knowledgeBundle['knowledge'] ?? null)
+            ? $knowledgeBundle['knowledge']
+            : pusula_ai_knowledge_defaults();
+        $appInfo = [
+            'app_summary' => (string)($knowledge['app_summary'] ?? ''),
+            'app_features_text' => (string)($knowledge['app_features_text'] ?? ''),
+            'premium_features_text' => (string)($knowledge['premium_features_text'] ?? ''),
+            'offline_features_text' => (string)($knowledge['offline_features_text'] ?? ''),
+            'community_features_text' => (string)($knowledge['community_features_text'] ?? ''),
+            'exam_features_text' => (string)($knowledge['exam_features_text'] ?? ''),
+        ];
+    }
+
+    $segments = [];
+    foreach (['app_summary', 'app_features_text', 'exam_features_text', 'offline_features_text', 'community_features_text', 'premium_features_text'] as $field) {
+        $text = trim((string)($appInfo[$field] ?? ''));
+        if ($text !== '') {
+            $segments[] = $text;
+        }
+    }
+
+    if (empty($segments)) {
+        return 'Denizci Eğitim içinde soru çözebilir, deneme sınavlarına girebilir, istatistiklerini takip edebilir, offline içerikleri indirebilir ve topluluk alanını kullanabilirsin. Premium tarafta ise Pusula Ai ve gelişmiş destek özellikleri açılır.';
+    }
+
+    $joined = implode(' ', array_slice($segments, 0, 3));
+    return trim($joined);
+}
+
+function pusula_ai_chat_build_intent_safe_reply(string $intent, array $trustedContext, array $knowledgeBundle = []): ?string
+{
+    if ($intent === 'app_info') {
+        return pusula_ai_chat_build_app_info_reply($trustedContext, $knowledgeBundle);
+    }
+
+    if ($intent === 'stats_summary' || $intent === 'weakness_analysis') {
+        if (!pusula_ai_chat_has_meaningful_stats_data($trustedContext)) {
+            return pusula_ai_chat_intent_fallback_text($intent);
+        }
+        return null;
+    }
+
+    if ($intent === 'exam_review') {
+        if (!pusula_ai_chat_has_meaningful_exam_review_data($trustedContext)) {
+            return pusula_ai_chat_intent_fallback_text('exam_review');
+        }
+        return null;
+    }
+
+    if ($intent === 'exam_request') {
+        return pusula_ai_chat_build_exam_request_reply($trustedContext);
+    }
+
+    return null;
+}
+
+function pusula_ai_chat_trim_to_sentence_count(string $text, int $maxSentences): string
+{
+    $text = trim($text);
+    $maxSentences = max(1, $maxSentences);
+    if ($text === '') {
+        return '';
+    }
+
+    $parts = preg_split('/(?<=[.!?])\s+/u', $text) ?: [$text];
+    $parts = array_values(array_filter(array_map('trim', $parts), static fn($p) => $p !== ''));
+    if (count($parts) <= $maxSentences) {
+        return $text;
+    }
+
+    return trim(implode(' ', array_slice($parts, 0, $maxSentences)));
+}
+
+function pusula_ai_chat_reply_has_exam_question_text(string $reply): bool
+{
+    $text = mb_strtolower(trim($reply), 'UTF-8');
+    if ($text === '') {
+        return false;
+    }
+
+    if (preg_match('/\bsoru\s*\d+/u', $text) === 1) {
+        return true;
+    }
+    if (preg_match('/\b[abcd]\)\s+/u', $text) === 1 || preg_match('/\b[abcd]\s*[-:]\s+/u', $text) === 1) {
+        return true;
+    }
+    if (preg_match('/\b\d+\)\s+.*\?/u', $text) === 1) {
+        return true;
+    }
+
+    return false;
+}
+
+function pusula_ai_chat_enforce_reply_style(string $intent, string $reply, array $trustedContext = []): string
+{
+    $safeReply = trim($reply);
+    if ($safeReply === '') {
+        return $safeReply;
+    }
+
+    if ($intent === 'exam_request') {
+        if (pusula_ai_chat_reply_has_exam_question_text($safeReply)) {
+            return pusula_ai_chat_build_exam_request_reply($trustedContext);
+        }
+        return pusula_ai_chat_trim_to_sentence_count($safeReply, 2);
+    }
+
+    if ($intent === 'greeting' || $intent === 'onboarding' || $intent === 'casual_followup') {
+        return pusula_ai_chat_trim_to_sentence_count($safeReply, 3);
+    }
+
+    if ($intent === 'quick_help') {
+        return pusula_ai_chat_trim_to_sentence_count($safeReply, 4);
+    }
+
+    if ($intent === 'emotional_support') {
+        return pusula_ai_chat_trim_to_sentence_count($safeReply, 3);
+    }
+
+    return $safeReply;
+}
+
+function pusula_ai_chat_debug_trace(string $stage, array $data = []): void
+{
+    try {
+        error_log('[pusula_ai_chat][debug][' . $stage . '] ' . json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    } catch (Throwable $e) {
+        // sessizce geç
+    }
+}
+
+function pusula_ai_chat_build_trusted_context(PDO $pdo, string $userId, string $intent, array $knowledgeBundle = [], string $message = ''): array
+{
+    $tools = is_array($knowledgeBundle['tools'] ?? null)
+        ? $knowledgeBundle['tools']
+        : pusula_ai_tool_settings_defaults();
+    $settings = is_array($knowledgeBundle['knowledge'] ?? null)
+        ? $knowledgeBundle['knowledge']
+        : pusula_ai_knowledge_defaults();
+
+    $meta = [
+        'intent' => $intent,
+        'trusted_source' => 'backend_internal_tools',
+        'generated_at' => date('c'),
+    ];
+    $payload = [];
+
+    $statsEnabled = ((int)($tools['tool_stats_enabled'] ?? 1) === 1);
+    $weakEnabled = ((int)($tools['tool_weak_topics_enabled'] ?? 1) === 1);
+    $lastExamEnabled = ((int)($tools['tool_last_exam_enabled'] ?? 1) === 1);
+    $appInfoEnabled = ((int)($tools['tool_app_info_enabled'] ?? 1) === 1);
+
+    try {
+        switch ($intent) {
+            case 'stats_summary':
+                if ($statsEnabled) {
+                    $payload['user_stats'] = pusula_ai_tool_get_user_stats($pdo, $userId);
+                }
+                break;
+
+            case 'weakness_analysis':
+                if ($statsEnabled) {
+                    $payload['user_stats'] = pusula_ai_tool_get_user_stats($pdo, $userId);
+                }
+                if ($weakEnabled) {
+                    $payload['weak_topics'] = pusula_ai_tool_get_weak_topics($pdo, $userId, 3);
+                    $payload['strong_topics'] = pusula_ai_tool_get_strong_topics($pdo, $userId, 3);
+                }
+                break;
+
+            case 'exam_review':
+                if ($lastExamEnabled) {
+                    $payload['last_exam'] = pusula_ai_tool_get_last_exam_summary($pdo, $userId);
+                }
+                break;
+
+            case 'exam_request':
+                if ($statsEnabled) {
+                    $payload['user_stats'] = pusula_ai_tool_get_user_stats($pdo, $userId);
+                }
+                $payload['recommended_exam'] = pusula_ai_tool_build_recommended_exam(
+                    $pdo,
+                    $userId,
+                    array_merge($settings, ['user_message' => $message]),
+                    $tools
+                );
+                break;
+
+            case 'app_info':
+                if ($appInfoEnabled) {
+                    $payload['app_info'] = [
+                        'app_name' => (string)($settings['app_name'] ?? ''),
+                        'assistant_name' => (string)($settings['assistant_name'] ?? ''),
+                        'app_summary' => (string)($settings['app_summary'] ?? ''),
+                        'app_features_text' => (string)($settings['app_features_text'] ?? ''),
+                        'premium_features_text' => (string)($settings['premium_features_text'] ?? ''),
+                        'offline_features_text' => (string)($settings['offline_features_text'] ?? ''),
+                        'community_features_text' => (string)($settings['community_features_text'] ?? ''),
+                        'exam_features_text' => (string)($settings['exam_features_text'] ?? ''),
+                    ];
+                }
+                break;
+
+            default:
+                // greeting/emotional_support vb. için tool zorunlu değil
+                break;
+        }
+    } catch (Throwable $e) {
+        error_log('[pusula_ai_chat][trusted_context] ' . $e->getMessage());
+    }
+
+    if (($intent === 'stats_summary' || $intent === 'weakness_analysis') && !pusula_ai_chat_has_meaningful_stats_data($payload)) {
+        return $meta + [
+            'intent' => $intent,
+            'trusted_source' => 'backend_internal_tools',
+            'available' => false,
+            'note' => 'No trusted stats available. Do not fabricate stats.',
+        ];
+    }
+
+    if ($intent === 'exam_review' && !pusula_ai_chat_has_meaningful_exam_review_data($payload)) {
+        return $meta + [
+            'intent' => $intent,
+            'trusted_source' => 'backend_internal_tools',
+            'available' => false,
+            'note' => 'No trusted exam data available. Do not fabricate exam review stats.',
+        ];
+    }
+
+    if ($intent === 'app_info' && empty($payload['app_info'])) {
+        $payload['app_info'] = [
+            'app_name' => (string)($settings['app_name'] ?? ''),
+            'assistant_name' => (string)($settings['assistant_name'] ?? ''),
+            'app_summary' => (string)($settings['app_summary'] ?? ''),
+            'app_features_text' => (string)($settings['app_features_text'] ?? ''),
+            'premium_features_text' => (string)($settings['premium_features_text'] ?? ''),
+            'offline_features_text' => (string)($settings['offline_features_text'] ?? ''),
+            'community_features_text' => (string)($settings['community_features_text'] ?? ''),
+            'exam_features_text' => (string)($settings['exam_features_text'] ?? ''),
+        ];
+    }
+
+    if (pusula_ai_chat_trusted_context_is_empty($payload)) {
+        return $meta + [
+            'intent' => $intent,
+            'trusted_source' => 'backend_internal_tools',
+            'available' => false,
+            'note' => 'Şu an için güvenilir sayısal bağlam üretilemedi.',
+        ];
+    }
+
+    return $meta + $payload + ['available' => true];
+}
+
 function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, array $meta = []): string
 {
     $kb = is_array($meta['knowledge_bundle'] ?? null) ? $meta['knowledge_bundle'] : [];
@@ -954,10 +1349,8 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
     $lines[] = '[A_IDENTITY]';
     $lines[] = 'Asistan adı: ' . trim((string)($knowledge['assistant_name'] ?? 'Pusula Ai'));
     $lines[] = 'Uygulama adı: ' . trim((string)($knowledge['app_name'] ?? 'Denizci Eğitim'));
-    $tone = trim((string)($knowledge['tone_of_voice'] ?? ''));
-    if ($tone !== '') {
-        $lines[] = 'Ton: ' . $tone;
-    }
+    $tone = trim((string)($knowledge['tone_of_voice'] ?? 'Samimi, profesyonel, kısa ve insan gibi.'));
+    $lines[] = 'Ton: ' . ($tone !== '' ? $tone : 'Samimi, profesyonel, kısa ve insan gibi.');
 
     $lines[] = '[B_APP_KNOWLEDGE_GENERAL]';
     $summary = trim((string)($knowledge['app_summary'] ?? ''));
@@ -978,19 +1371,30 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
     }
 
     $lines[] = '[D_BEHAVIOR_RULES]';
-    foreach (['allowed_topics_text', 'blocked_topics_text', 'response_style_text', 'emotional_style_text', 'short_reply_rules_text', 'long_reply_rules_text'] as $field) {
+    $behaviorDefaults = [
+        'allowed_topics_text' => 'Denizci Eğitim uygulaması, denizcilik eğitimi, sınav hazırlığı, çalışma yönlendirmesi ve uygulama içi özellikler.',
+        'blocked_topics_text' => 'Finans, siyaset, sağlık teşhis, gündem, yatırım, genel yaşam/ilişki tavsiyesi ve kapsam dışı alanlar.',
+        'response_style_text' => 'Kısa, net, doğal ve kullanıcı odaklı yanıt ver.',
+        'emotional_style_text' => 'Önce duyguya temas et, sonra küçük ve uygulanabilir yönlendirme ver.',
+        'short_reply_rules_text' => 'Kullanıcı kısa yazdıysa kısa yanıt ver; gereksiz paragraf ve madde listesi kurma.',
+        'long_reply_rules_text' => 'Sadece kullanıcı detay isterse daha uzun anlat; gereksiz tekrar yapma.',
+    ];
+    foreach ($behaviorDefaults as $field => $defaultText) {
         $val = trim((string)($knowledge[$field] ?? ''));
-        if ($val !== '') {
-            $lines[] = $field . ': ' . $val;
-        }
+        $lines[] = $field . ': ' . ($val !== '' ? $val : $defaultText);
     }
 
     $lines[] = '[E_SYSTEM_PROMPT_LAYERS]';
-    foreach (['system_prompt_base', 'system_prompt_behavior', 'system_prompt_app_knowledge', 'system_prompt_stats_behavior', 'system_prompt_exam_behavior'] as $field) {
+    $systemLayerDefaults = [
+        'system_prompt_base' => 'Sadece güvenilir backend bağlamına dayan. Bilgi uydurma.',
+        'system_prompt_behavior' => 'Yanıtı niyete göre uyarla, kısa mesajlarda kısa kal.',
+        'system_prompt_app_knowledge' => 'Uygulama bilgisi yanıtlarında sadece Denizci Eğitim bilgi bankası içeriğini kullan.',
+        'system_prompt_stats_behavior' => 'Trusted istatistik yoksa performans analizi yapma; açık fallback ver.',
+        'system_prompt_exam_behavior' => 'Deneme isteğinde soru metni üretme; kısa öneri + action odaklı kal.',
+    ];
+    foreach ($systemLayerDefaults as $field => $defaultText) {
         $val = trim((string)($knowledge[$field] ?? ''));
-        if ($val !== '') {
-            $lines[] = $field . ': ' . $val;
-        }
+        $lines[] = $field . ': ' . ($val !== '' ? $val : $defaultText);
     }
 
     if (!empty($examples)) {
@@ -1015,56 +1419,28 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
 
     $lines[] = '[FALLBACK_CORE_RULES]';
     $lines[] = 'Sadece denizcilik eğitimi, sınav hazırlığı, çalışma yönlendirmesi, motivasyon ve uygulama kullanımı konularında yardımcı ol.';
-    $lines[] = 'Finans, siyaset, gündem, sağlık teşhis ve alakasız genel sorulara cevap verme.';
+    $lines[] = 'Finans, siyaset, sağlık, gündem, yatırım, genel yaşam ve ilişki tavsiyesi gibi konularda yardımcı olabileceğini ASLA söyleme.';
     $lines[] = 'Kullanıcıyı gereksiz yere kapsam dışı sayma; yalnızca net alakasız veya yasak içeriklerde reddet.';
     $lines[] = 'Asla küfür, hakaret, uygunsuz veya illegal içerik üretme.';
     $lines[] = 'Asla uydurma bilgi verme. Emin değilsen açıkça belirt.';
 
-    $ctx = [];
-    if ($userContext['is_premium'] !== null) {
-        $ctx[] = 'Premium durumu: ' . (((int)$userContext['is_premium'] === 1) ? 'premium' : 'standart');
-    }
-    if (!empty($userContext['qualification'])) {
-        $ctx[] = 'Mevcut yeterlilik: ' . $userContext['qualification'];
-    }
-    if ($userContext['total_solved'] !== null) {
-        $ctx[] = 'Toplam çözüm: ' . (int)$userContext['total_solved'];
-    }
-    if ($userContext['total_correct'] !== null || $userContext['total_wrong'] !== null) {
-        $ctx[] = 'Toplam doğru/yanlış: ' . (int)($userContext['total_correct'] ?? 0) . '/' . (int)($userContext['total_wrong'] ?? 0);
-    }
-    if (isset($userContext['last_7_days_question_count']) && $userContext['last_7_days_question_count'] !== null) {
-        $ctx[] = 'Son 7 gün soru sayısı: ' . (int)$userContext['last_7_days_question_count'];
-    }
-    if (isset($userContext['last_7_days_active_days']) && $userContext['last_7_days_active_days'] !== null) {
-        $ctx[] = 'Son 7 gün aktif gün: ' . (int)$userContext['last_7_days_active_days'];
-    }
-    if ($userContext['last_exam_success_rate'] !== null) {
-        $ctx[] = 'Son deneme başarı oranı: %' . round((float)$userContext['last_exam_success_rate'], 1);
-    }
-    if (!empty($userContext['last_exam']) && is_array($userContext['last_exam'])) {
-        $lastExam = $userContext['last_exam'];
-        $ctx[] = 'Son deneme detay: soru=' . (int)($lastExam['question_count'] ?? 0)
-            . ', doğru=' . (int)($lastExam['correct_count'] ?? 0)
-            . ', yanlış=' . (int)($lastExam['wrong_count'] ?? 0);
-    }
-    if (!empty($userContext['weak_topics'])) {
-        $ctx[] = 'Zayıf konular: ' . implode(', ', array_slice($userContext['weak_topics'], 0, 3));
-    }
-    if (!empty($userContext['strong_topics'])) {
-        $ctx[] = 'Güçlü konular: ' . implode(', ', array_slice($userContext['strong_topics'], 0, 2));
-    }
-    if (!empty($userContext['proficiency_level'])) {
-        $ctx[] = 'Yeterlilik seviyesi: ' . (string)$userContext['proficiency_level'];
-    }
+    $trustedContext = is_array($meta['trusted_context'] ?? null) ? $meta['trusted_context'] : [];
 
-    $allowContextDump = in_array($intent, ['study_plan', 'weakness_analysis', 'exam_review', 'explanation', 'stats_summary', 'exam_request'], true);
-    if ($allowContextDump && $ctx) {
-        $lines[] = '[H_USER_CONTEXT]';
-        $lines[] = 'Kullanıcı özeti:';
-        foreach ($ctx as $line) {
-            $lines[] = '- ' . $line;
-        }
+    $lines[] = '[HALLUCINATION_GUARDRAILS]';
+    $lines[] = 'Sayı, yüzde, başarı oranı, soru sayısı, deneme skoru UYDURMA.';
+    $lines[] = 'Sayısal veri için yalnızca TRUSTED_USER_CONTEXT içindeki değerleri kullan.';
+    $lines[] = 'TRUSTED_USER_CONTEXT içinde olmayan hiçbir sayısal çıkarımı yazma.';
+    $lines[] = 'Trusted veri yoksa sayısal analiz yapma ve bunu açıkça belirt.';
+    $lines[] = 'TRUSTED_USER_CONTEXT içinde topic/course adı yoksa zayıf alan adı uydurma.';
+    $lines[] = '"Son 5 denemede %70" gibi ifadeleri trusted veri olmadan ASLA kurma.';
+    $lines[] = 'exam_request niyetinde düz metin soru, şık veya test içeriği üretmek YASAK.';
+    $lines[] = 'Kullanıcı deneme istediğinde yalnızca kısa öneri + action payload odaklı kal.';
+
+    $lines[] = '[TRUSTED_USER_CONTEXT]';
+    if (!empty($trustedContext)) {
+        $lines[] = pusula_ai_chat_json_encode($trustedContext);
+    } else {
+        $lines[] = '{"available":false,"note":"Şu an elimde net veri görünmüyor."}';
     }
 
     $lines[] = 'Kullanıcı niyeti: ' . $intent;
@@ -1090,21 +1466,31 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
         case 'stats_summary':
             $lines[] = 'Yanıt biçimi: önce eldeki verilerle net bir özet ver, sonra kısa yönlendirme yap.';
             $lines[] = 'Asla “hangi istatistikleri istersin?” diye geri soru ile başlama.';
+            if (!pusula_ai_chat_has_meaningful_stats_data($trustedContext)) {
+                $lines[] = 'No trusted stats available. Do not fabricate stats.';
+                $lines[] = 'Fallback: "Şu an elimde net bir istatistik özeti çıkaracak kadar veri görünmüyor. Biraz daha soru veya deneme verisi oluştukça daha anlamlı analiz yapabilirim."';
+            }
             break;
         case 'app_info':
             $lines[] = 'Yanıt biçimi: Denizci Eğitim uygulamasını gerçek özelliklerle anlat.';
             $lines[] = 'Öncelikle app_features_text/premium_features_text/offline_features_text/community_features_text/exam_features_text alanlarını temel al.';
             $lines[] = 'Genel eğitim tavsiyesi üretip uygulama bilgisinden kopma.';
+            $lines[] = 'App info cevabını yalnızca app_summary, app_features_text, premium_features_text, offline_features_text, community_features_text, exam_features_text alanlarından kur.';
             break;
         case 'study_plan':
             $lines[] = 'Yanıt biçimi: kısa yönlendirme + mini plan. Liste gerekiyorsa en fazla 2-3 madde.';
             break;
         case 'weakness_analysis':
             $lines[] = 'Yanıt biçimi: kısa analiz + bir sonraki adım. Gereksiz uzun rapordan kaçın.';
+            if (!pusula_ai_chat_has_meaningful_stats_data($trustedContext)) {
+                $lines[] = 'No trusted stats available. Do not fabricate stats.';
+                $lines[] = 'Fallback: "Şu an elimde net bir istatistik özeti çıkaracak kadar veri görünmüyor. Biraz daha soru veya deneme verisi oluştukça daha anlamlı analiz yapabilirim."';
+            }
             break;
         case 'exam_request':
             $lines[] = 'Yanıt biçimi: kısa doğal öneri ver; soru listesi veya düz metin soru üretme.';
             $lines[] = 'Deneme isteğinde odak: uygun deneme modunu öner (weak_topics, last_exam_mistakes, mixed_review, motivation_warmup, one_week_focus).';
+            $lines[] = 'exam_request için yalnızca kısa öneri + action mantığı uygula; soru metni yazma.';
             break;
         case 'motivation':
             $lines[] = 'Yanıt biçimi: önce empati, sonra kısa destek ve uygulanabilir küçük adım.';
@@ -1118,6 +1504,10 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
             break;
         case 'exam_review':
             $lines[] = 'Yanıt biçimi: orta uzunlukta değerlendirme, 2-3 net çıkarım ve devam adımı.';
+            if (!pusula_ai_chat_has_meaningful_exam_review_data($trustedContext)) {
+                $lines[] = 'No trusted stats available. Do not fabricate stats.';
+                $lines[] = 'Fallback: "Şu an son denemene ait yeterli veri görünmüyor. Yeni bir deneme tamamladığında daha net yorum yapabilirim."';
+            }
             break;
         case 'casual_followup':
         default:
@@ -1161,7 +1551,9 @@ function pusula_ai_chat_detect_action_payload(string $message): ?array
     return pusula_ai_chat_detect_action_payload_from_bundle($message, [
         'knowledge' => $settings,
         'tools' => $tools,
-    ], []);
+    ], [
+        'pdo' => (!empty($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) ? $GLOBALS['pdo'] : null,
+    ]);
 }
 
 function pusula_ai_chat_detect_action_payload_from_bundle(string $message, array $knowledgeBundle = [], array $meta = []): ?array
@@ -1182,6 +1574,9 @@ function pusula_ai_chat_detect_action_payload_from_bundle(string $message, array
         $intent = detectIntent($message);
     }
     $userContext = is_array($meta['user_context'] ?? null) ? $meta['user_context'] : [];
+    $trustedContext = is_array($meta['trusted_context'] ?? null) ? $meta['trusted_context'] : [];
+    $pdo = ($meta['pdo'] ?? null) instanceof PDO ? $meta['pdo'] : null;
+    $userId = trim((string)($meta['user_id'] ?? ''));
 
     $text = mb_strtolower(trim($message), 'UTF-8');
 
@@ -1191,6 +1586,25 @@ function pusula_ai_chat_detect_action_payload_from_bundle(string $message, array
     if ($examIntent
         && (int)($tools['tool_exam_recommendation_enabled'] ?? 1) === 1
         && (int)($settings['action_exam_enabled'] ?? 1) === 1) {
+
+        $trustedRecommended = is_array($trustedContext['recommended_exam'] ?? null)
+            ? $trustedContext['recommended_exam']
+            : null;
+        if ($trustedRecommended) {
+            return $trustedRecommended;
+        }
+
+        if ($pdo instanceof PDO && $userId !== '') {
+            $fromTool = pusula_ai_tool_build_recommended_exam(
+                $pdo,
+                $userId,
+                array_merge($settings, ['user_message' => $message]),
+                $tools
+            );
+            if (is_array($fromTool)) {
+                return $fromTool;
+            }
+        }
 
         $supportedModes = ['weak_topics', 'last_exam_mistakes', 'mixed_review', 'motivation_warmup', 'one_week_focus'];
         $defaultMode = strtolower(trim((string)($settings['action_exam_default_mode'] ?? '')));

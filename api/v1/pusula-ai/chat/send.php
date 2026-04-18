@@ -48,9 +48,19 @@ try {
     }
 
     $userContext = pusula_ai_chat_fetch_user_context($pdo, $userId);
+    $trustedContext = pusula_ai_chat_build_trusted_context($pdo, $userId, $userIntent, $knowledgeBundle, $message);
     $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle, [
         'intent' => $userIntent,
         'user_context' => $userContext,
+        'trusted_context' => $trustedContext,
+        'pdo' => $pdo,
+        'user_id' => $userId,
+    ]);
+
+    pusula_ai_chat_debug_trace('pre_response', [
+        'intent' => $userIntent,
+        'trusted_context_available' => !empty($trustedContext['available']),
+        'action_payload_generated' => is_array($actionPayload),
     ]);
 
     if (empty($moderation['allowed'])) {
@@ -94,6 +104,68 @@ try {
         ]);
     }
 
+    $intentSafeReply = pusula_ai_chat_build_intent_safe_reply($userIntent, $trustedContext, $knowledgeBundle);
+
+    if ($userIntent === 'exam_request' && !is_array($actionPayload)) {
+        $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle, [
+            'intent' => 'exam_request',
+            'user_context' => $userContext,
+            'trusted_context' => $trustedContext,
+            'pdo' => $pdo,
+            'user_id' => $userId,
+        ]);
+    }
+
+    if (is_string($intentSafeReply) && trim($intentSafeReply) !== '') {
+        $reply = pusula_ai_chat_enforce_reply_style($userIntent, $intentSafeReply, $trustedContext);
+        $inputTokens = 0;
+        $outputTokens = 0;
+
+        $pdo->beginTransaction();
+        try {
+            pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'user', $message, null, 0, 0);
+            $assistantMessageId = pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'assistant', $reply, $actionPayload, $inputTokens, $outputTokens);
+            $pdo->commit();
+        } catch (Throwable $txe) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $txe;
+        }
+
+        pusula_ai_chat_log_usage($pdo, $userId, [
+            'conversation_id' => $conversationId,
+            'provider' => (string)($settings['provider'] ?? ''),
+            'model' => (string)($settings['model'] ?? ''),
+            'token_in' => $inputTokens,
+            'token_out' => $outputTokens,
+            'estimated_cost' => 0,
+            'success' => true,
+            'error_code' => '',
+            'error_message' => '',
+        ]);
+
+        $remainingAfter = max(0, $remainingBefore - 1);
+
+        pusula_ai_chat_debug_trace('short_circuit_reply', [
+            'intent' => $userIntent,
+            'trusted_context_available' => !empty($trustedContext['available']),
+            'action_payload_generated' => is_array($actionPayload),
+        ]);
+
+        api_success('Mesaj işlendi.', [
+            'conversation_id' => $conversationId,
+            'reply' => $reply,
+            'mode' => $mode,
+            'provider' => (string)($settings['provider'] ?? ''),
+            'model' => (string)($settings['model'] ?? ''),
+            'remaining_limit' => $remainingAfter,
+            'message_id' => $assistantMessageId,
+            'created_at' => date('c'),
+            'action_payload' => $actionPayload,
+        ]);
+    }
+
     $systemPrompt = pusula_ai_chat_build_system_prompt($mode, $userContext, [
         'user_intent' => $userIntent,
         'moderation_reason' => (string)($moderation['reason'] ?? ''),
@@ -102,6 +174,7 @@ try {
         'provider' => (string)($settings['provider'] ?? ''),
         'model' => (string)($settings['model'] ?? ''),
         'knowledge_bundle' => $knowledgeBundle,
+        'trusted_context' => $trustedContext,
     ]);
 
     $recent = pusula_ai_chat_fetch_recent_messages($pdo, $conversationId, 8);
@@ -148,6 +221,7 @@ try {
     }
 
     $reply = trim((string)($providerResult['reply'] ?? ''));
+    $reply = pusula_ai_chat_enforce_reply_style($userIntent, $reply, $trustedContext);
     if ($reply === '') {
         pusula_ai_chat_log_usage($pdo, $userId, [
             'conversation_id' => $conversationId,
@@ -166,6 +240,12 @@ try {
 
     $inputTokens = max(0, (int)($providerResult['input_tokens'] ?? 0));
     $outputTokens = max(0, (int)($providerResult['output_tokens'] ?? 0));
+
+    pusula_ai_chat_debug_trace('provider_reply', [
+        'intent' => $userIntent,
+        'trusted_context_available' => !empty($trustedContext['available']),
+        'action_payload_generated' => is_array($actionPayload),
+    ]);
 
     $pdo->beginTransaction();
     try {
