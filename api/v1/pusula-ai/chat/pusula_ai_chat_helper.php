@@ -325,27 +325,8 @@ function pusula_ai_chat_resolve_navigation_target(string $message, array $knowle
     return null;
 }
 
-function pusula_ai_chat_is_navigation_request(string $message, array $knowledgeBundle = []): bool
+function pusula_ai_chat_build_navigation_reply_from_target(?array $target): string
 {
-    $text = mb_strtolower(trim($message), 'UTF-8');
-    if ($text === '') {
-        return false;
-    }
-
-    if (!pusula_ai_chat_message_has_navigation_verb($text)) {
-        return false;
-    }
-
-    if (pusula_ai_chat_contains_any($text, pusula_ai_chat_navigation_external_terms())) {
-        return false;
-    }
-
-    return is_array(pusula_ai_chat_resolve_navigation_target($text, $knowledgeBundle));
-}
-
-function pusula_ai_chat_build_navigation_reply(string $message): string
-{
-    $target = pusula_ai_chat_resolve_navigation_target($message);
     if (!is_array($target)) {
         return 'Hangi bölüme gitmek istiyorsun?';
     }
@@ -368,6 +349,82 @@ function pusula_ai_chat_build_navigation_reply(string $message): string
 
     $label = trim((string)($target['label'] ?? ''));
     return $label !== '' ? ($label . ' alanına geçebilirsin.') : 'Seni ilgili alana yönlendirebilirim.';
+}
+
+function pusula_ai_chat_resolve_navigation_action(string $message, array $knowledgeBundle = [], array $meta = []): array
+{
+    $intentHint = trim((string)($meta['intent'] ?? ''));
+    $debug = !empty($meta['debug']);
+    $text = mb_strtolower(trim($message), 'UTF-8');
+
+    $intentDetected = false;
+    if ($intentHint === 'navigation_request') {
+        $intentDetected = true;
+    } elseif (
+        $text !== ''
+        && pusula_ai_chat_message_has_navigation_verb($text)
+        && !pusula_ai_chat_contains_any($text, pusula_ai_chat_navigation_external_terms())
+    ) {
+        $intentDetected = true;
+    }
+
+    if ($debug && $intentDetected) {
+        pusula_ai_chat_debug_trace('navigation_intent_detected', [
+            'intent_hint' => $intentHint,
+            'message_length' => function_exists('mb_strlen') ? mb_strlen($message, 'UTF-8') : strlen($message),
+        ]);
+    }
+
+    $target = null;
+    if ($intentDetected) {
+        $target = pusula_ai_chat_resolve_navigation_target($message, $knowledgeBundle);
+        if ($debug && is_array($target)) {
+            pusula_ai_chat_debug_trace('navigation_target_resolved', [
+                'target' => (string)($target['target'] ?? ''),
+                'title' => (string)($target['title'] ?? ''),
+            ]);
+        }
+    }
+
+    $payload = null;
+    if (is_array($target)) {
+        $resolvedTarget = trim((string)($target['target'] ?? ''));
+        if ($resolvedTarget !== '') {
+            $payload = pusula_ai_chat_build_navigation_payload($resolvedTarget);
+        }
+
+        if ($debug) {
+            if (is_array($payload)) {
+                pusula_ai_chat_debug_trace('navigation_payload_generated', [
+                    'target' => (string)($payload['target'] ?? ''),
+                    'type' => (string)($payload['type'] ?? ''),
+                ]);
+            } else {
+                pusula_ai_chat_debug_trace('navigation_payload_missing_unexpected', [
+                    'target' => $resolvedTarget,
+                ]);
+            }
+        }
+    }
+
+    return [
+        'intent_detected' => $intentDetected,
+        'target' => $target,
+        'reply' => $intentDetected ? pusula_ai_chat_build_navigation_reply_from_target($target) : null,
+        'payload' => $payload,
+    ];
+}
+
+function pusula_ai_chat_is_navigation_request(string $message, array $knowledgeBundle = []): bool
+{
+    $resolved = pusula_ai_chat_resolve_navigation_action($message, $knowledgeBundle);
+    return !empty($resolved['intent_detected']) && is_array($resolved['target'] ?? null);
+}
+
+function pusula_ai_chat_build_navigation_reply(string $message, array $knowledgeBundle = []): string
+{
+    $resolved = pusula_ai_chat_resolve_navigation_action($message, $knowledgeBundle);
+    return (string)($resolved['reply'] ?? 'Hangi bölüme gitmek istiyorsun?');
 }
 
 function pusula_ai_chat_build_navigation_payload(string $target): ?array
@@ -1639,7 +1696,7 @@ function pusula_ai_chat_build_app_info_reply(array $trustedContext, array $knowl
 function pusula_ai_chat_build_intent_safe_reply(string $intent, array $trustedContext, array $knowledgeBundle = [], string $userMessage = ''): ?string
 {
     if ($intent === 'navigation_request') {
-        return pusula_ai_chat_build_navigation_reply($userMessage);
+        return pusula_ai_chat_build_navigation_reply($userMessage, $knowledgeBundle);
     }
 
     if ($intent === 'app_info') {
@@ -2446,10 +2503,6 @@ function pusula_ai_chat_detect_action_payload_from_bundle(string $message, array
         ? $knowledgeBundle['tools']
         : pusula_ai_tool_settings_defaults();
 
-    if ((int)($tools['tool_action_payload_enabled'] ?? 1) !== 1) {
-        return null;
-    }
-
     $intent = trim((string)($meta['intent'] ?? ''));
     if ($intent === '') {
         $intent = detectIntent($message);
@@ -2461,19 +2514,21 @@ function pusula_ai_chat_detect_action_payload_from_bundle(string $message, array
 
     $text = mb_strtolower(trim($message), 'UTF-8');
 
-    $navigationIntent = $intent === 'navigation_request' || pusula_ai_chat_is_navigation_request($text, $knowledgeBundle);
+    $navigationResolved = pusula_ai_chat_resolve_navigation_action($message, $knowledgeBundle, [
+        'intent' => $intent,
+        'debug' => !empty($meta['debug_navigation']),
+    ]);
+    $navigationIntent = !empty($navigationResolved['intent_detected']);
     if ($navigationIntent) {
-        $resolvedTarget = pusula_ai_chat_resolve_navigation_target($message, $knowledgeBundle);
-        if (is_array($resolvedTarget)) {
-            $target = trim((string)($resolvedTarget['target'] ?? ''));
-            if ($target !== '') {
-                $payload = pusula_ai_chat_build_navigation_payload($target);
-                if (is_array($payload)) {
-                    return $payload;
-                }
-            }
+        $payload = $navigationResolved['payload'] ?? null;
+        if (is_array($payload)) {
+            return $payload;
         }
 
+        return null;
+    }
+
+    if ((int)($tools['tool_action_payload_enabled'] ?? 1) !== 1) {
         return null;
     }
 

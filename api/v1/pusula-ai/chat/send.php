@@ -126,7 +126,26 @@ try {
         'trusted_context' => $trustedContext,
         'pdo' => $pdo,
         'user_id' => $userId,
+        'debug_navigation' => true,
     ]);
+
+    $navigationResolution = pusula_ai_chat_resolve_navigation_action($message, $knowledgeBundle, [
+        'intent' => $userIntent,
+        'debug' => true,
+    ]);
+    if ($userIntent === 'navigation_request' && is_array($navigationResolution['target'] ?? null) && !is_array($actionPayload)) {
+        $actionPayload = is_array($navigationResolution['payload'] ?? null)
+            ? $navigationResolution['payload']
+            : null;
+
+        if (!is_array($actionPayload)) {
+            pusula_ai_chat_debug_trace('navigation_payload_missing_unexpected', [
+                'intent' => $userIntent,
+                'target' => (string)(($navigationResolution['target']['target'] ?? '') ?: ''),
+                'source' => 'send_enforcement',
+            ]);
+        }
+    }
 
     pusula_ai_chat_debug_trace('pre_response', [
         'intent' => $userIntent,
@@ -185,6 +204,7 @@ try {
             'trusted_context' => $trustedContext,
             'pdo' => $pdo,
             'user_id' => $userId,
+            'debug_navigation' => true,
         ]);
     }
 
