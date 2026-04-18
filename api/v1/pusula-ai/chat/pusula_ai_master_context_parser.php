@@ -7,6 +7,15 @@ function pusula_ai_master_context_normalize_line(string $line): string
     return trim($line);
 }
 
+function pusula_ai_master_context_strip_parse_markers(string $text): string
+{
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $text = preg_replace('/^\s*#{1,6}\s+/um', '', $text) ?? $text;
+    $text = preg_replace('/^\s*(raw_question|raw_answer)\s*[:=]\s*/ium', '', $text) ?? $text;
+    $text = preg_replace('/^\s*\[[A-Z0-9_]+\]\s*$/um', '', $text) ?? $text;
+    return trim($text);
+}
+
 function pusula_ai_master_context_normalize_multiline(string $text): string
 {
     $text = str_replace(["\r\n", "\r"], "\n", $text);
@@ -22,6 +31,7 @@ function pusula_ai_master_context_normalize_multiline(string $text): string
     unset($line);
 
     $text = implode("\n", $lines);
+    $text = pusula_ai_master_context_strip_parse_markers($text);
     $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
 
     return trim($text);

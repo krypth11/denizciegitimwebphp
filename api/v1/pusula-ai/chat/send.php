@@ -37,12 +37,40 @@ try {
     $conversationId = (string)$validated['conversation_id'];
     $knowledgeBundle = pusula_ai_chat_get_knowledge_bundle($pdo);
 
+    $finalizeReply = static function (string $candidateReply, string $intentValue, string $userMessageValue): string {
+        $raw = trim($candidateReply);
+        $originalLen = function_exists('mb_strlen') ? mb_strlen($raw, 'UTF-8') : strlen($raw);
+
+        $sanitized = pusula_ai_sanitize_output($raw);
+        $markersRemoved = ($sanitized !== $raw);
+
+        $polished = pusula_ai_polish_response($sanitized, [
+            'intent' => $intentValue,
+            'user_message' => $userMessageValue,
+            'strict_preservation' => true,
+        ]);
+
+        $final = trim($polished !== '' ? $polished : $sanitized);
+        $finalLen = function_exists('mb_strlen') ? mb_strlen($final, 'UTF-8') : strlen($final);
+
+        pusula_ai_chat_debug_trace('response_finalize', [
+            'markers_removed' => $markersRemoved,
+            'polished' => ($polished !== $sanitized),
+            'strict_preserved' => true,
+            'original_len' => $originalLen,
+            'final_len' => $finalLen,
+        ]);
+
+        return $final;
+    };
+
     $conversationId = pusula_ai_chat_resolve_conversation($pdo, $userId, $conversationId, $mode, $message);
     $actionPayload = null;
 
     $policyHardBlock = pusula_ai_chat_detect_policy_hard_block($message);
     if (is_array($policyHardBlock)) {
         $reply = (string)($policyHardBlock['reply'] ?? pusula_ai_chat_policy_hard_block_reply());
+        $reply = $finalizeReply($reply, 'policy_hard_block', $message);
 
         $pdo->beginTransaction();
         try {
@@ -108,6 +136,7 @@ try {
 
     if (empty($moderation['allowed'])) {
         $reply = (string)($moderation['reply'] ?? pusula_ai_chat_rejection_text());
+        $reply = $finalizeReply($reply, $userIntent, $message);
         $actionPayload = null;
 
         $pdo->beginTransaction();
@@ -163,6 +192,7 @@ try {
         $reply = pusula_ai_chat_enforce_reply_style($userIntent, $intentSafeReply, $trustedContext);
         $reply = pusula_ai_chat_sanitize_reply_links($userIntent, $reply, $trustedContext);
         $reply = pusula_ai_chat_enforce_action_card_language($userIntent, $reply, is_array($actionPayload));
+        $reply = $finalizeReply($reply, $userIntent, $message);
         $inputTokens = 0;
         $outputTokens = 0;
 
@@ -270,6 +300,7 @@ try {
     $reply = pusula_ai_chat_enforce_reply_style($userIntent, $reply, $trustedContext);
     $reply = pusula_ai_chat_sanitize_reply_links($userIntent, $reply, $trustedContext);
     $reply = pusula_ai_chat_enforce_action_card_language($userIntent, $reply, is_array($actionPayload));
+    $reply = $finalizeReply($reply, $userIntent, $message);
     if ($reply === '') {
         pusula_ai_chat_log_usage($pdo, $userId, [
             'conversation_id' => $conversationId,

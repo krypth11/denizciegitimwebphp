@@ -1515,6 +1515,148 @@ function pusula_ai_chat_trim_to_sentence_count(string $text, int $maxSentences):
     return trim(implode(' ', array_slice($parts, 0, $maxSentences)));
 }
 
+function pusula_ai_sanitize_output(string $text): string
+{
+    $original = (string)$text;
+    $clean = str_replace(["\r\n", "\r"], "\n", $original);
+
+    // Markdown heading marker sızıntısını engelle.
+    $clean = preg_replace('/^\s*##\s+/um', '', $clean) ?? $clean;
+    $clean = preg_replace('/^\s*#\s+/um', '', $clean) ?? $clean;
+
+    // Parse/debug sızıntılarını engelle.
+    $clean = preg_replace('/\braw_question\b\s*[:=]?/iu', '', $clean) ?? $clean;
+    $clean = preg_replace('/\braw_answer\b\s*[:=]?/iu', '', $clean) ?? $clean;
+    $clean = preg_replace('/^\s*(?:debug|trace|log)\s*[:=].*$/ium', '', $clean) ?? $clean;
+    $clean = preg_replace('/^\s*\[[A-Z0-9_]+\]\s*$/um', '', $clean) ?? $clean;
+
+    // Markdown kalıntıları.
+    $clean = preg_replace('/^\s*[-*]\s{0,2}#+\s+/um', '- ', $clean) ?? $clean;
+    $clean = preg_replace('/`{3,}[\s\S]*?`{3,}/u', '', $clean) ?? $clean;
+
+    // Boşluk/boş satır normalizasyonu.
+    $clean = preg_replace('/[ \t]{2,}/u', ' ', $clean) ?? $clean;
+    $clean = preg_replace('/\n{3,}/u', "\n\n", $clean) ?? $clean;
+    $clean = preg_replace('/\s+([,.;:!?])/u', '$1', $clean) ?? $clean;
+    $clean = trim($clean);
+
+    return $clean;
+}
+
+function pusula_ai_chat_is_app_info_polish_eligible_question(string $message): bool
+{
+    $text = mb_strtolower(trim($message), 'UTF-8');
+    if ($text === '') {
+        return false;
+    }
+
+    $allow = [
+        'denizci eğitim nedir',
+        'uygulamada neler var',
+        'premium ne açıyor',
+        'word game nedir',
+        'kart oyunu nedir',
+        'offline içerikler nedir',
+        'topluluk alanı nedir',
+        'pusula ai nedir',
+    ];
+
+    foreach ($allow as $term) {
+        if (mb_strpos($text, $term, 0, 'UTF-8') !== false) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function pusula_ai_chat_polish_replace_synonyms(string $text): string
+{
+    // Strict preservation: sadece anlamı birebir koruyan yüzey değişimleri.
+    $map = [
+        'sağlar' => 'sunar',
+        'geliştirilmiştir' => 'hazırlanmıştır',
+        'kullanıcılara' => 'sana',
+    ];
+
+    $out = $text;
+    foreach ($map as $from => $to) {
+        $out = preg_replace('/\b' . preg_quote($from, '/') . '\b/iu', $to, $out) ?? $out;
+    }
+
+    return $out;
+}
+
+function pusula_ai_chat_sentence_split(string $text): array
+{
+    $parts = preg_split('/(?<=[.!?])\s+/u', trim($text)) ?: [];
+    $parts = array_values(array_filter(array_map(static fn($p) => trim((string)$p), $parts), static fn($p) => $p !== ''));
+    return $parts;
+}
+
+function pusula_ai_chat_dedupe_sentences(array $sentences): array
+{
+    $out = [];
+    $seen = [];
+    foreach ($sentences as $sentence) {
+        $key = mb_strtolower(preg_replace('/\s+/u', ' ', trim((string)$sentence)) ?? trim((string)$sentence), 'UTF-8');
+        if ($key === '' || isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $out[] = trim((string)$sentence);
+    }
+
+    return $out;
+}
+
+function pusula_ai_polish_response(string $text, array $meta = []): string
+{
+    $original = trim((string)$text);
+    if ($original === '') {
+        return '';
+    }
+
+    $userMessage = mb_strtolower(trim((string)($meta['user_message'] ?? '')), 'UTF-8');
+    if ($userMessage === 'selam') {
+        return 'Merhaba 👋 Sana nasıl yardımcı olayım?';
+    }
+    if ($userMessage === 'merhaba') {
+        return 'Merhaba, bugün neye ihtiyacın var?';
+    }
+
+    $intent = trim((string)($meta['intent'] ?? ''));
+    $strict = !isset($meta['strict_preservation']) || !empty($meta['strict_preservation']);
+    $isAppInfoScope = ($intent === 'app_info') || pusula_ai_chat_is_app_info_polish_eligible_question((string)($meta['user_message'] ?? ''));
+
+    $polished = pusula_ai_sanitize_output($original);
+    if ($polished === '') {
+        return '';
+    }
+
+    $polished = preg_replace('/\s+/u', ' ', $polished) ?? $polished;
+    $polished = trim($polished);
+
+    $sentences = pusula_ai_chat_sentence_split($polished);
+    $sentences = pusula_ai_chat_dedupe_sentences($sentences);
+    if (!empty($sentences)) {
+        $polished = implode(' ', $sentences);
+    }
+
+    // Uzun metni bilgi kaybı olmadan okunabilir seviyeye indir.
+    $sentences = pusula_ai_chat_sentence_split($polished);
+    if (count($sentences) > 5) {
+        $polished = implode(' ', array_slice($sentences, 0, 5));
+    }
+
+    if ($strict && $isAppInfoScope) {
+        $polished = pusula_ai_chat_polish_replace_synonyms($polished);
+    }
+
+    $polished = preg_replace('/\s{2,}/u', ' ', trim($polished)) ?? trim($polished);
+    return $polished;
+}
+
 function pusula_ai_chat_reply_has_exam_question_text(string $reply): bool
 {
     $text = mb_strtolower(trim($reply), 'UTF-8');
