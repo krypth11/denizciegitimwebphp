@@ -147,7 +147,7 @@ try {
         ]);
     }
 
-    $intentSafeReply = pusula_ai_chat_build_intent_safe_reply($userIntent, $trustedContext, $knowledgeBundle);
+    $intentSafeReply = pusula_ai_chat_build_intent_safe_reply($userIntent, $trustedContext, $knowledgeBundle, $message);
 
     if ($userIntent === 'exam_request' && !is_array($actionPayload)) {
         $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle, [

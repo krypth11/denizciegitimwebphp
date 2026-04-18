@@ -51,6 +51,16 @@ function pusula_ai_knowledge_defaults(): array
     ];
 }
 
+function pusula_ai_knowledge_get_master_context_text(array $knowledge): string
+{
+    $enabled = ((int)($knowledge['master_context_enabled'] ?? 0) === 1);
+    if (!$enabled) {
+        return '';
+    }
+
+    return pusula_ai_knowledge_normalize_multiline_text($knowledge['master_context_text'] ?? '', 60000);
+}
+
 function pusula_ai_tool_settings_defaults(): array
 {
     return [

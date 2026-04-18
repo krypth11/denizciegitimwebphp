@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/bootstrap.php';
 require_once dirname(__DIR__, 4) . '/includes/pusula_ai_knowledge_helper.php';
 require_once dirname(__DIR__) . '/tools/pusula_ai_tools_helper.php';
+require_once __DIR__ . '/pusula_ai_master_context_parser.php';
 
 if (!defined('PUSULA_AI_CHAT_MAX_MESSAGE_LEN')) {
     define('PUSULA_AI_CHAT_MAX_MESSAGE_LEN', 1500);
@@ -972,6 +973,192 @@ function pusula_ai_chat_json_encode($data): string
     return is_string($json) ? $json : '{}';
 }
 
+function pusula_ai_chat_master_context_truncate(string $text, int $limit = 900): string
+{
+    $text = trim($text);
+    if ($text === '' || $limit < 1) {
+        return '';
+    }
+
+    if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+        if (mb_strlen($text, 'UTF-8') <= $limit) {
+            return $text;
+        }
+        return rtrim(mb_substr($text, 0, $limit, 'UTF-8')) . '…';
+    }
+
+    if (strlen($text) <= $limit) {
+        return $text;
+    }
+
+    return rtrim(substr($text, 0, $limit)) . '…';
+}
+
+function pusula_ai_chat_master_context_unique_merge(array ...$groups): array
+{
+    $out = [];
+    $seen = [];
+
+    foreach ($groups as $blocks) {
+        foreach ($blocks as $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+
+            $q = trim((string)($block['question'] ?? $block['raw_question'] ?? ''));
+            $t = trim((string)($block['section_type'] ?? 'generic_knowledge'));
+            $key = mb_strtolower($q . '|' . $t, 'UTF-8');
+            if ($key !== '' && isset($seen[$key])) {
+                continue;
+            }
+            if ($key !== '') {
+                $seen[$key] = true;
+            }
+            $out[] = $block;
+        }
+    }
+
+    return $out;
+}
+
+function pusula_ai_chat_master_context_select_by_types(array $blocks, array $types, int $limit = 5): array
+{
+    $filtered = array_values(array_filter($blocks, static function ($block) use ($types): bool {
+        $type = (string)($block['section_type'] ?? '');
+        return in_array($type, $types, true);
+    }));
+
+    if ($limit > 0) {
+        return array_slice($filtered, 0, $limit);
+    }
+
+    return $filtered;
+}
+
+function pusula_ai_chat_master_context_blocks_to_prompt_lines(array $blocks, int $limit = 5, int $maxAnswerLen = 900): array
+{
+    $lines = [];
+    $picked = array_slice($blocks, 0, max(0, $limit));
+
+    foreach ($picked as $block) {
+        $question = trim((string)($block['question'] ?? $block['raw_question'] ?? ''));
+        $answer = trim((string)($block['answer'] ?? $block['raw_answer'] ?? ''));
+        $type = trim((string)($block['section_type'] ?? 'generic_knowledge'));
+
+        if ($question === '' && $answer === '') {
+            continue;
+        }
+
+        $lines[] = '- [' . ($type !== '' ? $type : 'generic_knowledge') . ']';
+        if ($question !== '') {
+            $lines[] = '  Soru: ' . pusula_ai_chat_master_context_truncate($question, 240);
+        }
+        if ($answer !== '') {
+            $lines[] = '  Cevap: ' . pusula_ai_chat_master_context_truncate($answer, $maxAnswerLen);
+        }
+    }
+
+    return $lines;
+}
+
+function pusula_ai_chat_prepare_master_context_layers(array $knowledge, string $userMessage, string $intent): array
+{
+    $enabled = ((int)($knowledge['master_context_enabled'] ?? 0) === 1);
+    $text = trim((string)($knowledge['master_context_text'] ?? ''));
+
+    if (!$enabled || $text === '') {
+        return [
+            'enabled' => $enabled,
+            'available' => false,
+            'parse_fallback_used' => false,
+            'parsed_block_count' => 0,
+            'forbidden_blocks' => [],
+            'behavior_blocks' => [],
+            'app_info_blocks' => [],
+            'relevant_blocks' => [],
+            'selected_titles' => [],
+            'selected_types' => [],
+            'fallback_raw' => '',
+        ];
+    }
+
+    $blocks = pusula_ai_parse_master_context($text);
+    $parseFallback = empty($blocks);
+
+    if ($parseFallback) {
+        return [
+            'enabled' => true,
+            'available' => true,
+            'parse_fallback_used' => true,
+            'parsed_block_count' => 0,
+            'forbidden_blocks' => [],
+            'behavior_blocks' => [],
+            'app_info_blocks' => [],
+            'relevant_blocks' => [],
+            'selected_titles' => [],
+            'selected_types' => [],
+            'fallback_raw' => pusula_ai_chat_master_context_truncate($text, 5000),
+        ];
+    }
+
+    $forbidden = pusula_ai_extract_rule_blocks($blocks);
+    $behavior = pusula_ai_extract_behavior_blocks($blocks);
+    $appInfo = pusula_ai_extract_app_info_blocks($blocks);
+    $relevant = pusula_ai_find_relevant_master_context_blocks($blocks, $userMessage, 5);
+
+    if ($intent === 'app_info') {
+        $relevant = pusula_ai_chat_master_context_unique_merge($relevant, array_slice($appInfo, 0, 5));
+    } elseif ($intent === 'stats_summary' || $intent === 'weakness_analysis') {
+        $statsBlocks = pusula_ai_chat_master_context_select_by_types($blocks, ['stats_rule', 'behavior_rule', 'action_rule'], 4);
+        $relevant = pusula_ai_chat_master_context_unique_merge($relevant, $statsBlocks);
+    } elseif ($intent === 'exam_request' || $intent === 'exam_review') {
+        $examBlocks = pusula_ai_chat_master_context_select_by_types($blocks, ['exam_rule', 'action_rule', 'behavior_rule'], 5);
+        $relevant = pusula_ai_chat_master_context_unique_merge($relevant, $examBlocks);
+    } elseif ($intent === 'motivation' || $intent === 'emotional_support') {
+        $motivationBlocks = pusula_ai_chat_master_context_select_by_types($blocks, ['motivation_rule', 'behavior_rule', 'persona_rule'], 5);
+        $relevant = pusula_ai_chat_master_context_unique_merge($relevant, $motivationBlocks);
+    }
+
+    $messageNorm = mb_strtolower(trim($userMessage), 'UTF-8');
+    if ($messageNorm !== '' && (
+        mb_strpos($messageNorm, 'link', 0, 'UTF-8') !== false
+        || mb_strpos($messageNorm, 'url', 0, 'UTF-8') !== false
+        || mb_strpos($messageNorm, 'harici', 0, 'UTF-8') !== false
+        || mb_strpos($messageNorm, 'bağlantı', 0, 'UTF-8') !== false
+    )) {
+        $relevant = pusula_ai_chat_master_context_unique_merge($relevant, array_slice($forbidden, 0, 5));
+    }
+
+    $relevant = array_slice($relevant, 0, 5);
+
+    $selectedTitles = [];
+    $selectedTypes = [];
+    foreach ($relevant as $block) {
+        $title = trim((string)($block['question'] ?? $block['raw_question'] ?? ''));
+        if ($title !== '') {
+            $selectedTitles[] = $title;
+        }
+        $type = trim((string)($block['section_type'] ?? 'generic_knowledge'));
+        if ($type !== '') {
+            $selectedTypes[] = $type;
+        }
+    }
+
+    return [
+        'enabled' => true,
+        'available' => true,
+        'parse_fallback_used' => false,
+        'parsed_block_count' => count($blocks),
+        'forbidden_blocks' => $forbidden,
+        'behavior_blocks' => $behavior,
+        'app_info_blocks' => $appInfo,
+        'relevant_blocks' => $relevant,
+        'selected_titles' => array_values(array_unique($selectedTitles)),
+        'selected_types' => array_values(array_unique($selectedTypes)),
+        'fallback_raw' => '',
+    ];
+}
+
 function pusula_ai_chat_trusted_context_is_empty($value): bool
 {
     if (!is_array($value)) {
@@ -1102,7 +1289,7 @@ function pusula_ai_chat_build_exam_request_reply(array $trustedContext): string
     return 'İstersen seviyene uygun ' . $questionCount . ' soruluk bir denemeye yönlendirebilirim.';
 }
 
-function pusula_ai_chat_build_app_info_reply(array $trustedContext, array $knowledgeBundle = []): string
+function pusula_ai_chat_build_app_info_reply(array $trustedContext, array $knowledgeBundle = [], string $userMessage = ''): string
 {
     $knowledge = is_array($knowledgeBundle['knowledge'] ?? null)
         ? $knowledgeBundle['knowledge']
@@ -1111,13 +1298,35 @@ function pusula_ai_chat_build_app_info_reply(array $trustedContext, array $knowl
     $masterContextEnabled = (int)($knowledge['master_context_enabled'] ?? 0) === 1;
     $masterContextText = trim((string)($knowledge['master_context_text'] ?? ''));
     if ($masterContextEnabled && $masterContextText !== '') {
-        $paragraphs = preg_split('/\n\s*\n/u', $masterContextText) ?: [$masterContextText];
-        $paragraphs = array_values(array_filter(array_map('trim', $paragraphs), static fn($p) => $p !== ''));
-        if (!empty($paragraphs)) {
-            $picked = implode(' ', array_slice($paragraphs, 0, 2));
-            $picked = function_exists('mb_substr') ? mb_substr($picked, 0, 550, 'UTF-8') : substr($picked, 0, 550);
-            if (trim($picked) !== '') {
-                return trim($picked);
+        $layers = pusula_ai_chat_prepare_master_context_layers($knowledge, $userMessage, 'app_info');
+        if (!empty($layers['parse_fallback_used'])) {
+            pusula_ai_chat_debug_trace('master_context_parse_failed', [
+                'intent' => 'app_info',
+                'parse_fallback_used' => true,
+            ]);
+        }
+
+        $appBlocks = is_array($layers['app_info_blocks'] ?? null) ? $layers['app_info_blocks'] : [];
+        $relevantBlocks = is_array($layers['relevant_blocks'] ?? null) ? $layers['relevant_blocks'] : [];
+        $pickedBlocks = pusula_ai_chat_master_context_unique_merge($relevantBlocks, $appBlocks);
+
+        $answerSegments = [];
+        foreach (array_slice($pickedBlocks, 0, 3) as $block) {
+            $answer = trim((string)($block['answer'] ?? ''));
+            if ($answer === '') {
+                continue;
+            }
+            $answerSegments[] = pusula_ai_chat_master_context_truncate($answer, 320);
+        }
+
+        if (!empty($answerSegments)) {
+            return trim(implode(' ', $answerSegments));
+        }
+
+        if (!empty($layers['parse_fallback_used'])) {
+            $fallbackRaw = trim((string)($layers['fallback_raw'] ?? ''));
+            if ($fallbackRaw !== '') {
+                return pusula_ai_chat_master_context_truncate($fallbackRaw, 550);
             }
         }
     }
@@ -1150,10 +1359,10 @@ function pusula_ai_chat_build_app_info_reply(array $trustedContext, array $knowl
     return trim($joined);
 }
 
-function pusula_ai_chat_build_intent_safe_reply(string $intent, array $trustedContext, array $knowledgeBundle = []): ?string
+function pusula_ai_chat_build_intent_safe_reply(string $intent, array $trustedContext, array $knowledgeBundle = [], string $userMessage = ''): ?string
 {
     if ($intent === 'app_info') {
-        return pusula_ai_chat_build_app_info_reply($trustedContext, $knowledgeBundle);
+        return pusula_ai_chat_build_app_info_reply($trustedContext, $knowledgeBundle, $userMessage);
     }
 
     if ($intent === 'stats_summary' || $intent === 'weakness_analysis') {
@@ -1504,6 +1713,17 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
     $wantsDetailed = !empty($meta['user_wants_detailed']);
     $isShortUserMessage = $userMessageLength > 0 && $userMessageLength <= 45;
     $userMessage = trim((string)($meta['user_message'] ?? ''));
+    $masterContextLayers = pusula_ai_chat_prepare_master_context_layers($knowledge, $userMessage, $intent);
+
+    if (!empty($masterContextLayers['enabled'])) {
+        pusula_ai_chat_debug_trace('master_context_retrieval', [
+            'intent' => $intent,
+            'parsed_block_count' => (int)($masterContextLayers['parsed_block_count'] ?? 0),
+            'selected_block_titles' => $masterContextLayers['selected_titles'] ?? [],
+            'selected_block_types' => $masterContextLayers['selected_types'] ?? [],
+            'parse_fallback_used' => !empty($masterContextLayers['parse_fallback_used']),
+        ]);
+    }
 
     $lines = [];
 
@@ -1527,15 +1747,43 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
     $lines[] = 'MASTER_CONTEXT_DOCUMENT ve Bilgi Bankası kaynaklarında olmayan bir özelliği gerçekmiş gibi yazma.';
     $lines[] = '“Uygulamada ne yapabilirim?” gibi sorularda genel internet cevabı verme; yalnızca Denizci Eğitim uygulamasını anlat.';
 
-    $masterContextEnabled = (int)($knowledge['master_context_enabled'] ?? 0) === 1;
-    $masterContextText = trim((string)($knowledge['master_context_text'] ?? ''));
-    if ($masterContextEnabled && $masterContextText !== '') {
-        $lines[] = '[B_MASTER_CONTEXT_DOCUMENT]';
-        $lines[] = 'Bu belge uygulama bilgisinde yüksek öncelikli kaynaktır.';
-        $lines[] = 'Kullanıcı uygulama, özellikler, modüller, premium, offline, topluluk, oyunlar veya uygulama işleyişini sorarsa önce bu belgeyi temel al.';
-        $lines[] = 'Belgede cevap varsa önceliği bu belgeye ver. Belge dışında kalan bilgileri gerçekmiş gibi uydurma.';
-        $lines[] = 'MASTER_CONTEXT_DOCUMENT:';
-        $lines[] = $masterContextText;
+    if (!empty($masterContextLayers['available'])) {
+        $forbiddenLines = pusula_ai_chat_master_context_blocks_to_prompt_lines((array)($masterContextLayers['forbidden_blocks'] ?? []), 8, 800);
+        if (!empty($forbiddenLines)) {
+            $lines[] = '[B_MASTER_FORBIDDEN_RULES]';
+            $lines[] = 'Aşağıdaki yasak/risk kuralları yüksek önceliklidir. Link/URL/harici kaynak yönlendirmesinde bu katmana uy.';
+            $lines = array_merge($lines, $forbiddenLines);
+        }
+
+        $behaviorLines = pusula_ai_chat_master_context_blocks_to_prompt_lines((array)($masterContextLayers['behavior_blocks'] ?? []), 8, 700);
+        if (!empty($behaviorLines)) {
+            $lines[] = '[B_MASTER_BEHAVIOR_RULES]';
+            $lines[] = 'Aşağıdaki davranış/persona/motivasyon kuralları yanıt tarzına doğrudan uygulanmalıdır.';
+            $lines = array_merge($lines, $behaviorLines);
+        }
+
+        $appInfoLines = pusula_ai_chat_master_context_blocks_to_prompt_lines((array)($masterContextLayers['app_info_blocks'] ?? []), 8, 700);
+        if (!empty($appInfoLines)) {
+            $lines[] = '[B_MASTER_APP_INFO_BLOCKS]';
+            $lines[] = 'Uygulama/premium/özellik sorularında öncelik bu bloklardadır.';
+            $lines = array_merge($lines, $appInfoLines);
+        }
+
+        $relevantLines = pusula_ai_chat_master_context_blocks_to_prompt_lines((array)($masterContextLayers['relevant_blocks'] ?? []), 5, 800);
+        if (!empty($relevantLines)) {
+            $lines[] = '[B_MASTER_RELEVANT_QA_BLOCKS]';
+            $lines[] = 'Kullanıcı mesajı için seçilen en ilgili soru-cevap blokları:';
+            $lines = array_merge($lines, $relevantLines);
+        }
+
+        if (!empty($masterContextLayers['parse_fallback_used'])) {
+            $fallbackRaw = trim((string)($masterContextLayers['fallback_raw'] ?? ''));
+            if ($fallbackRaw !== '') {
+                $lines[] = '[B_MASTER_CONTEXT_FALLBACK_RAW]';
+                $lines[] = 'Parser başarısız olduğu için güvenli fallback olarak ham metnin kısaltılmış hali kullanıldı:';
+                $lines[] = $fallbackRaw;
+            }
+        }
     }
 
     $lines[] = '[C_IDENTITY]';
