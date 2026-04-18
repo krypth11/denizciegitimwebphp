@@ -207,6 +207,63 @@ function pusula_ai_master_context_tokenize(string $text): array
     return array_keys($tokens);
 }
 
+function pusula_ai_master_context_feature_targets(): array
+{
+    return [
+        'study' => ['çalışma alanı', 'calisma alani', 'study'],
+        'statistics' => ['istatistik', 'statistics', 'performans'],
+        'community' => ['topluluk', 'community'],
+        'offline' => ['offline', 'çevrimdışı', 'cevrimdisi', 'çevrim dışı', 'cevrim disi'],
+        'maritime_english' => ['maritime english', 'maritime_english', 'denizcilik ingilizcesi'],
+        'word_game' => ['word game', 'word_game', 'kelime oyunu'],
+        'card_game' => ['card game', 'card_game', 'kart oyunu'],
+        'exams' => ['deneme', 'sınav', 'sinav', 'exams', 'deneme alanı'],
+        'pusula_ai' => ['pusula ai', 'pusula_ai'],
+    ];
+}
+
+function pusula_ai_master_context_detect_targets(string $text): array
+{
+    $normalized = pusula_ai_master_context_normalize_for_match($text);
+    if ($normalized === '') {
+        return [];
+    }
+
+    $found = [];
+    foreach (pusula_ai_master_context_feature_targets() as $target => $terms) {
+        foreach ($terms as $term) {
+            $needle = pusula_ai_master_context_normalize_for_match((string)$term);
+            if ($needle !== '' && mb_strpos($normalized, $needle, 0, 'UTF-8') !== false) {
+                $found[$target] = true;
+                break;
+            }
+        }
+    }
+
+    return array_keys($found);
+}
+
+function pusula_ai_master_context_is_general_app_block(string $questionNorm): bool
+{
+    if ($questionNorm === '') {
+        return false;
+    }
+
+    if (mb_strpos($questionNorm, 'uygulama nedir', 0, 'UTF-8') !== false) {
+        return true;
+    }
+
+    if (mb_strpos($questionNorm, 'denizci eğitim uygulaması', 0, 'UTF-8') !== false) {
+        return true;
+    }
+
+    if (mb_strpos($questionNorm, 'uygulamada neler var', 0, 'UTF-8') !== false) {
+        return true;
+    }
+
+    return false;
+}
+
 function pusula_ai_find_relevant_master_context_blocks(array $blocks, string $userMessage, int $limit = 5): array
 {
     if (empty($blocks)) {
@@ -217,6 +274,8 @@ function pusula_ai_find_relevant_master_context_blocks(array $blocks, string $us
     $messageNorm = pusula_ai_master_context_normalize_for_match($userMessage);
     $messageTokens = pusula_ai_master_context_tokenize($userMessage);
     $messageTokenMap = array_fill_keys($messageTokens, true);
+    $messageTargets = pusula_ai_master_context_detect_targets($userMessage);
+    $messageTargetMap = array_fill_keys($messageTargets, true);
 
     $intentBoosts = [
         'premium' => ['premium_info', 'app_info', 'feature_info'],
@@ -242,14 +301,22 @@ function pusula_ai_find_relevant_master_context_blocks(array $blocks, string $us
 
         $qNorm = pusula_ai_master_context_normalize_for_match($question);
         $aNorm = pusula_ai_master_context_normalize_for_match($answer);
+        $blockTargets = pusula_ai_master_context_detect_targets($question . ' ' . $answer);
+        $blockTargetMap = array_fill_keys($blockTargets, true);
 
         $score = 0.0;
         if ($messageNorm !== '') {
+            if ($qNorm === $messageNorm) {
+                $score += 90;
+            }
             if ($qNorm !== '' && mb_strpos($qNorm, $messageNorm, 0, 'UTF-8') !== false) {
-                $score += 14;
+                $score += 24;
             }
             if ($aNorm !== '' && mb_strpos($aNorm, $messageNorm, 0, 'UTF-8') !== false) {
                 $score += 6;
+            }
+            if ($qNorm !== '' && mb_strpos($messageNorm, $qNorm, 0, 'UTF-8') !== false) {
+                $score += 12;
             }
         }
 
@@ -264,6 +331,37 @@ function pusula_ai_find_relevant_master_context_blocks(array $blocks, string $us
         foreach ($aTokens as $token) {
             if (isset($messageTokenMap[$token])) {
                 $score += 1.0;
+            }
+        }
+
+        if (!empty($messageTargetMap)) {
+            $matchingTargetCount = 0;
+            foreach ($blockTargetMap as $target => $_) {
+                if (isset($messageTargetMap[$target])) {
+                    $matchingTargetCount++;
+                }
+            }
+
+            if ($matchingTargetCount > 0) {
+                $score += 28.0 * $matchingTargetCount;
+                if ($qNorm !== '') {
+                    foreach (array_keys($messageTargetMap) as $target) {
+                        foreach ((array)(pusula_ai_master_context_feature_targets()[$target] ?? []) as $term) {
+                            $needle = pusula_ai_master_context_normalize_for_match((string)$term);
+                            if ($needle !== '' && mb_strpos($qNorm, $needle, 0, 'UTF-8') !== false) {
+                                $score += 8.0;
+                                break;
+                            }
+                        }
+                    }
+                }
+            } else {
+                if (in_array($sectionType, ['app_info', 'feature_info', 'premium_info'], true)) {
+                    $score -= 16.0;
+                }
+                if (pusula_ai_master_context_is_general_app_block($qNorm)) {
+                    $score -= 20.0;
+                }
             }
         }
 

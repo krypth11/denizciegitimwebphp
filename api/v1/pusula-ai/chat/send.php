@@ -118,6 +118,19 @@ try {
         $userIntent = $normalizedIntent;
     }
 
+    $navigationResolution = pusula_ai_chat_resolve_navigation_action($message, $knowledgeBundle, [
+        'intent' => $userIntent,
+        'debug' => true,
+    ]);
+    $navigationTarget = is_array($navigationResolution['target'] ?? null)
+        ? (string)(($navigationResolution['target']['target'] ?? '') ?: '')
+        : '';
+
+    // HARD PRIORITY: navigation fiili + target çözüldüyse intent kesin navigation_request olmalı.
+    if (!empty($navigationResolution['intent_detected']) && $navigationTarget !== '') {
+        $userIntent = 'navigation_request';
+    }
+
     $userContext = pusula_ai_chat_fetch_user_context($pdo, $userId);
     $trustedContext = pusula_ai_chat_build_trusted_context($pdo, $userId, $userIntent, $knowledgeBundle, $message);
     $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle, [
@@ -129,10 +142,6 @@ try {
         'debug_navigation' => true,
     ]);
 
-    $navigationResolution = pusula_ai_chat_resolve_navigation_action($message, $knowledgeBundle, [
-        'intent' => $userIntent,
-        'debug' => true,
-    ]);
     if ($userIntent === 'navigation_request' && is_array($navigationResolution['target'] ?? null)) {
         $resolvedNavigationTarget = (string)(($navigationResolution['target']['target'] ?? '') ?: '');
 
@@ -156,6 +165,29 @@ try {
             ]);
         }
     }
+
+    $selectedBlockTitles = [];
+    $selectedBlockCount = 0;
+    $masterContextText = trim((string)(($knowledgeBundle['knowledge']['master_context_text'] ?? '') ?: ''));
+    if ($masterContextText !== '') {
+        $masterLayersDebug = pusula_ai_chat_prepare_master_context_layers(
+            (array)($knowledgeBundle['knowledge'] ?? []),
+            $message,
+            $userIntent
+        );
+        $selectedBlockTitles = is_array($masterLayersDebug['selected_titles'] ?? null)
+            ? $masterLayersDebug['selected_titles']
+            : [];
+        $selectedBlockCount = (int)($masterLayersDebug['selected_block_count'] ?? count($selectedBlockTitles));
+    }
+
+    pusula_ai_chat_debug_trace('intent_resolution', [
+        'resolved_intent' => $userIntent,
+        'resolved_target' => $navigationTarget,
+        'selected_block_titles' => $selectedBlockTitles,
+        'selected_block_count' => $selectedBlockCount,
+        'navigation_payload_generated' => is_array($actionPayload),
+    ]);
 
     pusula_ai_chat_debug_trace('pre_response', [
         'intent' => $userIntent,

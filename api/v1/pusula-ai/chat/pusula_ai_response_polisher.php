@@ -301,7 +301,7 @@ function pusula_ai_response_polisher_polish(string $text, array $meta = []): str
     $normalized = trim($normalized);
 
     // App info / premium sorularında liste önceliği.
-    if ($intent === 'app_info' || $isPremiumAsk) {
+    if (in_array($intent, ['app_info', 'general_app_info', 'feature_info'], true) || $isPremiumAsk) {
         $list = pusula_ai_response_polisher_extract_comma_list($normalized);
         if (is_array($list)) {
             $intro = trim((string)($list['intro'] ?? ''));
