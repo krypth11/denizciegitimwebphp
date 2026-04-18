@@ -113,7 +113,7 @@ try {
 
     $moderation = pusula_ai_chat_moderate_message($message);
     $userIntent = trim((string)($moderation['intent'] ?? ''));
-    $normalizedIntent = detectIntent($message);
+    $normalizedIntent = detectIntent($message, $knowledgeBundle);
     if ($userIntent === '') {
         $userIntent = $normalizedIntent;
     }

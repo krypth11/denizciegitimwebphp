@@ -4,6 +4,7 @@ require_once dirname(__DIR__) . '/bootstrap.php';
 require_once dirname(__DIR__, 4) . '/includes/pusula_ai_knowledge_helper.php';
 require_once dirname(__DIR__) . '/tools/pusula_ai_tools_helper.php';
 require_once __DIR__ . '/pusula_ai_master_context_parser.php';
+require_once __DIR__ . '/pusula_ai_response_polisher.php';
 
 if (!defined('PUSULA_AI_CHAT_MAX_MESSAGE_LEN')) {
     define('PUSULA_AI_CHAT_MAX_MESSAGE_LEN', 1500);
@@ -127,6 +128,273 @@ function pusula_ai_chat_contains_any(string $text, array $terms): bool
     return false;
 }
 
+function pusula_ai_chat_navigation_verbs(): array
+{
+    return ['gönder', 'götür', 'aç', 'yönlendir', 'geç', 'gir', 'başlat', 'git'];
+}
+
+function pusula_ai_chat_navigation_external_terms(): array
+{
+    return [
+        'site', 'web', 'website', 'internet', 'tarayıcı', 'browser', 'youtube', 'telegram',
+        'whatsapp', 'instagram', 'x.com', 'twitter', 'google', 'link', 'url', 'kanal',
+    ];
+}
+
+function pusula_ai_chat_navigation_target_definitions(): array
+{
+    return [
+        'study' => [
+            'title' => 'Çalışma Alanına Git',
+            'label' => 'Çalışma Alanı',
+            'terms' => [
+                'study', 'çalışma alanı', 'calisma alani', 'çalışma alanına', 'calisma alanina',
+                'çalışma alanını', 'calisma alanini', 'çalışma', 'calisma',
+            ],
+        ],
+        'exams' => [
+            'title' => 'Deneme Alanına Git',
+            'label' => 'Deneme Alanı',
+            'terms' => [
+                'exams', 'deneme', 'denemeye', 'deneme alanı', 'deneme alanına', 'deneme alanını',
+                'sınav', 'sinav', 'sınava', 'sinava', 'mock exam',
+            ],
+        ],
+        'statistics' => [
+            'title' => 'İstatistiklere Git',
+            'label' => 'İstatistikler',
+            'terms' => [
+                'statistics', 'istatistik', 'istatistikler', 'istatistikleri', 'istatistiklere',
+                'istatistiklerime', 'performans',
+            ],
+        ],
+        'community' => [
+            'title' => 'Topluluk Alanına Git',
+            'label' => 'Topluluk',
+            'terms' => ['community', 'topluluk', 'topluluğu', 'toplulugu', 'topluluğa', 'topluluga'],
+        ],
+        'word_game' => [
+            'title' => 'Kelime Oyununa Git',
+            'label' => 'Kelime Oyunu',
+            'terms' => ['word_game', 'word game', 'kelime oyunu', 'kelime oyununa', 'kelime oyununu'],
+        ],
+        'card_game' => [
+            'title' => 'Kart Oyununa Git',
+            'label' => 'Kart Oyunu',
+            'terms' => ['card_game', 'card game', 'kart oyunu', 'kart oyununa', 'kart oyununu'],
+        ],
+        'offline' => [
+            'title' => 'Offline İçeriklere Git',
+            'label' => 'Offline İçerikler',
+            'terms' => [
+                'offline', 'offline içerik', 'offline içerikleri', 'offline içerikleri aç',
+                'çevrimdışı', 'cevrimdisi', 'çevrim dışı', 'cevrim disi',
+            ],
+        ],
+        'maritime_english' => [
+            'title' => 'Maritime English Alanına Git',
+            'label' => 'Maritime English',
+            'terms' => [
+                'maritime_english', 'maritime english', 'maritime', 'denizcilik ingilizcesi',
+                'ingilizce', 'english',
+            ],
+        ],
+        'pusula_ai' => [
+            'title' => 'Pusula Ai Ekranına Git',
+            'label' => 'Pusula Ai',
+            'terms' => ['pusula_ai', 'pusula ai', 'pusulaaı', 'ai ekranı', 'ai ekrani'],
+        ],
+    ];
+}
+
+function pusula_ai_chat_navigation_guess_target_from_text(string $text): ?string
+{
+    $haystack = mb_strtolower(trim($text), 'UTF-8');
+    if ($haystack === '') {
+        return null;
+    }
+
+    $targets = pusula_ai_chat_navigation_target_definitions();
+    foreach ($targets as $target => $definition) {
+        $terms = is_array($definition['terms'] ?? null) ? $definition['terms'] : [];
+        foreach ($terms as $term) {
+            $needle = mb_strtolower(trim((string)$term), 'UTF-8');
+            if ($needle === '') {
+                continue;
+            }
+            if (mb_strpos($haystack, $needle, 0, 'UTF-8') !== false) {
+                return (string)$target;
+            }
+        }
+    }
+
+    return null;
+}
+
+function pusula_ai_chat_navigation_extract_context_targets(array $knowledgeBundle = []): array
+{
+    $found = [];
+    $knowledge = is_array($knowledgeBundle['knowledge'] ?? null) ? $knowledgeBundle['knowledge'] : [];
+
+    foreach (['app_features_text', 'premium_features_text', 'offline_features_text', 'community_features_text', 'exam_features_text'] as $field) {
+        $text = trim((string)($knowledge[$field] ?? ''));
+        $target = pusula_ai_chat_navigation_guess_target_from_text($text);
+        if ($target !== null) {
+            $found[$target] = true;
+        }
+    }
+
+    $masterContextText = trim((string)($knowledge['master_context_text'] ?? ''));
+    if ($masterContextText !== '' && function_exists('pusula_ai_parse_master_context')) {
+        $blocks = pusula_ai_parse_master_context($masterContextText);
+        foreach ($blocks as $block) {
+            $title = trim((string)($block['question'] ?? ''));
+            $target = pusula_ai_chat_navigation_guess_target_from_text($title);
+            if ($target !== null) {
+                $found[$target] = true;
+            }
+        }
+    }
+
+    return array_keys($found);
+}
+
+function pusula_ai_chat_message_has_navigation_verb(string $text): bool
+{
+    $normalized = mb_strtolower(trim($text), 'UTF-8');
+    if ($normalized === '') {
+        return false;
+    }
+
+    return preg_match('/\b(gönder|götür|aç|yönlendir|geç|gir|başlat|git)\w*\b/iu', $normalized) === 1;
+}
+
+function pusula_ai_chat_resolve_navigation_target(string $message, array $knowledgeBundle = []): ?array
+{
+    $text = mb_strtolower(trim($message), 'UTF-8');
+    if ($text === '') {
+        return null;
+    }
+
+    $targets = pusula_ai_chat_navigation_target_definitions();
+    foreach ($targets as $target => $definition) {
+        $terms = is_array($definition['terms'] ?? null) ? $definition['terms'] : [];
+        foreach ($terms as $term) {
+            $needle = mb_strtolower(trim((string)$term), 'UTF-8');
+            if ($needle === '') {
+                continue;
+            }
+            if (mb_strpos($text, $needle, 0, 'UTF-8') !== false) {
+                return [
+                    'target' => $target,
+                    'title' => (string)($definition['title'] ?? ''),
+                    'label' => (string)($definition['label'] ?? ''),
+                ];
+            }
+        }
+    }
+
+    $contextTargets = pusula_ai_chat_navigation_extract_context_targets($knowledgeBundle);
+    if (!empty($contextTargets)) {
+        foreach ($contextTargets as $target) {
+            $candidate = (string)$target;
+            if ($candidate === '') {
+                continue;
+            }
+            $definition = $targets[$candidate] ?? null;
+            if (!is_array($definition)) {
+                continue;
+            }
+            $terms = is_array($definition['terms'] ?? null) ? $definition['terms'] : [];
+            foreach ($terms as $term) {
+                $needle = mb_strtolower(trim((string)$term), 'UTF-8');
+                if ($needle === '') {
+                    continue;
+                }
+                if (mb_strpos($text, $needle, 0, 'UTF-8') !== false) {
+                    return [
+                        'target' => $candidate,
+                        'title' => (string)($definition['title'] ?? ''),
+                        'label' => (string)($definition['label'] ?? ''),
+                    ];
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+function pusula_ai_chat_is_navigation_request(string $message, array $knowledgeBundle = []): bool
+{
+    $text = mb_strtolower(trim($message), 'UTF-8');
+    if ($text === '') {
+        return false;
+    }
+
+    if (!pusula_ai_chat_message_has_navigation_verb($text)) {
+        return false;
+    }
+
+    if (pusula_ai_chat_contains_any($text, pusula_ai_chat_navigation_external_terms())) {
+        return false;
+    }
+
+    return is_array(pusula_ai_chat_resolve_navigation_target($text, $knowledgeBundle));
+}
+
+function pusula_ai_chat_build_navigation_reply(string $message): string
+{
+    $target = pusula_ai_chat_resolve_navigation_target($message);
+    if (!is_array($target)) {
+        return 'Hangi bölüme gitmek istiyorsun?';
+    }
+
+    $resolvedTarget = trim((string)($target['target'] ?? ''));
+    $map = [
+        'study' => 'Çalışma alanına geçebilirsin.',
+        'statistics' => 'İstatistikler bölümünü açabilirim.',
+        'community' => 'Seni topluluk alanına yönlendirebilirim.',
+        'offline' => 'Offline içerikler bölümüne geçebilirsin.',
+        'maritime_english' => 'Maritime English alanına geçebilirsin.',
+        'word_game' => 'Seni Kelime Oyunu alanına yönlendirebilirim.',
+        'card_game' => 'Seni Kart Oyunu alanına yönlendirebilirim.',
+        'exams' => 'Deneme alanına geçebilirsin.',
+        'pusula_ai' => 'Pusula Ai ekranını açabilirim.',
+    ];
+    if (isset($map[$resolvedTarget])) {
+        return $map[$resolvedTarget];
+    }
+
+    $label = trim((string)($target['label'] ?? ''));
+    return $label !== '' ? ($label . ' alanına geçebilirsin.') : 'Seni ilgili alana yönlendirebilirim.';
+}
+
+function pusula_ai_chat_build_navigation_payload(string $target): ?array
+{
+    $target = trim($target);
+    if ($target === '') {
+        return null;
+    }
+
+    $definitions = pusula_ai_chat_navigation_target_definitions();
+    $definition = $definitions[$target] ?? null;
+    if (!is_array($definition)) {
+        return null;
+    }
+
+    $title = trim((string)($definition['title'] ?? ''));
+    if ($title === '') {
+        return null;
+    }
+
+    return [
+        'type' => 'navigate',
+        'target' => $target,
+        'title' => $title,
+    ];
+}
+
 function pusula_ai_chat_policy_hard_block_reply(): string
 {
     return 'Pusula Ai yalnızca denizcilik eğitimi, sınav hazırlığı ve uygulama kullanımı konularında yardımcı olabilir.';
@@ -170,11 +438,15 @@ function pusula_ai_chat_detect_policy_hard_block(string $message): ?array
     return null;
 }
 
-function pusula_ai_chat_detect_intent(string $message): string
+function pusula_ai_chat_detect_intent(string $message, array $knowledgeBundle = []): string
 {
     $text = mb_strtolower(trim($message), 'UTF-8');
     if ($text === '') {
         return 'casual_followup';
+    }
+
+    if (pusula_ai_chat_is_navigation_request($text, $knowledgeBundle)) {
+        return 'navigation_request';
     }
 
     $isShort = mb_strlen($text, 'UTF-8') <= 22;
@@ -190,7 +462,7 @@ function pusula_ai_chat_detect_intent(string $message): string
         return 'stats_summary';
     }
 
-    if (pusula_ai_chat_contains_any($text, ['uygulamada ne yapabilirim', 'uygulamada neler var', 'premium ne açıyor', 'offline ne işe yarar', 'uygulama özellikleri', 'topluluk özelliği'])) {
+    if (pusula_ai_chat_contains_any($text, ['uygulamada ne yapabilirim', 'uygulamada neler var', 'premium ne açıyor', 'premium ne sağlar', 'premium ne sunar', 'offline ne işe yarar', 'uygulama özellikleri', 'topluluk özelliği'])) {
         return 'app_info';
     }
 
@@ -236,9 +508,9 @@ function pusula_ai_chat_detect_intent(string $message): string
     return 'casual_followup';
 }
 
-function detectIntent(string $message): string
+function detectIntent(string $message, array $knowledgeBundle = []): string
 {
-    return pusula_ai_chat_detect_intent($message);
+    return pusula_ai_chat_detect_intent($message, $knowledgeBundle);
 }
 
 function pusula_ai_chat_user_wants_detailed_reply(string $message): bool
@@ -303,12 +575,16 @@ function pusula_ai_chat_detect_greeting_intent(string $text): ?string
 
 function pusula_ai_chat_detect_education_intent(string $text): ?string
 {
+    if (pusula_ai_chat_is_navigation_request($text)) {
+        return 'navigation_request';
+    }
+
     $intentMap = [
         'stats_summary' => [
             'istatistik', 'özetimi ver', 'özet çıkar', 'nasıl gidiyorum', 'performansım'
         ],
         'app_info' => [
-            'uygulamada', 'premium ne açıyor', 'offline', 'uygulama özellikleri', 'denizci eğitim uygulaması'
+            'uygulamada', 'premium ne açıyor', 'premium ne sağlar', 'premium ne sunar', 'offline', 'uygulama özellikleri', 'denizci eğitim uygulaması'
         ],
         'exam_request' => [
             'deneme hazırla', 'deneme oluştur', '20 soruluk', 'yanlış yaptığım konulardan deneme'
@@ -353,7 +629,8 @@ function pusula_ai_chat_is_clear_off_topic(string $text): bool
 {
     $offTopicTerms = [
         'coin öner', 'bitcoin', 'kripto', 'seçimde kim kazanır', 'maç tahmini', 'maç sonucu', 'iddaa',
-        'sevgili tavsiyesi', 'kız tavlama', 'burç yorumu', 'sağlık teşhisi', 'teşhis koy', 'gündem'
+        'sevgili tavsiyesi', 'kız tavlama', 'burç yorumu', 'sağlık teşhisi', 'teşhis koy', 'gündem',
+        'youtube aç', 'telegram grubu', 'beni siteye gönder', 'web sitesine gönder', 'google aç'
     ];
 
     return pusula_ai_chat_contains_any($text, $offTopicTerms);
@@ -1361,6 +1638,10 @@ function pusula_ai_chat_build_app_info_reply(array $trustedContext, array $knowl
 
 function pusula_ai_chat_build_intent_safe_reply(string $intent, array $trustedContext, array $knowledgeBundle = [], string $userMessage = ''): ?string
 {
+    if ($intent === 'navigation_request') {
+        return pusula_ai_chat_build_navigation_reply($userMessage);
+    }
+
     if ($intent === 'app_info') {
         return pusula_ai_chat_build_app_info_reply($trustedContext, $knowledgeBundle, $userMessage);
     }
@@ -1428,6 +1709,10 @@ function pusula_ai_chat_contains_url_like_content(string $text): bool
 
 function pusula_ai_chat_safe_short_reply_for_intent(string $intent, array $trustedContext = []): string
 {
+    if ($intent === 'navigation_request') {
+        return 'Seni ilgili alana yönlendirebilirim.';
+    }
+
     if ($intent === 'exam_request') {
         return pusula_ai_chat_build_exam_request_reply($trustedContext);
     }
@@ -1491,7 +1776,7 @@ function pusula_ai_chat_enforce_action_card_language(string $intent, string $rep
     $safeReply = preg_replace('/\s{2,}/u', ' ', $safeReply) ?? $safeReply;
     $safeReply = trim($safeReply);
 
-    if ($intent === 'exam_request') {
+    if ($intent === 'exam_request' || $intent === 'navigation_request') {
         return pusula_ai_chat_trim_to_sentence_count($safeReply, 2);
     }
 
@@ -1554,6 +1839,8 @@ function pusula_ai_chat_is_app_info_polish_eligible_question(string $message): b
         'denizci eğitim nedir',
         'uygulamada neler var',
         'premium ne açıyor',
+        'premium ne sağlar',
+        'premium ne sunar',
         'word game nedir',
         'kart oyunu nedir',
         'offline içerikler nedir',
@@ -1634,27 +1921,14 @@ function pusula_ai_polish_response(string $text, array $meta = []): string
         return '';
     }
 
-    $polished = preg_replace('/\s+/u', ' ', $polished) ?? $polished;
-    $polished = trim($polished);
+    $polished = pusula_ai_response_polisher_polish($polished, [
+        'intent' => $intent,
+        'user_message' => (string)($meta['user_message'] ?? ''),
+        'strict_preservation' => $strict,
+        'is_app_info_scope' => $isAppInfoScope,
+    ]);
 
-    $sentences = pusula_ai_chat_sentence_split($polished);
-    $sentences = pusula_ai_chat_dedupe_sentences($sentences);
-    if (!empty($sentences)) {
-        $polished = implode(' ', $sentences);
-    }
-
-    // Uzun metni bilgi kaybı olmadan okunabilir seviyeye indir.
-    $sentences = pusula_ai_chat_sentence_split($polished);
-    if (count($sentences) > 5) {
-        $polished = implode(' ', array_slice($sentences, 0, 5));
-    }
-
-    if ($strict && $isAppInfoScope) {
-        $polished = pusula_ai_chat_polish_replace_synonyms($polished);
-    }
-
-    $polished = preg_replace('/\s{2,}/u', ' ', trim($polished)) ?? trim($polished);
-    return $polished;
+    return trim($polished !== '' ? $polished : $text);
 }
 
 function pusula_ai_chat_reply_has_exam_question_text(string $reply): bool
@@ -1690,6 +1964,10 @@ function pusula_ai_chat_enforce_reply_style(string $intent, string $reply, array
         }
         // Exam request'te URL/link yönlendirmesi ve uzun metin yasak.
         $safeReply = pusula_ai_chat_sanitize_reply_links($intent, $safeReply, $trustedContext);
+        return pusula_ai_chat_trim_to_sentence_count($safeReply, 2);
+    }
+
+    if ($intent === 'navigation_request') {
         return pusula_ai_chat_trim_to_sentence_count($safeReply, 2);
     }
 
@@ -1772,6 +2050,10 @@ function pusula_ai_chat_build_trusted_context(PDO $pdo, string $userId, string $
                     array_merge($settings, ['user_message' => $message]),
                     $tools
                 );
+                break;
+
+            case 'navigation_request':
+                // Navigasyon isteğinde trusted tool context zorunlu değil.
                 break;
 
             case 'app_info':
@@ -2086,6 +2368,11 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
             $lines[] = 'exam_request için yalnızca kısa öneri + action mantığı uygula; soru metni yazma.';
             $lines[] = 'exam_request içinde link, URL, yönlendirme adresi, markdown link, web sitesi adı yazma.';
             break;
+        case 'navigation_request':
+            $lines[] = 'Yanıt biçimi: çok kısa (1-2 cümle) ve aksiyon odaklı ol.';
+            $lines[] = 'Navigasyon isteğini bilgi sorusu gibi uzun açıklama ile cevaplama.';
+            $lines[] = 'Hedef tanınırsa kısa yönlendirme cümlesi kullan; hedef tanınmazsa yalnızca "Hangi bölüme gitmek istiyorsun?" sorusunu sor.';
+            break;
         case 'motivation':
             $lines[] = 'Yanıt biçimi: önce empati, sonra kısa destek ve uygulanabilir küçük adım.';
             break;
@@ -2173,6 +2460,22 @@ function pusula_ai_chat_detect_action_payload_from_bundle(string $message, array
     $userId = trim((string)($meta['user_id'] ?? ''));
 
     $text = mb_strtolower(trim($message), 'UTF-8');
+
+    $navigationIntent = $intent === 'navigation_request' || pusula_ai_chat_is_navigation_request($text, $knowledgeBundle);
+    if ($navigationIntent) {
+        $resolvedTarget = pusula_ai_chat_resolve_navigation_target($message, $knowledgeBundle);
+        if (is_array($resolvedTarget)) {
+            $target = trim((string)($resolvedTarget['target'] ?? ''));
+            if ($target !== '') {
+                $payload = pusula_ai_chat_build_navigation_payload($target);
+                if (is_array($payload)) {
+                    return $payload;
+                }
+            }
+        }
+
+        return null;
+    }
 
     $examIntent = $intent === 'exam_request' || pusula_ai_chat_contains_any($text, [
         'deneme', 'sınav oluştur', 'soru çözüm denemesi', '20 soruluk', '10 soruluk', 'yanlış yaptığım konulardan'

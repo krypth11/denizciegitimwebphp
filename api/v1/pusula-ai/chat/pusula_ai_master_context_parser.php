@@ -156,7 +156,7 @@ function pusula_ai_classify_master_context_block(string $question, string $answe
     if ($has(['neleri yapmamalıdır', 'bağlantılar ve yönlendirmeler', 'link üretme', 'harici kaynak', 'dış bağlantı', 'url verme', 'link verme', 'yasak'])) {
         return 'forbidden_rule';
     }
-    if ($has(['nasıl davranmalıdır', 'deneme sonrası', 'deneme isterse', 'deneme oluştur', 'hangi durumda'])) {
+    if ($has(['nasıl davranmalıdır', 'deneme sonrası', 'deneme isterse', 'deneme oluştur', 'hangi durumda', 'yönlendirme', 'navigate', 'navigasyon'])) {
         return 'action_rule';
     }
     if ($has(['nasıl hitap etmelidir', 'konuşma karakteri', 'persona', 'hitap'])) {
@@ -225,6 +225,11 @@ function pusula_ai_find_relevant_master_context_blocks(array $blocks, string $us
         'istatistik' => ['stats_rule'],
         'motivasyon' => ['motivation_rule', 'behavior_rule', 'persona_rule'],
         'moral' => ['motivation_rule', 'behavior_rule'],
+        'yönlendir' => ['action_rule', 'app_info'],
+        'gönder' => ['action_rule', 'app_info'],
+        'aç' => ['action_rule', 'app_info'],
+        'git' => ['action_rule', 'app_info'],
+        'navigasyon' => ['action_rule', 'app_info'],
         'link' => ['forbidden_rule'],
         'harici' => ['forbidden_rule'],
     ];
