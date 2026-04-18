@@ -35,9 +35,10 @@ try {
     $message = (string)$validated['message'];
     $mode = (string)$validated['mode'];
     $conversationId = (string)$validated['conversation_id'];
+    $knowledgeBundle = pusula_ai_chat_get_knowledge_bundle($pdo);
 
     $conversationId = pusula_ai_chat_resolve_conversation($pdo, $userId, $conversationId, $mode, $message);
-    $actionPayload = pusula_ai_chat_detect_action_payload($message);
+    $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle);
 
     $moderation = pusula_ai_chat_moderate_message($message);
     $userIntent = trim((string)($moderation['intent'] ?? ''));
@@ -92,6 +93,9 @@ try {
         'moderation_reason' => (string)($moderation['reason'] ?? ''),
         'user_message_length' => mb_strlen($message, 'UTF-8'),
         'user_wants_detailed' => pusula_ai_chat_user_wants_detailed_reply($message),
+        'provider' => (string)($settings['provider'] ?? ''),
+        'model' => (string)($settings['model'] ?? ''),
+        'knowledge_bundle' => $knowledgeBundle,
     ]);
 
     $recent = pusula_ai_chat_fetch_recent_messages($pdo, $conversationId, 8);

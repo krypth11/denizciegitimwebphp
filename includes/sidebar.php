@@ -53,6 +53,7 @@ $menuGroups = [
         ['slug' => 'community-reports', 'url' => '/pages/community-reports.php', 'icon' => 'bi-flag', 'label' => 'Raporlanan Mesajlar'],
         ['slug' => 'community-blacklist', 'url' => '/pages/community-blacklist.php', 'icon' => 'bi-slash-circle', 'label' => 'Blacklist Kelimeler'],
         ['slug' => 'pusula-ai', 'url' => '/pages/pusula-ai.php', 'icon' => 'bi-stars', 'label' => 'Pusula Ai'],
+        ['slug' => 'pusula-ai-knowledge', 'url' => '/pages/pusula-ai-knowledge.php', 'icon' => 'bi-journal-text', 'label' => 'Pusula Ai Bilgi Bankası'],
         ['slug' => 'settings', 'url' => '/pages/settings.php', 'icon' => 'bi-gear', 'label' => 'Ayarlar'],
     ],
 ];
@@ -182,6 +183,7 @@ function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
 
 
 

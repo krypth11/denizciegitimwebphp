@@ -1,6 +1,7 @@
 <?php
 
 require_once dirname(__DIR__) . '/bootstrap.php';
+require_once dirname(__DIR__, 4) . '/includes/pusula_ai_knowledge_helper.php';
 
 if (!defined('PUSULA_AI_CHAT_MAX_MESSAGE_LEN')) {
     define('PUSULA_AI_CHAT_MAX_MESSAGE_LEN', 1500);
@@ -746,8 +747,50 @@ function pusula_ai_chat_fetch_user_context(PDO $pdo, string $userId): array
     return $context;
 }
 
+function pusula_ai_chat_get_knowledge_bundle(PDO $pdo): array
+{
+    $knowledge = pusula_ai_get_knowledge($pdo);
+    $tools = pusula_ai_get_tool_settings($pdo);
+    $examples = pusula_ai_list_example_conversations($pdo);
+
+    $activeExamples = [];
+    foreach ($examples as $example) {
+        if ((int)($example['is_active'] ?? 0) !== 1) {
+            continue;
+        }
+
+        $userMessage = trim((string)($example['user_message'] ?? ''));
+        $assistantReply = trim((string)($example['assistant_reply'] ?? ''));
+        if ($userMessage === '' || $assistantReply === '') {
+            continue;
+        }
+
+        $activeExamples[] = [
+            'conversation_tag' => trim((string)($example['conversation_tag'] ?? '')),
+            'user_message' => function_exists('mb_substr') ? mb_substr($userMessage, 0, 450, 'UTF-8') : substr($userMessage, 0, 450),
+            'assistant_reply' => function_exists('mb_substr') ? mb_substr($assistantReply, 0, 900, 'UTF-8') : substr($assistantReply, 0, 900),
+            'order_index' => (int)($example['order_index'] ?? 0),
+        ];
+    }
+
+    usort($activeExamples, static function (array $a, array $b): int {
+        return ($a['order_index'] <=> $b['order_index']);
+    });
+
+    return [
+        'knowledge' => is_array($knowledge) ? $knowledge : pusula_ai_knowledge_defaults(),
+        'tools' => is_array($tools) ? $tools : pusula_ai_tool_settings_defaults(),
+        'examples' => array_slice($activeExamples, 0, 8),
+    ];
+}
+
 function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, array $meta = []): string
 {
+    $kb = is_array($meta['knowledge_bundle'] ?? null) ? $meta['knowledge_bundle'] : [];
+    $knowledge = is_array($kb['knowledge'] ?? null) ? $kb['knowledge'] : pusula_ai_knowledge_defaults();
+    $tools = is_array($kb['tools'] ?? null) ? $kb['tools'] : pusula_ai_tool_settings_defaults();
+    $examples = is_array($kb['examples'] ?? null) ? $kb['examples'] : [];
+
     $intent = trim((string)($meta['user_intent'] ?? ''));
     if ($intent === '') {
         $intent = 'casual_followup';
@@ -756,31 +799,86 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
     $wantsDetailed = !empty($meta['user_wants_detailed']);
     $isShortUserMessage = $userMessageLength > 0 && $userMessageLength <= 45;
 
-    $lines = [
-        'Sen Pusula Ai’sin.',
-        'Denizci Eğitim uygulamasının premium kişisel koçusun.',
-        'Sadece denizcilik eğitimi, sınav hazırlığı, çalışma yönlendirmesi, motivasyon ve uygulama kullanımı konularında yardımcı ol.',
-        'Finans, siyaset, gündem, sağlık teşhis ve alakasız genel sorulara cevap verme.',
-        'Kullanıcı kısa veya genel bir eğitim mesajı yazarsa bunu eğitim niyeti olarak yorumla.',
-        'Selamlaşma ve başlangıç mesajlarında kısa bir tanıtım yapıp hangi konularda yardımcı olabileceğini nazikçe belirt.',
-        'Kullanıcıyı gereksiz yere kapsam dışı sayma; yalnızca net alakasız veya yasak içeriklerde reddet.',
-        'Kısa, net, güvenilir ve motive edici Türkçe cevap ver.',
-        'Asla küfür, hakaret, uygunsuz veya illegal içerik üretme.',
-        'Asla uydurma bilgi verme. Emin değilsen açıkça belirt.',
-        'Kullanıcının durumuna göre kişisel yönlendirme yap.',
-        'Gerektiğinde mini çalışma planı öner.',
-        'Her mesaja rapor gibi cevap verme.',
-        'Kullanıcının mesajı kısa ise sen de kısa cevap ver.',
-        'Gereksiz maddeli liste ve gereksiz uzun açıklama yapma.',
-        'Önce sohbet et, sonra yönlendir.',
-        'Sıcak ama profesyonel ol; robotik kurumsal dil kullanma.',
-        'Türkçeyi doğal konuşma diline yakın kullan.',
-        'Kullanıcı üzgün veya stresliyse önce duyguyu anlayıp kısa destek ver, sonra çözüm öner.',
-        'Gereksiz klişe kişisel gelişim cümleleri kurma.',
-        'Asla her cevabı plan/liste/paragraf duvarına çevirme.',
-        'Asla “premium kişisel koçunuzum” gibi kalıp cümleler kurma.',
-        'Emoji kullanımı çok hafif olsun; özellikle greeting/motivation yanıtlarında nadiren kullan.',
-    ];
+    $lines = [];
+
+    $provider = trim((string)($meta['provider'] ?? ''));
+    $model = trim((string)($meta['model'] ?? ''));
+    if ($provider !== '' || $model !== '') {
+        $lines[] = '[MODEL_CONFIG]';
+        if ($provider !== '') {
+            $lines[] = 'Provider: ' . $provider;
+        }
+        if ($model !== '') {
+            $lines[] = 'Model: ' . $model;
+        }
+    }
+
+    $lines[] = '[APP_GENERAL]';
+    $lines[] = 'Asistan adı: ' . trim((string)($knowledge['assistant_name'] ?? 'Pusula Ai'));
+    $lines[] = 'Uygulama adı: ' . trim((string)($knowledge['app_name'] ?? 'Denizci Eğitim'));
+    $summary = trim((string)($knowledge['app_summary'] ?? ''));
+    if ($summary !== '') {
+        $lines[] = 'Uygulama özeti: ' . $summary;
+    }
+    $targets = trim((string)($knowledge['target_users'] ?? ''));
+    if ($targets !== '') {
+        $lines[] = 'Hedef kullanıcılar: ' . $targets;
+    }
+    $tone = trim((string)($knowledge['tone_of_voice'] ?? ''));
+    if ($tone !== '') {
+        $lines[] = 'Ton: ' . $tone;
+    }
+
+    $lines[] = '[BEHAVIOR_RULES]';
+    foreach (['allowed_topics_text', 'blocked_topics_text', 'response_style_text', 'emotional_style_text', 'short_reply_rules_text', 'long_reply_rules_text'] as $field) {
+        $val = trim((string)($knowledge[$field] ?? ''));
+        if ($val !== '') {
+            $lines[] = $field . ': ' . $val;
+        }
+    }
+
+    $lines[] = '[APP_FEATURES]';
+    foreach (['app_features_text', 'premium_features_text', 'offline_features_text', 'community_features_text', 'exam_features_text'] as $field) {
+        $val = trim((string)($knowledge[$field] ?? ''));
+        if ($val !== '') {
+            $lines[] = $field . ': ' . $val;
+        }
+    }
+
+    $lines[] = '[SYSTEM_PROMPT_LAYERS]';
+    foreach (['system_prompt_base', 'system_prompt_behavior', 'system_prompt_app_knowledge', 'system_prompt_stats_behavior', 'system_prompt_exam_behavior'] as $field) {
+        $val = trim((string)($knowledge[$field] ?? ''));
+        if ($val !== '') {
+            $lines[] = $field . ': ' . $val;
+        }
+    }
+
+    if (!empty($examples)) {
+        $lines[] = '[EXAMPLE_CONVERSATIONS_ACTIVE]';
+        foreach ($examples as $example) {
+            $tag = trim((string)($example['conversation_tag'] ?? 'general'));
+            $u = trim((string)($example['user_message'] ?? ''));
+            $a = trim((string)($example['assistant_reply'] ?? ''));
+            if ($u === '' || $a === '') {
+                continue;
+            }
+            $lines[] = '- tag=' . $tag;
+            $lines[] = '  user: ' . $u;
+            $lines[] = '  assistant: ' . $a;
+        }
+    }
+
+    $lines[] = '[TOOL_SETTINGS]';
+    foreach (['tool_stats_enabled', 'tool_exam_recommendation_enabled', 'tool_app_info_enabled', 'tool_action_payload_enabled', 'tool_weak_topics_enabled', 'tool_last_exam_enabled'] as $toolField) {
+        $lines[] = $toolField . ': ' . (((int)($tools[$toolField] ?? 0) === 1) ? '1' : '0');
+    }
+
+    $lines[] = '[FALLBACK_CORE_RULES]';
+    $lines[] = 'Sadece denizcilik eğitimi, sınav hazırlığı, çalışma yönlendirmesi, motivasyon ve uygulama kullanımı konularında yardımcı ol.';
+    $lines[] = 'Finans, siyaset, gündem, sağlık teşhis ve alakasız genel sorulara cevap verme.';
+    $lines[] = 'Kullanıcıyı gereksiz yere kapsam dışı sayma; yalnızca net alakasız veya yasak içeriklerde reddet.';
+    $lines[] = 'Asla küfür, hakaret, uygunsuz veya illegal içerik üretme.';
+    $lines[] = 'Asla uydurma bilgi verme. Emin değilsen açıkça belirt.';
 
     $ctx = [];
     if (!empty($userContext['qualification'])) {
@@ -798,6 +896,7 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
 
     $allowContextDump = in_array($intent, ['study_plan', 'weakness_analysis', 'exam_review', 'explanation'], true);
     if ($allowContextDump && $ctx) {
+        $lines[] = '[USER_CONTEXT]';
         $lines[] = 'Kullanıcı özeti:';
         foreach ($ctx as $line) {
             $lines[] = '- ' . $line;
@@ -863,15 +962,87 @@ function pusula_ai_chat_build_system_prompt(string $mode, array $userContext, ar
 
 function pusula_ai_chat_detect_action_payload(string $message): ?array
 {
+    $settings = pusula_ai_knowledge_defaults();
+    $tools = pusula_ai_tool_settings_defaults();
+
+    if (!empty($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
+        try {
+            $settings = pusula_ai_get_knowledge($GLOBALS['pdo']);
+            $tools = pusula_ai_get_tool_settings($GLOBALS['pdo']);
+        } catch (Throwable $e) {
+            // fallback defaults
+        }
+    }
+
+    if ((int)($tools['tool_action_payload_enabled'] ?? 1) !== 1) {
+        return null;
+    }
+
     $text = mb_strtolower(trim($message), 'UTF-8');
-    $triggers = ['mini deneme', 'deneme hazırla', 'deneme oluştur', '10 soruluk deneme'];
-    foreach ($triggers as $trigger) {
-        if (mb_strpos($text, $trigger, 0, 'UTF-8') !== false) {
-            return [
-                'type' => 'recommended_exam',
-                'exam_mode' => 'mini',
-                'question_count' => 10,
-            ];
+    if ((int)($settings['action_exam_enabled'] ?? 1) === 1) {
+        $examTriggers = ['mini deneme', 'deneme hazırla', 'deneme oluştur', '10 soruluk deneme'];
+        foreach ($examTriggers as $trigger) {
+            if (mb_strpos($text, $trigger, 0, 'UTF-8') !== false) {
+                return [
+                    'type' => 'recommended_exam',
+                    'exam_mode' => (string)($settings['action_exam_default_mode'] ?? 'mini'),
+                    'question_count' => max(1, (int)($settings['action_exam_default_question_count'] ?? 10)),
+                    'intro_text' => trim((string)($settings['action_button_intro_text'] ?? '')),
+                ];
+            }
+        }
+    }
+
+    if ((int)($settings['action_plan_enabled'] ?? 1) === 1) {
+        $planTriggers = ['çalışma planı', 'plan yap', 'program yap', 'çalışma programı'];
+        foreach ($planTriggers as $trigger) {
+            if (mb_strpos($text, $trigger, 0, 'UTF-8') !== false) {
+                return [
+                    'type' => 'recommended_plan',
+                    'intro_text' => trim((string)($settings['action_button_intro_text'] ?? '')),
+                ];
+            }
+        }
+    }
+
+    return null;
+}
+
+function pusula_ai_chat_detect_action_payload_from_bundle(string $message, array $knowledgeBundle = []): ?array
+{
+    $settings = is_array($knowledgeBundle['knowledge'] ?? null)
+        ? $knowledgeBundle['knowledge']
+        : pusula_ai_knowledge_defaults();
+    $tools = is_array($knowledgeBundle['tools'] ?? null)
+        ? $knowledgeBundle['tools']
+        : pusula_ai_tool_settings_defaults();
+
+    if ((int)($tools['tool_action_payload_enabled'] ?? 1) !== 1) {
+        return null;
+    }
+
+    $text = mb_strtolower(trim($message), 'UTF-8');
+    if ((int)($settings['action_exam_enabled'] ?? 1) === 1) {
+        foreach (['mini deneme', 'deneme hazırla', 'deneme oluştur', '10 soruluk deneme'] as $trigger) {
+            if (mb_strpos($text, $trigger, 0, 'UTF-8') !== false) {
+                return [
+                    'type' => 'recommended_exam',
+                    'exam_mode' => (string)($settings['action_exam_default_mode'] ?? 'mini'),
+                    'question_count' => max(1, (int)($settings['action_exam_default_question_count'] ?? 10)),
+                    'intro_text' => trim((string)($settings['action_button_intro_text'] ?? '')),
+                ];
+            }
+        }
+    }
+
+    if ((int)($settings['action_plan_enabled'] ?? 1) === 1) {
+        foreach (['çalışma planı', 'plan yap', 'program yap', 'çalışma programı'] as $trigger) {
+            if (mb_strpos($text, $trigger, 0, 'UTF-8') !== false) {
+                return [
+                    'type' => 'recommended_plan',
+                    'intro_text' => trim((string)($settings['action_button_intro_text'] ?? '')),
+                ];
+            }
         }
     }
 

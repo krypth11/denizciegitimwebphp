@@ -807,6 +807,51 @@ h1, h2, h3, h4, h5, h6 {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
+/* Pusula AI Knowledge */
+.pusula-ai-knowledge-page .knowledge-tabs {
+    border-bottom: 1px solid var(--border);
+    gap: 6px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+}
+
+.pusula-ai-knowledge-page .knowledge-tabs .nav-link {
+    border: 1px solid transparent;
+    border-radius: 10px 10px 0 0;
+    color: var(--text-muted);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.pusula-ai-knowledge-page .knowledge-tabs .nav-link.active {
+    color: var(--text-main);
+    background: var(--primary-soft);
+    border-color: var(--border);
+}
+
+.pusula-ai-knowledge-page .soft-card {
+    border-radius: 14px;
+    border-color: var(--border-soft);
+    box-shadow: 0 6px 20px rgba(66, 78, 110, 0.05);
+}
+
+.pusula-ai-knowledge-page .form-check.form-switch {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 12px 10px 42px;
+    background: var(--bg-soft);
+    min-height: 44px;
+}
+
+.pusula-ai-knowledge-page .table-actions .btn {
+    min-width: 34px;
+    justify-content: center;
+}
+
+[data-theme="dark"] .pusula-ai-knowledge-page .soft-card {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
 @media (max-width: 1199.98px) {
     .main-content {
         padding: 18px;
