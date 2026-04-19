@@ -381,6 +381,300 @@ function pusula_ai_chat_build_navigation_reply_from_target(?array $target): stri
     return $label !== '' ? ($label . ' alanına geçebilirsin.') : 'Seni ilgili alana yönlendirebilirim.';
 }
 
+function pusula_ai_chat_soft_intent_target_clusters(): array
+{
+    return [
+        'word_game' => [
+            'strong' => [
+                'kelime oyunu', 'kelime çözelim', 'kelime cozelim', 'ingilizce kelime',
+                'terim çalış', 'terim calis', 'kelime çalış', 'kelime calis',
+            ],
+            'weak' => ['kelime', 'oyun', 'biraz kelime', 'kelime tarafı', 'kelime tarafi'],
+        ],
+        'study' => [
+            'strong' => [
+                'çalışmaya başlayalım', 'calismaya baslayalim', 'çalışma başlat', 'calisma baslat',
+                'ders çalışmak istiyorum', 'ders calismak istiyorum', 'konu çalışayım', 'konu calisayim',
+                'soru tarafına geçelim', 'soru tarafina gecelim',
+            ],
+            'weak' => ['çalışalım', 'calisalim', 'biraz çalışayım', 'biraz calisayim', 'çalışayım', 'calisayim'],
+        ],
+        'statistics' => [
+            'strong' => [
+                'istatistiklerime bakalım', 'istatistiklerime bakalim', 'istatistikleri aç', 'istatistikleri ac',
+                'gelişimime bak', 'gelisime bak', 'performansımı aç', 'performansimi ac',
+            ],
+            'weak' => ['durumuma bak', 'nasıl gidiyorum bakalım', 'nasil gidiyorum bakalim', 'istatistik'],
+        ],
+        'community' => [
+            'strong' => [
+                'topluluğa gideyim', 'topluluga gideyim', 'topluluk kısmına geçelim', 'topluluk kismina gecelim',
+                'community aç', 'community ac',
+            ],
+            'weak' => ['topluluk', 'community', 'insanlarla konuşayım', 'insanlarla konusayim'],
+        ],
+        'offline' => [
+            'strong' => [
+                'offline içerikleri aç', 'offline icerikleri ac', 'çevrimdışı içeriklere geçelim',
+                'cevrimdisi iceriklere gecelim', 'internetsiz içerikleri aç', 'internetsiz icerikleri ac',
+            ],
+            'weak' => ['offline', 'çevrimdışı', 'cevrimdisi', 'internetsiz içerik', 'internetsiz icerik'],
+        ],
+        'maritime_english' => [
+            'strong' => [
+                'maritime english aç', 'maritime english ac',
+                'denizcilik ingilizcesi çalışayım', 'denizcilik ingilizcesi calisayim',
+            ],
+            'weak' => ['maritime english', 'denizcilik ingilizcesi', 'ingilizce tarafına geçelim', 'ingilizce tarafina gecelim'],
+        ],
+        'card_game' => [
+            'strong' => [
+                'kart oyununu aç', 'kart oyununu ac', 'kart çalışalım', 'kart calisalim',
+                'kartlarla tekrar yapayım', 'kartlarla tekrar yapayim',
+            ],
+            'weak' => ['kart oyunu', 'kart', 'kart tekrar'],
+        ],
+        'exams' => [
+            'strong' => [
+                'deneme at', 'deneme aç', 'deneme ac', 'sınava sok', 'sinava sok',
+                'mini deneme ver', 'deneme çözeyim', 'deneme cozeyim',
+                'bana kısa deneme başlat', 'bana kisa deneme baslat',
+                'kısa deneme yapalım', 'kisa deneme yapalim', 'bir deneme başlat', 'bir deneme baslat',
+                'yanlışlarımdan deneme çıkar', 'yanlislarimdan deneme cikar',
+            ],
+            'weak' => ['deneme', 'sınav', 'sinav', 'mini deneme', 'kısa deneme', 'kisa deneme'],
+        ],
+    ];
+}
+
+function pusula_ai_chat_soft_intent_normalize_text(string $text): string
+{
+    $normalized = mb_strtolower(trim($text), 'UTF-8');
+    if ($normalized === '') {
+        return '';
+    }
+
+    $normalized = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $normalized) ?? $normalized;
+    $normalized = preg_replace('/\s+/u', ' ', $normalized) ?? $normalized;
+
+    return trim($normalized);
+}
+
+function pusula_ai_chat_soft_intent_contains(string $text, string $term): bool
+{
+    $needle = pusula_ai_chat_soft_intent_normalize_text($term);
+    if ($text === '' || $needle === '') {
+        return false;
+    }
+
+    return mb_strpos($text, $needle, 0, 'UTF-8') !== false;
+}
+
+function pusula_ai_chat_soft_intent_build_clarification(array $rankedTargets, string $message): string
+{
+    $text = pusula_ai_chat_soft_intent_normalize_text($message);
+    if ($text !== '' && (mb_strpos($text, 'ingilizce', 0, 'UTF-8') !== false || mb_strpos($text, 'english', 0, 'UTF-8') !== false)) {
+        return 'Maritime English alanına mı, yoksa Kelime Oyunu tarafına mı geçmek istersin?';
+    }
+
+    $top = (string)($rankedTargets[0]['target'] ?? '');
+    $second = (string)($rankedTargets[1]['target'] ?? '');
+    $pair = [$top, $second];
+    sort($pair);
+
+    if ($pair === ['exams', 'study']) {
+        return 'Seni çalışma alanına mı, yoksa deneme alanına mı yönlendireyim?';
+    }
+
+    $targetLabels = [
+        'word_game' => 'Kelime Oyunu',
+        'study' => 'Çalışma Alanı',
+        'statistics' => 'İstatistikler',
+        'community' => 'Topluluk',
+        'offline' => 'Offline İçerikler',
+        'maritime_english' => 'Maritime English',
+        'card_game' => 'Kart Oyunu',
+        'exams' => 'Deneme Alanı',
+    ];
+
+    $label = (string)($targetLabels[$top] ?? 'ilgili alan');
+    return 'Seni ' . $label . ' alanına yönlendireyim mi?';
+}
+
+function pusula_ai_chat_build_soft_navigation_reply(string $target): string
+{
+    $map = [
+        'word_game' => 'Sana Kelime Oyunu iyi gelir. Açabilirim.',
+        'study' => 'Çalışma alanını açabilirim.',
+        'statistics' => 'İstatistikler bölümünü açabilirim.',
+        'community' => 'Topluluk alanını açabilirim.',
+        'offline' => 'Offline içerikler bölümünü açabilirim.',
+        'maritime_english' => 'Maritime English alanını açabilirim.',
+        'card_game' => 'Kart Oyununu açabilirim.',
+        'exams' => 'Sana uygun bir deneme başlatabiliriz.',
+    ];
+
+    return (string)($map[$target] ?? 'Seni ilgili alana yönlendirebilirim.');
+}
+
+function pusula_ai_chat_soft_exam_prefers_recommended(string $message): bool
+{
+    $text = pusula_ai_chat_soft_intent_normalize_text($message);
+    if ($text === '') {
+        return false;
+    }
+
+    return pusula_ai_chat_contains_any($text, [
+        'yanlışlarımdan deneme çıkar', 'yanlislarimdan deneme cikar',
+        'yanlışlarımdan', 'yanlislarimdan', 'hatalarımdan', 'hatalarimdan',
+        'zayıf konulardan deneme', 'zayif konulardan deneme',
+    ]);
+}
+
+function pusula_ai_chat_resolve_soft_action_intent(string $message, array $knowledgeBundle = [], array $meta = []): array
+{
+    $text = pusula_ai_chat_soft_intent_normalize_text($message);
+    if ($text === '') {
+        return [
+            'intent' => '',
+            'target' => '',
+            'confidence' => 0.0,
+            'reason' => 'empty_message',
+            'clarification_needed' => false,
+            'clarification_question' => '',
+        ];
+    }
+
+    $clusters = pusula_ai_chat_soft_intent_target_clusters();
+    $ranked = [];
+
+    foreach ($clusters as $target => $weights) {
+        $strongTerms = is_array($weights['strong'] ?? null) ? $weights['strong'] : [];
+        $weakTerms = is_array($weights['weak'] ?? null) ? $weights['weak'] : [];
+
+        $strongHits = 0;
+        $weakHits = 0;
+
+        foreach ($strongTerms as $term) {
+            if (pusula_ai_chat_soft_intent_contains($text, (string)$term)) {
+                $strongHits++;
+            }
+        }
+        foreach ($weakTerms as $term) {
+            if (pusula_ai_chat_soft_intent_contains($text, (string)$term)) {
+                $weakHits++;
+            }
+        }
+
+        if ($strongHits <= 0 && $weakHits <= 0) {
+            continue;
+        }
+
+        $confidence = 0.0;
+        $reason = 'weak_keyword_single';
+        if ($strongHits >= 2) {
+            $confidence = 0.88;
+            $reason = 'keyword_cluster_multi_strong';
+        } elseif ($strongHits >= 1 && $weakHits >= 1) {
+            $confidence = 0.79;
+            $reason = 'keyword_cluster_strong_plus_weak';
+        } elseif ($strongHits >= 1) {
+            $confidence = 0.63;
+            $reason = 'keyword_cluster_single_strong';
+        } elseif ($weakHits >= 2) {
+            $confidence = 0.56;
+            $reason = 'keyword_cluster_multi_weak';
+        } else {
+            $confidence = 0.34;
+            $reason = 'keyword_cluster_single_weak';
+        }
+
+        $ranked[] = [
+            'target' => (string)$target,
+            'confidence' => (float)$confidence,
+            'strong_hits' => $strongHits,
+            'weak_hits' => $weakHits,
+            'reason' => $reason,
+        ];
+    }
+
+    if (empty($ranked)) {
+        return [
+            'intent' => '',
+            'target' => '',
+            'confidence' => 0.0,
+            'reason' => 'no_soft_match',
+            'clarification_needed' => false,
+            'clarification_question' => '',
+        ];
+    }
+
+    usort($ranked, static function (array $a, array $b): int {
+        $cmp = ((float)$b['confidence'] <=> (float)$a['confidence']);
+        if ($cmp !== 0) {
+            return $cmp;
+        }
+
+        $cmp = ((int)$b['strong_hits'] <=> (int)$a['strong_hits']);
+        if ($cmp !== 0) {
+            return $cmp;
+        }
+
+        return ((int)$b['weak_hits'] <=> (int)$a['weak_hits']);
+    });
+
+    $top = $ranked[0];
+    $topTarget = (string)($top['target'] ?? '');
+    $topConfidence = (float)($top['confidence'] ?? 0.0);
+    $reason = (string)($top['reason'] ?? 'soft_match');
+
+    if (
+        (mb_strpos($text, 'ingilizce', 0, 'UTF-8') !== false || mb_strpos($text, 'english', 0, 'UTF-8') !== false)
+        && mb_strpos($text, 'denizcilik', 0, 'UTF-8') === false
+        && mb_strpos($text, 'maritime', 0, 'UTF-8') === false
+        && mb_strpos($text, 'kelime oyunu', 0, 'UTF-8') === false
+    ) {
+        $topTarget = '';
+        $topConfidence = max(0.45, min(0.74, $topConfidence));
+        $reason = 'ambiguous_english_focus';
+    }
+
+    $second = $ranked[1] ?? null;
+    $secondConfidence = is_array($second) ? (float)($second['confidence'] ?? 0.0) : 0.0;
+    $isAmbiguous = is_array($second) && abs($topConfidence - $secondConfidence) < 0.12;
+    if ($isAmbiguous) {
+        $topConfidence = max(0.45, $topConfidence - 0.14);
+        $reason = 'ambiguous_target_competition';
+    }
+
+    $clarificationNeeded = false;
+    $clarificationQuestion = '';
+    if ($topConfidence >= 0.45 && $topConfidence < 0.75) {
+        $clarificationNeeded = true;
+        $clarificationQuestion = pusula_ai_chat_soft_intent_build_clarification($ranked, $message);
+    }
+
+    if ($topTarget === '' && $topConfidence >= 0.45) {
+        $clarificationNeeded = true;
+        $clarificationQuestion = pusula_ai_chat_soft_intent_build_clarification($ranked, $message);
+    }
+
+    return [
+        'intent' => 'soft_navigation_request',
+        'target' => $topTarget,
+        'confidence' => round($topConfidence, 2),
+        'reason' => $reason,
+        'clarification_needed' => $clarificationNeeded,
+        'clarification_question' => $clarificationQuestion,
+        'ranked_targets' => array_map(static function (array $row): array {
+            return [
+                'target' => (string)($row['target'] ?? ''),
+                'confidence' => round((float)($row['confidence'] ?? 0), 2),
+            ];
+        }, array_slice($ranked, 0, 3)),
+    ];
+}
+
 function pusula_ai_chat_resolve_navigation_action(string $message, array $knowledgeBundle = [], array $meta = []): array
 {
     $intentHint = trim((string)($meta['intent'] ?? ''));

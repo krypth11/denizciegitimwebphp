@@ -119,6 +119,16 @@ try {
         $userIntent = $normalizedIntent;
     }
 
+    $softIntentResolution = [
+        'intent' => '',
+        'target' => '',
+        'confidence' => 0.0,
+        'reason' => '',
+        'clarification_needed' => false,
+        'clarification_question' => '',
+    ];
+    $forceRecommendedExamFromSoftIntent = false;
+
     $navigationResolution = pusula_ai_chat_resolve_navigation_action($message, $knowledgeBundle, [
         'intent' => $userIntent,
         'debug' => true,
@@ -146,6 +156,11 @@ try {
     if (!empty($navigationResolution['intent_detected']) && $navigationTarget !== '') {
         $userIntent = 'navigation_request';
     }
+
+    pusula_ai_chat_debug_trace('intent_routing', [
+        'hard_navigation_detected' => $isHardNavigationRoute,
+        'hard_navigation_target' => $navigationTarget,
+    ]);
 
     if ($isHardNavigationRoute) {
         $userIntent = 'navigation_request';
@@ -236,6 +251,128 @@ try {
         api_success('Mesaj işlendi.', $responseData);
     }
 
+    // SOFT PRIORITY: hard route yoksa doğal niyet kümelerinden aksiyon çıkar.
+    $softIntentResolution = pusula_ai_chat_resolve_soft_action_intent($message, $knowledgeBundle, [
+        'intent' => $userIntent,
+        'debug' => true,
+    ]);
+
+    $softIntentDetected = (string)($softIntentResolution['intent'] ?? '') === 'soft_navigation_request';
+    $softTarget = trim((string)($softIntentResolution['target'] ?? ''));
+    $softConfidence = (float)($softIntentResolution['confidence'] ?? 0);
+    $softClarificationNeeded = !empty($softIntentResolution['clarification_needed']);
+
+    pusula_ai_chat_debug_trace('intent_routing', [
+        'hard_navigation_detected' => false,
+        'soft_intent_detected' => $softIntentDetected,
+        'soft_target' => $softTarget,
+        'soft_confidence' => $softConfidence,
+        'clarification_needed' => $softClarificationNeeded,
+    ]);
+
+    if ($softIntentDetected && $softClarificationNeeded && $softConfidence >= 0.45 && $softConfidence < 0.75) {
+        $reply = trim((string)($softIntentResolution['clarification_question'] ?? ''));
+        if ($reply === '') {
+            $reply = 'Seni çalışma alanına mı, yoksa deneme alanına mı yönlendireyim?';
+        }
+        $reply = $finalizeReply($reply, 'soft_navigation_clarification', $message);
+
+        $pdo->beginTransaction();
+        try {
+            pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'user', $message, null, 0, 0);
+            $assistantMessageId = pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'assistant', $reply, null, 0, 0);
+            $pdo->commit();
+        } catch (Throwable $txe) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $txe;
+        }
+
+        pusula_ai_chat_log_usage($pdo, $userId, [
+            'conversation_id' => $conversationId,
+            'provider' => (string)($settings['provider'] ?? ''),
+            'model' => (string)($settings['model'] ?? ''),
+            'token_in' => 0,
+            'token_out' => 0,
+            'estimated_cost' => 0,
+            'success' => true,
+            'error_code' => '',
+            'error_message' => '',
+        ]);
+
+        $remainingAfter = max(0, $remainingBefore - 1);
+
+        api_success('Mesaj işlendi.', [
+            'conversation_id' => $conversationId,
+            'reply' => $reply,
+            'mode' => $mode,
+            'provider' => (string)($settings['provider'] ?? ''),
+            'model' => (string)($settings['model'] ?? ''),
+            'remaining_limit' => $remainingAfter,
+            'message_id' => $assistantMessageId,
+            'created_at' => date('c'),
+            'action_payload' => null,
+        ]);
+    }
+
+    if ($softIntentDetected && $softConfidence >= 0.75 && $softTarget !== '') {
+        if ($softTarget === 'exams' && pusula_ai_chat_soft_exam_prefers_recommended($message)) {
+            $userIntent = 'exam_request';
+            $forceRecommendedExamFromSoftIntent = true;
+        } else {
+            $actionPayload = pusula_ai_chat_build_navigation_payload($softTarget);
+            $reply = pusula_ai_chat_build_soft_navigation_reply($softTarget);
+            $reply = $finalizeReply($reply, 'soft_navigation_request', $message);
+
+            pusula_ai_chat_debug_trace('intent_routing', [
+                'soft_intent_detected' => true,
+                'soft_target' => $softTarget,
+                'soft_confidence' => $softConfidence,
+                'clarification_needed' => false,
+                'action_payload_generated' => is_array($actionPayload),
+            ]);
+
+            $pdo->beginTransaction();
+            try {
+                pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'user', $message, null, 0, 0);
+                $assistantMessageId = pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'assistant', $reply, $actionPayload, 0, 0);
+                $pdo->commit();
+            } catch (Throwable $txe) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $txe;
+            }
+
+            pusula_ai_chat_log_usage($pdo, $userId, [
+                'conversation_id' => $conversationId,
+                'provider' => (string)($settings['provider'] ?? ''),
+                'model' => (string)($settings['model'] ?? ''),
+                'token_in' => 0,
+                'token_out' => 0,
+                'estimated_cost' => 0,
+                'success' => true,
+                'error_code' => '',
+                'error_message' => '',
+            ]);
+
+            $remainingAfter = max(0, $remainingBefore - 1);
+
+            api_success('Mesaj işlendi.', [
+                'conversation_id' => $conversationId,
+                'reply' => $reply,
+                'mode' => $mode,
+                'provider' => (string)($settings['provider'] ?? ''),
+                'model' => (string)($settings['model'] ?? ''),
+                'remaining_limit' => $remainingAfter,
+                'message_id' => $assistantMessageId,
+                'created_at' => date('c'),
+                'action_payload' => $actionPayload,
+            ]);
+        }
+    }
+
     $userContext = pusula_ai_chat_fetch_user_context($pdo, $userId);
     $trustedContext = pusula_ai_chat_build_trusted_context($pdo, $userId, $userIntent, $knowledgeBundle, $message);
     $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle, [
@@ -246,6 +383,21 @@ try {
         'user_id' => $userId,
         'debug_navigation' => true,
     ]);
+
+    if ($forceRecommendedExamFromSoftIntent && !is_array($actionPayload)) {
+        $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle, [
+            'intent' => 'exam_request',
+            'user_context' => $userContext,
+            'trusted_context' => $trustedContext,
+            'pdo' => $pdo,
+            'user_id' => $userId,
+            'debug_navigation' => true,
+        ]);
+
+        if (!is_array($actionPayload)) {
+            $actionPayload = pusula_ai_chat_build_navigation_payload('exams');
+        }
+    }
 
     if ($userIntent === 'navigation_request' && is_array($navigationResolution['target'] ?? null)) {
         $resolvedNavigationTarget = (string)(($navigationResolution['target']['target'] ?? '') ?: '');
@@ -310,6 +462,11 @@ try {
         'intent' => $userIntent,
         'trusted_context_available' => !empty($trustedContext['available']),
         'action_payload_generated' => is_array($actionPayload),
+        'hard_navigation_detected' => $isHardNavigationRoute,
+        'soft_intent_detected' => $softIntentDetected,
+        'soft_target' => $softTarget,
+        'soft_confidence' => $softConfidence,
+        'clarification_needed' => $softClarificationNeeded,
     ]);
 
     if (empty($moderation['allowed'])) {
