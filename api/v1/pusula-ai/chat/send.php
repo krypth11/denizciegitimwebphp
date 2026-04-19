@@ -66,6 +66,7 @@ try {
 
     $conversationId = pusula_ai_chat_resolve_conversation($pdo, $userId, $conversationId, $mode, $message);
     $actionPayload = null;
+    $resolvedNavigationTargetForResponse = '';
 
     $policyHardBlock = pusula_ai_chat_detect_policy_hard_block($message);
     if (is_array($policyHardBlock)) {
@@ -148,6 +149,7 @@ try {
 
     if ($isHardNavigationRoute) {
         $userIntent = 'navigation_request';
+        $resolvedNavigationTargetForResponse = $navigationTarget;
         $actionPayload = is_array($navigationResolution['payload'] ?? null)
             ? $navigationResolution['payload']
             : null;
@@ -206,7 +208,11 @@ try {
 
         $remainingAfter = max(0, $remainingBefore - 1);
 
-        api_success('Mesaj işlendi.', [
+        if ($resolvedNavigationTargetForResponse !== '' && !is_array($actionPayload)) {
+            $actionPayload = pusula_ai_chat_build_navigation_payload($resolvedNavigationTargetForResponse);
+        }
+
+        $responseData = [
             'conversation_id' => $conversationId,
             'reply' => $reply,
             'mode' => $mode,
@@ -216,7 +222,18 @@ try {
             'message_id' => $assistantMessageId,
             'created_at' => date('c'),
             'action_payload' => $actionPayload,
+        ];
+
+        pusula_ai_chat_debug_trace('navigation_response_payload_status', [
+            'navigation_response_payload_attached' => is_array($responseData['action_payload'] ?? null),
+            'navigation_target' => (string)(
+                (is_array($responseData['action_payload'] ?? null) ? ($responseData['action_payload']['target'] ?? '') : '')
+                ?: $resolvedNavigationTargetForResponse
+            ),
+            'response_keys' => array_keys($responseData),
         ]);
+
+        api_success('Mesaj işlendi.', $responseData);
     }
 
     $userContext = pusula_ai_chat_fetch_user_context($pdo, $userId);
@@ -232,6 +249,7 @@ try {
 
     if ($userIntent === 'navigation_request' && is_array($navigationResolution['target'] ?? null)) {
         $resolvedNavigationTarget = (string)(($navigationResolution['target']['target'] ?? '') ?: '');
+        $resolvedNavigationTargetForResponse = $resolvedNavigationTarget;
 
         // navigation_request + target çözüldüyse payload zorunlu akış.
         $actionPayload = is_array($navigationResolution['payload'] ?? null)
