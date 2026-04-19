@@ -130,7 +130,16 @@ function pusula_ai_chat_contains_any(string $text, array $terms): bool
 
 function pusula_ai_chat_navigation_verbs(): array
 {
-    return ['gönder', 'götür', 'aç', 'yönlendir', 'geç', 'gir', 'başlat', 'git'];
+    return [
+        'gönder', 'gonder',
+        'götür', 'gotur',
+        'aç', 'ac',
+        'yönlendir', 'yonlendir',
+        'geç', 'gec',
+        'gir',
+        'başlat', 'baslat',
+        'git',
+    ];
 }
 
 function pusula_ai_chat_navigation_external_terms(): array
@@ -281,14 +290,9 @@ function pusula_ai_chat_message_has_navigation_verb(string $text): bool
         return false;
     }
 
-    // ASCII ile biten fiiller: standart \b word-boundary ile güvenli.
-    if (preg_match('/\b(gönder|götür|yönlendir|gir|başlat|git)\w*\b/iu', $normalized) === 1) {
-        return true;
-    }
-
-    // "aç" ve "geç": ç (non-ASCII) ile biter, \b çalışmaz.
-    // Kelime başını ASCII \b ile, sonunu ise non-word karakter veya string-sonu ile yakala.
-    if (preg_match('/\b(aç|geç)(\W|$)/iu', $normalized) === 1) {
+    // Türkçe karakterli + ASCII fiil varyantlarını birlikte kabul et.
+    // Ek almış formları da yakalamak için fiil kökünden sonra harfleri serbest bırak.
+    if (preg_match('/\b(gönder|gonder|götür|gotur|yönlendir|yonlendir|gir|başlat|baslat|git|aç|ac|geç|gec)\p{L}*(?=\W|$)/iu', $normalized) === 1) {
         return true;
     }
 
