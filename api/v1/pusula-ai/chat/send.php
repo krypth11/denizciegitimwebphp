@@ -126,9 +126,97 @@ try {
         ? (string)(($navigationResolution['target']['target'] ?? '') ?: '')
         : '';
 
+    $hardNavigationTargets = [
+        'study',
+        'statistics',
+        'community',
+        'offline',
+        'maritime_english',
+        'word_game',
+        'card_game',
+        'exams',
+        'pusula_ai',
+    ];
+    $isHardNavigationRoute = is_array($navigationResolution['target'] ?? null)
+        && $navigationTarget !== ''
+        && in_array($navigationTarget, $hardNavigationTargets, true);
+
     // HARD PRIORITY: navigation fiili + target çözüldüyse intent kesin navigation_request olmalı.
     if (!empty($navigationResolution['intent_detected']) && $navigationTarget !== '') {
         $userIntent = 'navigation_request';
+    }
+
+    if ($isHardNavigationRoute) {
+        $userIntent = 'navigation_request';
+        $actionPayload = is_array($navigationResolution['payload'] ?? null)
+            ? $navigationResolution['payload']
+            : null;
+        if (!is_array($actionPayload) && $navigationTarget !== '') {
+            $actionPayload = pusula_ai_chat_build_navigation_payload($navigationTarget);
+        }
+
+        if (!is_array($actionPayload)) {
+            pusula_ai_chat_debug_trace('navigation_payload_missing_unexpected', [
+                'intent' => $userIntent,
+                'target' => $navigationTarget,
+                'source' => 'navigation_hard_route',
+            ]);
+        }
+
+        $reply = trim((string)($navigationResolution['reply'] ?? ''));
+        if ($reply === '') {
+            $reply = pusula_ai_chat_build_navigation_reply_from_target(
+                is_array($navigationResolution['target'] ?? null) ? $navigationResolution['target'] : null
+            );
+        }
+
+        pusula_ai_chat_debug_trace('navigation_hard_route_taken', [
+            'intent' => $userIntent,
+            'target' => $navigationTarget,
+            'payload_generated' => is_array($actionPayload),
+        ]);
+        pusula_ai_chat_debug_trace('llm_skipped_for_navigation', [
+            'target' => $navigationTarget,
+            'reason' => 'hard_navigation_route',
+        ]);
+
+        $pdo->beginTransaction();
+        try {
+            pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'user', $message, null, 0, 0);
+            $assistantMessageId = pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'assistant', $reply, $actionPayload, 0, 0);
+            $pdo->commit();
+        } catch (Throwable $txe) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $txe;
+        }
+
+        pusula_ai_chat_log_usage($pdo, $userId, [
+            'conversation_id' => $conversationId,
+            'provider' => (string)($settings['provider'] ?? ''),
+            'model' => (string)($settings['model'] ?? ''),
+            'token_in' => 0,
+            'token_out' => 0,
+            'estimated_cost' => 0,
+            'success' => true,
+            'error_code' => '',
+            'error_message' => '',
+        ]);
+
+        $remainingAfter = max(0, $remainingBefore - 1);
+
+        api_success('Mesaj işlendi.', [
+            'conversation_id' => $conversationId,
+            'reply' => $reply,
+            'mode' => $mode,
+            'provider' => (string)($settings['provider'] ?? ''),
+            'model' => (string)($settings['model'] ?? ''),
+            'remaining_limit' => $remainingAfter,
+            'message_id' => $assistantMessageId,
+            'created_at' => date('c'),
+            'action_payload' => $actionPayload,
+        ]);
     }
 
     $userContext = pusula_ai_chat_fetch_user_context($pdo, $userId);
@@ -149,6 +237,9 @@ try {
         $actionPayload = is_array($navigationResolution['payload'] ?? null)
             ? $navigationResolution['payload']
             : null;
+        if (!is_array($actionPayload) && $resolvedNavigationTarget !== '') {
+            $actionPayload = pusula_ai_chat_build_navigation_payload($resolvedNavigationTarget);
+        }
 
         pusula_ai_chat_debug_trace('navigation_request_resolution', [
             'navigation_request_target' => $resolvedNavigationTarget,
@@ -187,6 +278,14 @@ try {
         'selected_block_titles' => $selectedBlockTitles,
         'selected_block_count' => $selectedBlockCount,
         'navigation_payload_generated' => is_array($actionPayload),
+    ]);
+    pusula_ai_chat_debug_trace('selected_block_titles', [
+        'intent' => $userIntent,
+        'titles' => $selectedBlockTitles,
+    ]);
+    pusula_ai_chat_debug_trace('selected_block_count', [
+        'intent' => $userIntent,
+        'count' => $selectedBlockCount,
     ]);
 
     pusula_ai_chat_debug_trace('pre_response', [

@@ -349,13 +349,13 @@ function pusula_ai_chat_build_navigation_reply_from_target(?array $target): stri
     $resolvedTarget = trim((string)($target['target'] ?? ''));
     $map = [
         'study' => 'Çalışma alanını açabilirim.',
-        'statistics' => 'İstatistikler bölümüne gidebilirsin.',
+        'statistics' => 'İstatistikler bölümünü açabilirim.',
         'community' => 'Topluluk alanına geçebilirsin.',
-        'offline' => 'Offline içerikler bölümüne geçebilirsin.',
-        'maritime_english' => 'Maritime English alanına geçebilirsin.',
-        'word_game' => 'Kelime Oyununa geçebilirsin.',
-        'card_game' => 'Kart Oyununa geçebilirsin.',
-        'exams' => 'Deneme alanına geçebilirsin.',
+        'offline' => 'Offline içerikler bölümünü açabilirim.',
+        'maritime_english' => 'Maritime English alanını açabilirim.',
+        'word_game' => 'Kelime Oyununu açabilirim.',
+        'card_game' => 'Kart Oyununu açabilirim.',
+        'exams' => 'Deneme alanını açabilirim.',
         'pusula_ai' => 'Pusula Ai ekranını açabilirim.',
     ];
     if (isset($map[$resolvedTarget])) {
@@ -1765,7 +1765,7 @@ function pusula_ai_chat_build_app_info_reply(array $trustedContext, array $knowl
         $pickedBlocks = pusula_ai_chat_master_context_unique_merge($relevantBlocks, $appBlocks);
 
         if ($effectiveIntent === 'feature_info') {
-            $pickedBlocks = array_slice($relevantBlocks, 0, 2);
+            $pickedBlocks = array_slice($relevantBlocks, 0, 1);
         } elseif ($effectiveIntent === 'general_app_info') {
             $pickedBlocks = array_slice($pickedBlocks, 0, 3);
         }
@@ -1822,8 +1822,21 @@ function pusula_ai_chat_build_app_info_reply(array $trustedContext, array $knowl
     }
 
     if ($intent === 'feature_info') {
-        $joined = implode(' ', array_slice($segments, 0, 1));
-        return pusula_ai_chat_trim_to_sentence_count(trim($joined), 3);
+        $featureFields = ['app_features_text', 'exam_features_text', 'offline_features_text', 'community_features_text', 'premium_features_text'];
+        $featureSegments = [];
+        foreach ($featureFields as $field) {
+            $val = trim((string)($appInfo[$field] ?? ''));
+            if ($val !== '') {
+                $featureSegments[] = $val;
+            }
+        }
+
+        if (!empty($featureSegments)) {
+            $joinedFeature = implode(' ', array_slice($featureSegments, 0, 2));
+            return pusula_ai_chat_trim_to_sentence_count(trim($joinedFeature), 3);
+        }
+
+        return 'Bu özellikle ilgili kısa bilgiyi paylaşabilirim.';
     }
 
     $joined = implode(' ', array_slice($segments, 0, 3));
