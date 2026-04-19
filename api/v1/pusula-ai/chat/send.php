@@ -37,7 +37,7 @@ try {
     $conversationId = (string)$validated['conversation_id'];
     $knowledgeBundle = pusula_ai_chat_get_knowledge_bundle($pdo);
 
-    $finalizeReply = static function (string $candidateReply, string $intentValue, string $userMessageValue): string {
+    $finalizeReply = static function (string $candidateReply, string $intentValue, string $userMessageValue, ?array $actionPayloadValue = null): string {
         $raw = trim($candidateReply);
         $originalLen = function_exists('mb_strlen') ? mb_strlen($raw, 'UTF-8') : strlen($raw);
 
@@ -51,6 +51,7 @@ try {
         ]);
 
         $final = trim($polished !== '' ? $polished : $sanitized);
+        $final = pusula_ai_chat_guard_fake_action_claims($final, $actionPayloadValue);
         $finalLen = function_exists('mb_strlen') ? mb_strlen($final, 'UTF-8') : strlen($final);
 
         pusula_ai_chat_debug_trace('response_finalize', [
@@ -68,10 +69,73 @@ try {
     $actionPayload = null;
     $resolvedNavigationTargetForResponse = '';
 
+    $shortFollowupResolution = pusula_ai_chat_resolve_short_followup_action(
+        $pdo,
+        $conversationId,
+        $userId,
+        $message,
+        $knowledgeBundle
+    );
+    if (!empty($shortFollowupResolution['matched'])) {
+        $shortReply = trim((string)($shortFollowupResolution['reply'] ?? ''));
+        $shortActionPayload = is_array($shortFollowupResolution['action_payload'] ?? null)
+            ? $shortFollowupResolution['action_payload']
+            : null;
+        $shortIntent = trim((string)($shortFollowupResolution['intent'] ?? 'short_followup_action'));
+
+        if ($shortReply === '') {
+            $shortReply = 'İstersen şimdi başlatabilirim.';
+        }
+        $shortReply = $finalizeReply($shortReply, $shortIntent, $message, $shortActionPayload);
+
+        pusula_ai_chat_debug_trace('deterministic_short_followup_action', [
+            'intent' => $shortIntent,
+            'action_payload_generated' => is_array($shortActionPayload),
+        ]);
+
+        $pdo->beginTransaction();
+        try {
+            pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'user', $message, null, 0, 0);
+            $assistantMessageId = pusula_ai_chat_insert_message($pdo, $conversationId, $userId, 'assistant', $shortReply, $shortActionPayload, 0, 0);
+            $pdo->commit();
+        } catch (Throwable $txe) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $txe;
+        }
+
+        pusula_ai_chat_log_usage($pdo, $userId, [
+            'conversation_id' => $conversationId,
+            'provider' => (string)($settings['provider'] ?? ''),
+            'model' => (string)($settings['model'] ?? ''),
+            'token_in' => 0,
+            'token_out' => 0,
+            'estimated_cost' => 0,
+            'success' => true,
+            'error_code' => '',
+            'error_message' => '',
+        ]);
+
+        $remainingAfter = max(0, $remainingBefore - 1);
+
+        api_success('Mesaj işlendi.', [
+            'conversation_id' => $conversationId,
+            'reply' => $shortReply,
+            'mode' => $mode,
+            'provider' => (string)($settings['provider'] ?? ''),
+            'model' => (string)($settings['model'] ?? ''),
+            'remaining_limit' => $remainingAfter,
+            'message_id' => $assistantMessageId,
+            'created_at' => date('c'),
+            'action_payload' => $shortActionPayload,
+        ]);
+    }
+
     $policyHardBlock = pusula_ai_chat_detect_policy_hard_block($message);
     if (is_array($policyHardBlock)) {
         $reply = (string)($policyHardBlock['reply'] ?? pusula_ai_chat_policy_hard_block_reply());
-        $reply = $finalizeReply($reply, 'policy_hard_block', $message);
+        $reply = $finalizeReply($reply, 'policy_hard_block', $message, null);
 
         $pdo->beginTransaction();
         try {
@@ -275,7 +339,7 @@ try {
         if ($reply === '') {
             $reply = 'Seni çalışma alanına mı, yoksa deneme alanına mı yönlendireyim?';
         }
-        $reply = $finalizeReply($reply, 'soft_navigation_clarification', $message);
+        $reply = $finalizeReply($reply, 'soft_navigation_clarification', $message, null);
 
         $pdo->beginTransaction();
         try {
@@ -323,7 +387,7 @@ try {
         } else {
             $actionPayload = pusula_ai_chat_build_navigation_payload($softTarget);
             $reply = pusula_ai_chat_build_soft_navigation_reply($softTarget);
-            $reply = $finalizeReply($reply, 'soft_navigation_request', $message);
+            $reply = $finalizeReply($reply, 'soft_navigation_request', $message, $actionPayload);
 
             pusula_ai_chat_debug_trace('intent_routing', [
                 'soft_intent_detected' => true,
@@ -471,7 +535,7 @@ try {
 
     if (empty($moderation['allowed'])) {
         $reply = (string)($moderation['reply'] ?? pusula_ai_chat_rejection_text());
-        $reply = $finalizeReply($reply, $userIntent, $message);
+        $reply = $finalizeReply($reply, $userIntent, $message, $actionPayload);
         $actionPayload = null;
 
         $pdo->beginTransaction();
@@ -528,7 +592,7 @@ try {
         $reply = pusula_ai_chat_enforce_reply_style($userIntent, $intentSafeReply, $trustedContext);
         $reply = pusula_ai_chat_sanitize_reply_links($userIntent, $reply, $trustedContext);
         $reply = pusula_ai_chat_enforce_action_card_language($userIntent, $reply, is_array($actionPayload));
-        $reply = $finalizeReply($reply, $userIntent, $message);
+        $reply = $finalizeReply($reply, $userIntent, $message, $actionPayload);
         $inputTokens = 0;
         $outputTokens = 0;
 
@@ -636,7 +700,7 @@ try {
     $reply = pusula_ai_chat_enforce_reply_style($userIntent, $reply, $trustedContext);
     $reply = pusula_ai_chat_sanitize_reply_links($userIntent, $reply, $trustedContext);
     $reply = pusula_ai_chat_enforce_action_card_language($userIntent, $reply, is_array($actionPayload));
-    $reply = $finalizeReply($reply, $userIntent, $message);
+    $reply = $finalizeReply($reply, $userIntent, $message, $actionPayload);
     if ($reply === '') {
         pusula_ai_chat_log_usage($pdo, $userId, [
             'conversation_id' => $conversationId,

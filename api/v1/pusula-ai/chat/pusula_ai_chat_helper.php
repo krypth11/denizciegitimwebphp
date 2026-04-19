@@ -1404,6 +1404,251 @@ function pusula_ai_chat_fetch_recent_messages(PDO $pdo, string $conversationId, 
     return $messages;
 }
 
+function pusula_ai_chat_fetch_recent_assistant_messages(PDO $pdo, string $conversationId, int $limit = 5): array
+{
+    $schema = pusula_ai_chat_get_message_schema($pdo);
+    $safeLimit = max(1, min(10, $limit));
+
+    $createdExpr = $schema['created_at'] ? pusula_ai_chat_q($schema['created_at']) : pusula_ai_chat_q($schema['id']);
+    $payloadSelect = $schema['action_payload_json']
+        ? pusula_ai_chat_q($schema['action_payload_json']) . ' AS action_payload_json'
+        : 'NULL AS action_payload_json';
+
+    $sql = 'SELECT '
+        . pusula_ai_chat_q($schema['role']) . ' AS role, '
+        . pusula_ai_chat_q($schema['content']) . ' AS content, '
+        . $payloadSelect . ' '
+        . 'FROM ' . pusula_ai_chat_q($schema['table'])
+        . ' WHERE ' . pusula_ai_chat_q($schema['conversation_id']) . ' = :conversation_id '
+        . 'AND ' . pusula_ai_chat_q($schema['role']) . " = 'assistant' "
+        . ' ORDER BY ' . $createdExpr . ' DESC LIMIT ' . $safeLimit;
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([':conversation_id' => $conversationId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $messages = [];
+    foreach ($rows as $row) {
+        $content = trim((string)($row['content'] ?? ''));
+        if ($content === '') {
+            continue;
+        }
+
+        $payload = null;
+        $payloadRaw = trim((string)($row['action_payload_json'] ?? ''));
+        if ($payloadRaw !== '') {
+            $decoded = json_decode($payloadRaw, true);
+            if (is_array($decoded)) {
+                $payload = $decoded;
+            }
+        }
+
+        $messages[] = [
+            'content' => $content,
+            'action_payload' => $payload,
+        ];
+    }
+
+    return $messages;
+}
+
+function pusula_ai_chat_short_followup_terms(): array
+{
+    return ['tamam', 'tamamdır', 'okey', 'oluştur', 'olustur', 'başlat', 'baslat', 'yap', 'evet', 'hadi', 'devam', 'başla', 'basla'];
+}
+
+function pusula_ai_chat_is_short_followup_confirmation(string $message): bool
+{
+    $text = mb_strtolower(trim($message), 'UTF-8');
+    if ($text === '') {
+        return false;
+    }
+
+    $text = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $text) ?? $text;
+    $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+    $text = trim($text);
+    if ($text === '') {
+        return false;
+    }
+
+    if ((function_exists('mb_strlen') ? mb_strlen($text, 'UTF-8') : strlen($text)) > 24) {
+        return false;
+    }
+
+    $tokens = preg_split('/\s+/u', $text) ?: [];
+    if (empty($tokens) || count($tokens) > 3) {
+        return false;
+    }
+
+    $allowed = array_fill_keys(pusula_ai_chat_short_followup_terms(), true);
+    foreach ($tokens as $token) {
+        if (!isset($allowed[$token])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function pusula_ai_chat_classify_assistant_offer_intent(array $assistantMessage): string
+{
+    $payload = is_array($assistantMessage['action_payload'] ?? null) ? $assistantMessage['action_payload'] : null;
+    $type = mb_strtolower(trim((string)($payload['type'] ?? '')), 'UTF-8');
+    if ($type === 'recommended_exam') {
+        return 'exam_offer';
+    }
+    if ($type === 'navigate') {
+        return 'navigation_offer';
+    }
+    if ($type === 'study_plan') {
+        return 'plan_offer';
+    }
+
+    $text = mb_strtolower(trim((string)($assistantMessage['content'] ?? '')), 'UTF-8');
+    if ($text === '') {
+        return '';
+    }
+
+    if (pusula_ai_chat_contains_any($text, ['deneme', 'sınav', 'sinav']) && pusula_ai_chat_contains_any($text, ['başlat', 'baslat', 'yönlendirebilirim', 'yonlendirebilirim', 'açabilirim', 'acabilirim'])) {
+        return 'exam_offer';
+    }
+    if (pusula_ai_chat_contains_any($text, ['yönlendirebilirim', 'yonlendirebilirim', 'açabilirim', 'acabilirim', 'geçebilirsin', 'gidebilirsin'])
+        && pusula_ai_chat_contains_any($text, ['alan', 'bölüm', 'bolum', 'çalışma', 'calisma', 'istatistik', 'topluluk', 'offline', 'maritime', 'kelime', 'kart', 'pusula ai'])
+    ) {
+        return 'navigation_offer';
+    }
+    if (pusula_ai_chat_contains_any($text, ['istatistik', 'performans', 'özet', 'ozet']) && pusula_ai_chat_contains_any($text, ['çıkar', 'cikar', 'bakabilirim', 'paylaşabilirim', 'paylasabilirim'])) {
+        return 'stats_offer';
+    }
+    if (pusula_ai_chat_contains_any($text, ['plan', 'program']) && pusula_ai_chat_contains_any($text, ['oluştur', 'olustur', 'hazırla', 'hazirla', 'yapabilirim'])) {
+        return 'plan_offer';
+    }
+
+    return '';
+}
+
+function pusula_ai_chat_build_stats_offer_reply_from_trusted(array $trustedContext): string
+{
+    if (!pusula_ai_chat_has_meaningful_stats_data($trustedContext)) {
+        return (string)(pusula_ai_chat_intent_fallback_text('stats_summary') ?? 'Şu an elimde net veri görünmüyor.');
+    }
+
+    $stats = is_array($trustedContext['user_stats'] ?? null) ? $trustedContext['user_stats'] : [];
+    $totalSolved = max(0, (int)($stats['total_questions_solved'] ?? 0));
+    $accuracy = $stats['accuracy_percent'] ?? null;
+    $accuracyText = ($accuracy !== null && $accuracy !== '' && is_numeric($accuracy))
+        ? ('%' . round((float)$accuracy, 1))
+        : null;
+
+    if ($totalSolved > 0 && $accuracyText !== null) {
+        return 'Kısa özet: toplam ' . $totalSolved . ' soru çözmüşsün, doğruluk oranı ' . $accuracyText . '. İstersen detay kırılımı da açabilirim.';
+    }
+    if ($totalSolved > 0) {
+        return 'Kısa özet: toplam ' . $totalSolved . ' soru çözmüşsün. İstersen detay kırılımı da açabilirim.';
+    }
+
+    return 'İstersen şimdi istatistik özetini çıkarabilirim.';
+}
+
+function pusula_ai_chat_resolve_short_followup_action(
+    PDO $pdo,
+    string $conversationId,
+    string $userId,
+    string $message,
+    array $knowledgeBundle,
+    array $userContext = []
+): array {
+    if (!pusula_ai_chat_is_short_followup_confirmation($message)) {
+        return ['matched' => false];
+    }
+
+    $recentAssistant = pusula_ai_chat_fetch_recent_assistant_messages($pdo, $conversationId, 5);
+    if (empty($recentAssistant)) {
+        return ['matched' => false];
+    }
+
+    $offerIntent = '';
+    $offerMessage = null;
+    foreach ($recentAssistant as $assistantMessage) {
+        $classified = pusula_ai_chat_classify_assistant_offer_intent($assistantMessage);
+        if (in_array($classified, ['plan_offer', 'exam_offer', 'navigation_offer', 'stats_offer'], true)) {
+            $offerIntent = $classified;
+            $offerMessage = $assistantMessage;
+            break;
+        }
+    }
+
+    if ($offerIntent === '' || !is_array($offerMessage)) {
+        return ['matched' => false];
+    }
+
+    $actionPayload = is_array($offerMessage['action_payload'] ?? null) ? $offerMessage['action_payload'] : null;
+    $reply = 'İstersen şimdi başlatabilirim.';
+
+    if ($offerIntent === 'exam_offer') {
+        if (!is_array($actionPayload) || strtolower(trim((string)($actionPayload['type'] ?? ''))) !== 'recommended_exam') {
+            $trusted = pusula_ai_chat_build_trusted_context($pdo, $userId, 'exam_request', $knowledgeBundle, $message);
+            $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle, [
+                'intent' => 'exam_request',
+                'user_context' => $userContext,
+                'trusted_context' => $trusted,
+                'pdo' => $pdo,
+                'user_id' => $userId,
+                'debug_navigation' => true,
+            ]);
+        }
+
+        if (is_array($actionPayload) && strtolower(trim((string)($actionPayload['type'] ?? ''))) === 'recommended_exam') {
+            $reply = 'Hazırsan önerilen denemeyi şimdi başlatabilirsin.';
+        } else {
+            $actionPayload = null;
+            $reply = 'İstersen şimdi başlatabilirim.';
+        }
+    } elseif ($offerIntent === 'navigation_offer') {
+        if (!is_array($actionPayload) || strtolower(trim((string)($actionPayload['type'] ?? ''))) !== 'navigate') {
+            $target = pusula_ai_chat_navigation_guess_target_from_text((string)($offerMessage['content'] ?? ''));
+            $actionPayload = $target !== null ? pusula_ai_chat_build_navigation_payload($target) : null;
+        }
+
+        if (is_array($actionPayload) && strtolower(trim((string)($actionPayload['type'] ?? ''))) === 'navigate') {
+            $reply = 'Hazırsan seni ilgili bölüme yönlendirebilirim.';
+        } else {
+            $actionPayload = null;
+            $reply = 'İstersen şimdi başlatabilirim.';
+        }
+    } elseif ($offerIntent === 'stats_offer') {
+        $trusted = pusula_ai_chat_build_trusted_context($pdo, $userId, 'stats_summary', $knowledgeBundle, $message);
+        $reply = pusula_ai_chat_build_stats_offer_reply_from_trusted($trusted);
+        $actionPayload = null;
+    } elseif ($offerIntent === 'plan_offer') {
+        if (!is_array($actionPayload) || strtolower(trim((string)($actionPayload['type'] ?? ''))) !== 'study_plan') {
+            $trusted = pusula_ai_chat_build_trusted_context($pdo, $userId, 'study_plan', $knowledgeBundle, $message);
+            $actionPayload = pusula_ai_chat_detect_action_payload_from_bundle($message, $knowledgeBundle, [
+                'intent' => 'study_plan',
+                'user_context' => $userContext,
+                'trusted_context' => $trusted,
+                'pdo' => $pdo,
+                'user_id' => $userId,
+                'debug_navigation' => true,
+            ]);
+        }
+
+        if (is_array($actionPayload) && strtolower(trim((string)($actionPayload['type'] ?? ''))) === 'study_plan') {
+            $reply = 'Hazırsan çalışma planını şimdi açabilirsin.';
+        } else {
+            $actionPayload = null;
+            $reply = 'İstersen şimdi başlatabilirim.';
+        }
+    }
+
+    return [
+        'matched' => true,
+        'intent' => $offerIntent,
+        'reply' => $reply,
+        'action_payload' => $actionPayload,
+    ];
+}
+
 function pusula_ai_chat_fetch_user_context(PDO $pdo, string $userId): array
 {
     $context = [
@@ -2297,6 +2542,24 @@ function pusula_ai_chat_enforce_action_card_language(string $intent, string $rep
     }
 
     return pusula_ai_chat_trim_to_sentence_count($safeReply, 3);
+}
+
+function pusula_ai_chat_guard_fake_action_claims(string $reply, ?array $actionPayload = null): string
+{
+    $safeReply = trim($reply);
+    if ($safeReply === '') {
+        return $safeReply;
+    }
+
+    if (is_array($actionPayload)) {
+        return $safeReply;
+    }
+
+    if (preg_match('/\b(başlattım|baslattim|başlatıldı|baslatildi|oluşturdum|olusturdum|hazırladım|hazirladim)\b/iu', $safeReply) === 1) {
+        return 'İstersen şimdi başlatabilirim.';
+    }
+
+    return $safeReply;
 }
 
 function pusula_ai_chat_trim_to_sentence_count(string $text, int $maxSentences): string
