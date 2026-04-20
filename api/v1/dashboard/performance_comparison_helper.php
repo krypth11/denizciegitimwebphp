@@ -59,7 +59,7 @@ function pc_sql_wrong_count_expr(string $tableAlias, string $isCorrectCol): stri
 
 function pc_sql_solved_count_expr(string $tableAlias): string
 {
-    return 'COUNT(' . $tableAlias . '.*)';
+    return 'COUNT(*)';
 }
 
 function pc_sql_success_rate_expr(string $tableAlias, string $isCorrectCol): string
@@ -558,7 +558,6 @@ function pc_fetch_course_breakdown(PDO $pdo, string $userId, array $eventSchema,
     $courseIdCol = $eventSchema['course_id'];
     $correctExpr = pc_sql_correct_count_expr('e', $isCorrectCol);
     $wrongExpr = pc_sql_wrong_count_expr('e', $isCorrectCol);
-    $solvedExpr = pc_sql_solved_count_expr('e');
 
     $userSql = 'SELECT '
         . 'c.id AS id, c.name AS name, '
@@ -568,8 +567,7 @@ function pc_fetch_course_breakdown(PDO $pdo, string $userId, array $eventSchema,
         . 'INNER JOIN courses c ON c.id = e.' . pc_q($courseIdCol) . ' '
         . 'WHERE e.' . pc_q($userIdCol) . ' = ? AND ' . $scopeFilters['where_sql'] . ' '
         . 'GROUP BY c.id, c.name '
-        . 'HAVING ' . $solvedExpr . ' > 0 '
-        . 'ORDER BY ' . $solvedExpr . ' DESC, c.name ASC';
+        . 'ORDER BY (' . $correctExpr . ' + ' . $wrongExpr . ') DESC, c.name ASC';
 
     $userStmt = $pdo->prepare($userSql);
     $userStmt->execute(array_merge([$userId], $scopeFilters['params']));
@@ -626,6 +624,9 @@ function pc_fetch_course_breakdown(PDO $pdo, string $userId, array $eventSchema,
         $correct = pc_to_int($row['correct_count'] ?? 0);
         $wrong = pc_to_int($row['wrong_count'] ?? 0);
         $solved = $correct + $wrong;
+        if ($solved <= 0) {
+            continue;
+        }
         $userRate = pc_calc_success_rate($correct, $wrong);
 
         $benchmarkRate = null;
@@ -659,7 +660,6 @@ function pc_fetch_topic_breakdown(PDO $pdo, string $userId, array $eventSchema, 
     $topicIdCol = $eventSchema['topic_id'];
     $correctExpr = pc_sql_correct_count_expr('e', $isCorrectCol);
     $wrongExpr = pc_sql_wrong_count_expr('e', $isCorrectCol);
-    $solvedExpr = pc_sql_solved_count_expr('e');
 
     $userSql = 'SELECT '
         . 't.id AS id, t.name AS name, '
@@ -669,8 +669,7 @@ function pc_fetch_topic_breakdown(PDO $pdo, string $userId, array $eventSchema, 
         . 'INNER JOIN topics t ON t.id = e.' . pc_q($topicIdCol) . ' '
         . 'WHERE e.' . pc_q($userIdCol) . ' = ? AND ' . $scopeFilters['where_sql'] . ' '
         . 'GROUP BY t.id, t.name '
-        . 'HAVING ' . $solvedExpr . ' > 0 '
-        . 'ORDER BY ' . $solvedExpr . ' DESC, t.name ASC';
+        . 'ORDER BY (' . $correctExpr . ' + ' . $wrongExpr . ') DESC, t.name ASC';
 
     $userStmt = $pdo->prepare($userSql);
     $userStmt->execute(array_merge([$userId], $scopeFilters['params']));
@@ -718,6 +717,9 @@ function pc_fetch_topic_breakdown(PDO $pdo, string $userId, array $eventSchema, 
         $correct = pc_to_int($row['correct_count'] ?? 0);
         $wrong = pc_to_int($row['wrong_count'] ?? 0);
         $solved = $correct + $wrong;
+        if ($solved <= 0) {
+            continue;
+        }
         $userRate = pc_calc_success_rate($correct, $wrong);
 
         $benchmarkRate = null;
@@ -750,8 +752,6 @@ function pc_fetch_trend_points(PDO $pdo, string $userId, array $eventSchema, arr
     $attemptedAtCol = $eventSchema['attempted_at'];
     $correctExpr = pc_sql_correct_count_expr('e', $isCorrectCol);
     $wrongExpr = pc_sql_wrong_count_expr('e', $isCorrectCol);
-    $solvedExpr = pc_sql_solved_count_expr('e');
-    $successExpr = pc_sql_success_rate_expr('e', $isCorrectCol);
 
     $userSql = 'SELECT '
         . 'DATE(e.' . pc_q($attemptedAtCol) . ') AS d, '
@@ -792,13 +792,16 @@ function pc_fetch_trend_points(PDO $pdo, string $userId, array $eventSchema, arr
     $benchSql = 'SELECT '
         . 'x.d, '
         . 'ROUND(AVG(x.solved_count), 2) AS benchmark_avg_solved_count, '
-        . 'ROUND(AVG(x.success_rate), 2) AS benchmark_success_rate '
+        . 'ROUND(AVG(CASE '
+            . 'WHEN x.solved_count > 0 THEN (x.correct_count * 100.0 / x.solved_count) '
+            . 'ELSE 0 END), 2) AS benchmark_success_rate '
         . 'FROM ( '
             . 'SELECT '
             . 'DATE(e.' . pc_q($attemptedAtCol) . ') AS d, '
             . 'e.' . pc_q($userIdCol) . ' AS uid, '
-            . $solvedExpr . ' AS solved_count, '
-            . $successExpr . ' AS success_rate '
+            . $correctExpr . ' AS correct_count, '
+            . $wrongExpr . ' AS wrong_count, '
+            . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' IN (0,1) THEN 1 ELSE 0 END), 0) AS solved_count '
             . 'FROM `' . $eventSchema['table'] . '` e '
             . 'INNER JOIN `' . $profileSchema['table'] . '` up ON up.' . pc_q((string)$profileSchema['id']) . ' = e.' . pc_q($userIdCol) . ' '
             . 'WHERE ' . implode(' AND ', $benchWhere) . ' '
