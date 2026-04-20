@@ -11,7 +11,7 @@ try {
 
     $settings = pusula_ai_api_settings($pdo);
     if (!pusula_ai_api_feature_enabled($settings)) {
-        api_error('Pusula Ai özelliği şu anda aktif değil.', 403);
+        pusula_ai_api_send_feature_disabled($settings, 403);
     }
 
     $isPremium = pusula_ai_api_is_user_premium($pdo, $userId);

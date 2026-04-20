@@ -9,9 +9,14 @@ try {
 
     $settings = pusula_ai_api_settings($pdo);
     $featureEnabled = pusula_ai_api_feature_enabled($settings);
+    $accessReason = $featureEnabled ? 'allowed' : 'feature_disabled';
 
     api_success('Pusula Ai konfigürasyonu alındı.', [
         'feature_enabled' => $featureEnabled,
+        'access' => [
+            'allowed' => $featureEnabled,
+            'reason' => $accessReason,
+        ],
         'provider' => (string)($settings['provider'] ?? ''),
         'model' => (string)($settings['model'] ?? ''),
         'premium_only' => pusula_ai_api_requires_premium($settings),

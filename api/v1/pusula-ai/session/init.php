@@ -9,12 +9,14 @@ try {
     $userId = (string)$authContext['user_id'];
 
     $settings = pusula_ai_api_settings($pdo);
+    if (!pusula_ai_api_feature_enabled($settings)) {
+        pusula_ai_api_send_feature_disabled($settings, 403);
+    }
+
     $isPremium = pusula_ai_api_is_user_premium($pdo, $userId);
 
     $payload = pusula_ai_api_build_session_payload($pdo, $userId, $settings, $isPremium);
-    $message = !empty($payload['feature_enabled'])
-        ? 'Pusula Ai oturumu başlatıldı.'
-        : 'Pusula Ai şu anda aktif değil.';
+    $message = 'Pusula Ai oturumu başlatıldı.';
 
     api_success($message, $payload);
 } catch (Throwable $e) {

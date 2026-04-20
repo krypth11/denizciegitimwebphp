@@ -22,6 +22,30 @@ function pusula_ai_api_feature_enabled(array $settings): bool
     return ((int)($settings['is_active'] ?? 0) === 1);
 }
 
+function pusula_ai_api_feature_disabled_payload(array $settings = []): array
+{
+    return [
+        'error_code' => 'feature_disabled',
+        'feature_enabled' => false,
+        'is_active' => false,
+        'access' => [
+            'allowed' => false,
+            'reason' => 'feature_disabled',
+        ],
+        'provider' => (string)($settings['provider'] ?? ''),
+        'model' => (string)($settings['model'] ?? ''),
+    ];
+}
+
+function pusula_ai_api_send_feature_disabled(array $settings = [], int $status = 403): void
+{
+    api_send_json([
+        'success' => false,
+        'message' => 'Pusula Ai özelliği şu anda aktif değil.',
+        'data' => pusula_ai_api_feature_disabled_payload($settings),
+    ], $status);
+}
+
 function pusula_ai_api_requires_premium(array $settings): bool
 {
     return ((int)($settings['premium_only'] ?? 0) === 1);
@@ -107,9 +131,21 @@ function pusula_ai_api_build_session_payload(PDO $pdo, string $userId, array $se
         $requiresPremiumForUser = true;
     }
 
+    $accessReason = 'allowed';
+    if (!$featureEnabled) {
+        $accessReason = 'feature_disabled';
+    } elseif ($requiresPremiumForUser) {
+        $accessReason = 'premium_required';
+    }
+
     return [
         'feature_enabled' => $featureEnabled,
+        'is_active' => $featureEnabled,
         'access_allowed' => $accessAllowed,
+        'access' => [
+            'allowed' => $accessAllowed,
+            'reason' => $accessReason,
+        ],
         'requires_premium' => $requiresPremiumForUser,
         'requires_internet' => $requiresInternet,
         'provider' => (string)($settings['provider'] ?? ''),
@@ -120,5 +156,6 @@ function pusula_ai_api_build_session_payload(PDO $pdo, string $userId, array $se
         'quick_actions' => pusula_ai_api_quick_actions(),
     ];
 }
+
 
 
