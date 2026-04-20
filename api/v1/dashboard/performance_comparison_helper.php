@@ -850,27 +850,37 @@ function pc_build_insights(array $userSummary, array $benchmarkSummary, array $i
     usort($strongest, static function (array $a, array $b): int {
         return (float)($b['delta_vs_benchmark'] ?? -9999) <=> (float)($a['delta_vs_benchmark'] ?? -9999);
     });
-    $strongest = array_slice(array_map(static function (array $item): array {
+
+    $strongestComparable = array_values(array_filter($strongest, static function (array $item): bool {
+        return (($item['delta_vs_benchmark'] ?? null) !== null);
+    }));
+    $strongestMapped = array_map(static function (array $item): array {
         return [
             'id' => $item['id'] ?? null,
             'name' => $item['name'] ?? '',
             'delta_vs_benchmark' => $item['delta_vs_benchmark'] ?? null,
             'success_rate' => $item['success_rate'] ?? 0,
         ];
-    }, array_values(array_filter($strongest, static fn(array $i): bool => (($i['delta_vs_benchmark'] ?? null) !== null))), 0, 3);
+    }, $strongestComparable);
+    $strongest = array_slice($strongestMapped, 0, 3);
 
     $weakest = $items;
     usort($weakest, static function (array $a, array $b): int {
         return (float)($a['delta_vs_benchmark'] ?? 9999) <=> (float)($b['delta_vs_benchmark'] ?? 9999);
     });
-    $weakest = array_slice(array_map(static function (array $item): array {
+
+    $weakestComparable = array_values(array_filter($weakest, static function (array $item): bool {
+        return (($item['delta_vs_benchmark'] ?? null) !== null);
+    }));
+    $weakestMapped = array_map(static function (array $item): array {
         return [
             'id' => $item['id'] ?? null,
             'name' => $item['name'] ?? '',
             'delta_vs_benchmark' => $item['delta_vs_benchmark'] ?? null,
             'success_rate' => $item['success_rate'] ?? 0,
         ];
-    }, array_values(array_filter($weakest, static fn(array $i): bool => (($i['delta_vs_benchmark'] ?? null) !== null))), 0, 3);
+    }, $weakestComparable);
+    $weakest = array_slice($weakestMapped, 0, 3);
 
     $summaryText = 'Bu aralıkta karşılaştırma için yeterli veri yok.';
     $focusText = 'Önce düzenli çözüm yaparak veri oluşmasını bekleyin.';

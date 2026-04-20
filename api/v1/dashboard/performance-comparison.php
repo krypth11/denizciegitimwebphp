@@ -66,16 +66,21 @@ function pc_build_delta_bars(string $scope, array $courseBreakdown, array $topic
 
     $bars = [];
     foreach (array_slice($items, 0, 8) as $item) {
+        $userValue = round((float)($item['success_rate'] ?? 0), 2);
+        $benchmarkValue = isset($item['benchmark_success_rate']) && $item['benchmark_success_rate'] !== null
+            ? round((float)$item['benchmark_success_rate'], 2)
+            : 0.0;
+        $delta = isset($item['delta_vs_benchmark']) && $item['delta_vs_benchmark'] !== null
+            ? round((float)$item['delta_vs_benchmark'], 2)
+            : round($userValue - $benchmarkValue, 2);
+
         $bars[] = [
             'id' => $item['id'] ?? null,
-            'name' => $item['name'] ?? '',
-            'delta_vs_benchmark' => isset($item['delta_vs_benchmark']) && $item['delta_vs_benchmark'] !== null
-                ? round((float)$item['delta_vs_benchmark'], 2)
-                : null,
-            'success_rate' => round((float)($item['success_rate'] ?? 0), 2),
-            'benchmark_success_rate' => isset($item['benchmark_success_rate']) && $item['benchmark_success_rate'] !== null
-                ? round((float)$item['benchmark_success_rate'], 2)
-                : null,
+            'label' => (string)($item['name'] ?? ''),
+            'user_value' => $userValue,
+            'benchmark_value' => $benchmarkValue,
+            'delta' => $delta,
+            'workload' => (int)($item['solved_count'] ?? 0),
         ];
     }
 
@@ -92,19 +97,122 @@ function pc_build_workload_bars(string $scope, array $courseBreakdown, array $to
     usort($items, static fn(array $a, array $b): int => ((int)($b['solved_count'] ?? 0)) <=> ((int)($a['solved_count'] ?? 0)));
     $bars = [];
     foreach (array_slice($items, 0, 8) as $item) {
+        $solvedCount = (int)($item['solved_count'] ?? 0);
         $bars[] = [
             'id' => $item['id'] ?? null,
-            'name' => $item['name'] ?? '',
-            'solved_count' => (int)($item['solved_count'] ?? 0),
-            'success_rate' => round((float)($item['success_rate'] ?? 0), 2),
+            'label' => (string)($item['name'] ?? ''),
+            'user_value' => $solvedCount,
+            'benchmark_value' => 0,
+            'delta' => 0,
+            'workload' => $solvedCount,
         ];
     }
 
     return $bars;
 }
 
+function pc_build_status_label(?float $delta): string
+{
+    if ($delta === null) {
+        return 'Veri yetersiz';
+    }
+    if ($delta >= 3) {
+        return 'Benchmark üstü';
+    }
+    if ($delta <= -3) {
+        return 'Benchmark altı';
+    }
+
+    return 'Benchmarka yakın';
+}
+
+function pc_normalize_breakdown_items(array $items): array
+{
+    $result = [];
+    foreach ($items as $item) {
+        $userRate = round((float)($item['success_rate'] ?? 0), 2);
+        $benchmarkRate = isset($item['benchmark_success_rate']) && $item['benchmark_success_rate'] !== null
+            ? round((float)$item['benchmark_success_rate'], 2)
+            : null;
+        $delta = isset($item['delta_vs_benchmark']) && $item['delta_vs_benchmark'] !== null
+            ? round((float)$item['delta_vs_benchmark'], 2)
+            : ($benchmarkRate !== null ? round($userRate - $benchmarkRate, 2) : null);
+
+        $item['success_rate'] = $userRate;
+        $item['benchmark_success_rate'] = $benchmarkRate;
+        $item['delta_vs_benchmark'] = $delta;
+        $item['user_success_rate'] = $userRate;
+        $item['delta'] = $delta;
+        $item['solved_count'] = (int)($item['solved_count'] ?? 0);
+        $item['status_label'] = pc_build_status_label($delta);
+
+        $result[] = $item;
+    }
+
+    return $result;
+}
+
+function pc_fetch_context_collections(PDO $pdo, array $context): array
+{
+    $qualificationId = trim((string)($context['qualification_id'] ?? ''));
+    $courseId = trim((string)($context['course_id'] ?? ''));
+
+    $courses = [];
+    if ($qualificationId !== '') {
+        $courseStmt = $pdo->prepare('SELECT id, name FROM courses WHERE qualification_id = ? ORDER BY name ASC');
+        $courseStmt->execute([$qualificationId]);
+        foreach (($courseStmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
+            $courses[] = [
+                'id' => (string)($row['id'] ?? ''),
+                'name' => (string)($row['name'] ?? ''),
+            ];
+        }
+    }
+
+    $topics = [];
+    if ($courseId !== '') {
+        $topicStmt = $pdo->prepare('SELECT id, name FROM topics WHERE course_id = ? ORDER BY name ASC');
+        $topicStmt->execute([$courseId]);
+        foreach (($topicStmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
+            $topics[] = [
+                'id' => (string)($row['id'] ?? ''),
+                'name' => (string)($row['name'] ?? ''),
+            ];
+        }
+    }
+
+    return [
+        'courses' => $courses,
+        'topics' => $topics,
+    ];
+}
+
+function pc_normalize_insights(array $insights): array
+{
+    $strongAreas = array_values(array_filter(array_map(static function (array $item): string {
+        return trim((string)($item['name'] ?? ''));
+    }, $insights['strongest_items'] ?? []), static fn(string $name): bool => $name !== ''));
+
+    $weakAreas = array_values(array_filter(array_map(static function (array $item): string {
+        return trim((string)($item['name'] ?? ''));
+    }, $insights['weakest_items'] ?? []), static fn(string $name): bool => $name !== ''));
+
+    return [
+        'headline' => (string)($insights['summary_text'] ?? ''),
+        'strong_areas' => $strongAreas,
+        'weak_areas' => $weakAreas,
+        'focus_suggestion' => (string)($insights['focus_text'] ?? ''),
+        'trend_comment' => (string)($insights['trend_text'] ?? ''),
+    ];
+}
+
 function pc_build_empty_comparison(string $scope, array $window, array $context, bool $topicSupport): array
 {
+    $contextCollections = [
+        'courses' => [],
+        'topics' => [],
+    ];
+
     $comparison = [
         'scope' => $scope,
         'range' => (string)$window['range'],
@@ -116,12 +224,14 @@ function pc_build_empty_comparison(string $scope, array $window, array $context,
             'course_name' => $context['course_name'] ?? null,
             'topic_id' => $context['topic_id'] ?? null,
             'topic_name' => $context['topic_name'] ?? null,
+            'courses' => $contextCollections['courses'],
+            'topics' => $contextCollections['topics'],
         ],
         'user_summary' => [
+            'success_rate' => 0,
             'solved_count' => 0,
             'correct_count' => 0,
             'wrong_count' => 0,
-            'success_rate' => 0,
             'delta_vs_benchmark' => null,
             'percentile' => null,
             'rank_label' => 'Yeterli veri yok',
@@ -133,6 +243,8 @@ function pc_build_empty_comparison(string $scope, array $window, array $context,
             'topic_name' => $context['topic_name'] ?? null,
         ],
         'benchmark_summary' => [
+            'success_rate' => 0,
+            'solved_count' => 0,
             'participants_count' => 0,
             'avg_solved_count' => 0,
             'avg_correct_count' => 0,
@@ -144,18 +256,15 @@ function pc_build_empty_comparison(string $scope, array $window, array $context,
         'course_breakdown' => [],
         'topic_breakdown' => [],
         'trend_points' => [],
-        'comparison_bars' => [
-            'user_success_rate' => 0,
-            'benchmark_success_rate' => null,
-        ],
+        'comparison_bars' => [],
         'delta_bars' => [],
         'workload_bars' => [],
         'insights' => [
-            'strongest_items' => [],
-            'weakest_items' => [],
-            'summary_text' => 'Bu aralıkta çözüm verin yok. Insight üretilemedi.',
-            'trend_text' => 'Trend üretilemedi.',
-            'focus_text' => 'Önce düzenli çözüm yaparak veri oluşmasını bekleyin.',
+            'headline' => 'Bu aralıkta çözüm verin yok. Insight üretilemedi.',
+            'strong_areas' => [],
+            'weak_areas' => [],
+            'focus_suggestion' => 'Önce düzenli çözüm yaparak veri oluşmasını bekleyin.',
+            'trend_comment' => 'Trend üretilemedi.',
         ],
     ];
 
@@ -177,6 +286,7 @@ try {
     $topicId = pc_optional_id_from_query('topic_id');
 
     $context = pc_resolve_scope_context($pdo, $userId, $scope, $courseId, $topicId);
+    $contextCollections = pc_fetch_context_collections($pdo, $context);
     $eventSchema = pc_get_event_schema($pdo);
     $scopeFilters = pc_build_scope_filters($eventSchema, $scope, $window, $context);
 
@@ -207,22 +317,36 @@ try {
     $trendPoints = pc_fetch_trend_points($pdo, $userId, $eventSchema, $scopeFilters, $window);
 
     [$userSummary, $benchmarkSummary] = pc_normalize_numeric_summary($userSummary, $benchmarkSummary);
+    $benchmarkSummary['success_rate'] = $benchmarkSummary['avg_success_rate'] ?? 0;
+    $benchmarkSummary['solved_count'] = $benchmarkSummary['avg_solved_count'] ?? 0;
+
+    $courseBreakdown = pc_normalize_breakdown_items($courseBreakdown);
+    $topicBreakdown = pc_normalize_breakdown_items($topicBreakdown);
 
     $insightItems = $scope === 'qualification' ? $courseBreakdown : ($scope === 'course' ? $topicBreakdown : []);
-    $insights = pc_build_insights($userSummary, $benchmarkSummary, $insightItems, $trendPoints);
+    $insightsRaw = pc_build_insights($userSummary, $benchmarkSummary, $insightItems, $trendPoints);
+    $insights = pc_normalize_insights($insightsRaw);
 
     $comparison = pc_build_empty_comparison($scope, $window, $context, $topicSupport);
+    $comparison['context']['courses'] = $contextCollections['courses'];
+    $comparison['context']['topics'] = $contextCollections['topics'];
     $comparison['user_summary'] = $userSummary;
     $comparison['benchmark_summary'] = $benchmarkSummary;
     $comparison['course_breakdown'] = $courseBreakdown;
     $comparison['topic_breakdown'] = $scope === 'course' ? $topicBreakdown : [];
     $comparison['trend_points'] = $trendPoints;
-    $comparison['comparison_bars'] = [
-        'user_success_rate' => round((float)($userSummary['success_rate'] ?? 0), 2),
-        'benchmark_success_rate' => isset($benchmarkSummary['avg_success_rate']) && $benchmarkSummary['avg_success_rate'] !== null
+    $comparison['comparison_bars'] = [[
+        'id' => 'user_vs_benchmark',
+        'label' => 'Başarı',
+        'user_value' => round((float)($userSummary['success_rate'] ?? 0), 2),
+        'benchmark_value' => isset($benchmarkSummary['avg_success_rate']) && $benchmarkSummary['avg_success_rate'] !== null
             ? round((float)$benchmarkSummary['avg_success_rate'], 2)
-            : null,
-    ];
+            : 0.0,
+        'delta' => isset($userSummary['delta_vs_benchmark']) && $userSummary['delta_vs_benchmark'] !== null
+            ? round((float)$userSummary['delta_vs_benchmark'], 2)
+            : 0.0,
+        'workload' => (int)($userSummary['solved_count'] ?? 0),
+    ]];
     $comparison['delta_bars'] = pc_build_delta_bars($scope, $courseBreakdown, $topicBreakdown);
     $comparison['workload_bars'] = pc_build_workload_bars($scope, $courseBreakdown, $topicBreakdown);
     $comparison['insights'] = $insights;
@@ -230,6 +354,8 @@ try {
     api_success('Karşılaştırmalı performans verisi alındı.', [
         'comparison' => $comparison,
     ]);
+} catch (RuntimeException $e) {
+    api_error($e->getMessage() !== '' ? $e->getMessage() : 'Karşılaştırma verisi üretilemedi.', 422);
 } catch (Throwable $e) {
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
 }
