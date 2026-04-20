@@ -47,6 +47,29 @@ function pc_safe_delta(?float $userRate, ?float $benchmarkRate): ?float
     return round($userRate - $benchmarkRate, 2);
 }
 
+function pc_sql_correct_count_expr(string $tableAlias, string $isCorrectCol): string
+{
+    return 'COALESCE(SUM(CASE WHEN ' . $tableAlias . '.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0)';
+}
+
+function pc_sql_wrong_count_expr(string $tableAlias, string $isCorrectCol): string
+{
+    return 'COALESCE(SUM(CASE WHEN ' . $tableAlias . '.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0)';
+}
+
+function pc_sql_solved_count_expr(string $tableAlias): string
+{
+    return 'COUNT(' . $tableAlias . '.*)';
+}
+
+function pc_sql_success_rate_expr(string $tableAlias, string $isCorrectCol): string
+{
+    $correctExpr = pc_sql_correct_count_expr($tableAlias, $isCorrectCol);
+    $solvedExpr = pc_sql_solved_count_expr($tableAlias);
+
+    return 'ROUND((' . $correctExpr . ' * 100.0) / NULLIF(' . $solvedExpr . ', 0), 2)';
+}
+
 function pc_resolve_window(?string $rangeRaw): array
 {
     $range = strtolower(trim((string)$rangeRaw));
@@ -354,10 +377,12 @@ function pc_fetch_user_summary(PDO $pdo, string $userId, array $eventSchema, arr
 {
     $userIdCol = $eventSchema['user_id'];
     $isCorrectCol = $eventSchema['is_correct'];
+    $correctExpr = pc_sql_correct_count_expr('e', $isCorrectCol);
+    $wrongExpr = pc_sql_wrong_count_expr('e', $isCorrectCol);
 
     $sql = 'SELECT '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) AS correct_count, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0) AS wrong_count '
+        . $correctExpr . ' AS correct_count, '
+        . $wrongExpr . ' AS wrong_count '
         . 'FROM `' . $eventSchema['table'] . '` e '
         . 'WHERE e.' . pc_q($userIdCol) . ' = ?'
         . ' AND ' . $scopeFilters['where_sql'];
@@ -393,6 +418,9 @@ function pc_fetch_benchmark_user_rows(PDO $pdo, string $userId, array $eventSche
 {
     $userIdCol = $eventSchema['user_id'];
     $isCorrectCol = $eventSchema['is_correct'];
+    $correctExpr = pc_sql_correct_count_expr('e', $isCorrectCol);
+    $wrongExpr = pc_sql_wrong_count_expr('e', $isCorrectCol);
+    $solvedExpr = pc_sql_solved_count_expr('e');
 
     $profile = pc_build_benchmark_profile_filters($pdo, 'up');
     $profileSchema = $profile['profile_schema'];
@@ -408,13 +436,13 @@ function pc_fetch_benchmark_user_rows(PDO $pdo, string $userId, array $eventSche
 
     $sql = 'SELECT '
         . 'e.' . pc_q($userIdCol) . ' AS user_id, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) AS correct_count, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0) AS wrong_count '
+        . $correctExpr . ' AS correct_count, '
+        . $wrongExpr . ' AS wrong_count '
         . 'FROM `' . $eventSchema['table'] . '` e '
         . 'INNER JOIN `' . $profileSchema['table'] . '` up ON up.' . pc_q((string)$profileSchema['id']) . ' = e.' . pc_q($userIdCol) . ' '
         . 'WHERE ' . implode(' AND ', $where) . ' '
         . 'GROUP BY e.' . pc_q($userIdCol) . ' '
-        . 'HAVING (correct_count + wrong_count) > 0';
+        . 'HAVING ' . $solvedExpr . ' > 0';
 
     $params = array_merge([$userId], $scopeFilters['params']);
     $stmt = $pdo->prepare($sql);
@@ -528,17 +556,20 @@ function pc_fetch_course_breakdown(PDO $pdo, string $userId, array $eventSchema,
     $userIdCol = $eventSchema['user_id'];
     $isCorrectCol = $eventSchema['is_correct'];
     $courseIdCol = $eventSchema['course_id'];
+    $correctExpr = pc_sql_correct_count_expr('e', $isCorrectCol);
+    $wrongExpr = pc_sql_wrong_count_expr('e', $isCorrectCol);
+    $solvedExpr = pc_sql_solved_count_expr('e');
 
     $userSql = 'SELECT '
         . 'c.id AS id, c.name AS name, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) AS correct_count, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0) AS wrong_count '
+        . $correctExpr . ' AS correct_count, '
+        . $wrongExpr . ' AS wrong_count '
         . 'FROM `' . $eventSchema['table'] . '` e '
         . 'INNER JOIN courses c ON c.id = e.' . pc_q($courseIdCol) . ' '
         . 'WHERE e.' . pc_q($userIdCol) . ' = ? AND ' . $scopeFilters['where_sql'] . ' '
         . 'GROUP BY c.id, c.name '
-        . 'HAVING (correct_count + wrong_count) > 0 '
-        . 'ORDER BY (correct_count + wrong_count) DESC, c.name ASC';
+        . 'HAVING ' . $solvedExpr . ' > 0 '
+        . 'ORDER BY ' . $solvedExpr . ' DESC, c.name ASC';
 
     $userStmt = $pdo->prepare($userSql);
     $userStmt->execute(array_merge([$userId], $scopeFilters['params']));
@@ -556,8 +587,8 @@ function pc_fetch_course_breakdown(PDO $pdo, string $userId, array $eventSchema,
 
     $benchSql = 'SELECT '
         . 'c.id AS id, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) AS total_correct, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0) AS total_wrong, '
+        . $correctExpr . ' AS total_correct, '
+        . $wrongExpr . ' AS total_wrong, '
         . 'COUNT(DISTINCT e.' . pc_q($userIdCol) . ') AS participants_count '
         . 'FROM `' . $eventSchema['table'] . '` e '
         . 'INNER JOIN courses c ON c.id = e.' . pc_q($courseIdCol) . ' '
@@ -626,17 +657,20 @@ function pc_fetch_topic_breakdown(PDO $pdo, string $userId, array $eventSchema, 
     $userIdCol = $eventSchema['user_id'];
     $isCorrectCol = $eventSchema['is_correct'];
     $topicIdCol = $eventSchema['topic_id'];
+    $correctExpr = pc_sql_correct_count_expr('e', $isCorrectCol);
+    $wrongExpr = pc_sql_wrong_count_expr('e', $isCorrectCol);
+    $solvedExpr = pc_sql_solved_count_expr('e');
 
     $userSql = 'SELECT '
         . 't.id AS id, t.name AS name, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) AS correct_count, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0) AS wrong_count '
+        . $correctExpr . ' AS correct_count, '
+        . $wrongExpr . ' AS wrong_count '
         . 'FROM `' . $eventSchema['table'] . '` e '
         . 'INNER JOIN topics t ON t.id = e.' . pc_q($topicIdCol) . ' '
         . 'WHERE e.' . pc_q($userIdCol) . ' = ? AND ' . $scopeFilters['where_sql'] . ' '
         . 'GROUP BY t.id, t.name '
-        . 'HAVING (correct_count + wrong_count) > 0 '
-        . 'ORDER BY (correct_count + wrong_count) DESC, t.name ASC';
+        . 'HAVING ' . $solvedExpr . ' > 0 '
+        . 'ORDER BY ' . $solvedExpr . ' DESC, t.name ASC';
 
     $userStmt = $pdo->prepare($userSql);
     $userStmt->execute(array_merge([$userId], $scopeFilters['params']));
@@ -654,8 +688,8 @@ function pc_fetch_topic_breakdown(PDO $pdo, string $userId, array $eventSchema, 
 
     $benchSql = 'SELECT '
         . 't.id AS id, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) AS total_correct, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0) AS total_wrong, '
+        . $correctExpr . ' AS total_correct, '
+        . $wrongExpr . ' AS total_wrong, '
         . 'COUNT(DISTINCT e.' . pc_q($userIdCol) . ') AS participants_count '
         . 'FROM `' . $eventSchema['table'] . '` e '
         . 'INNER JOIN topics t ON t.id = e.' . pc_q($topicIdCol) . ' '
@@ -714,11 +748,15 @@ function pc_fetch_trend_points(PDO $pdo, string $userId, array $eventSchema, arr
     $userIdCol = $eventSchema['user_id'];
     $isCorrectCol = $eventSchema['is_correct'];
     $attemptedAtCol = $eventSchema['attempted_at'];
+    $correctExpr = pc_sql_correct_count_expr('e', $isCorrectCol);
+    $wrongExpr = pc_sql_wrong_count_expr('e', $isCorrectCol);
+    $solvedExpr = pc_sql_solved_count_expr('e');
+    $successExpr = pc_sql_success_rate_expr('e', $isCorrectCol);
 
     $userSql = 'SELECT '
         . 'DATE(e.' . pc_q($attemptedAtCol) . ') AS d, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) AS correct_count, '
-        . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0) AS wrong_count '
+        . $correctExpr . ' AS correct_count, '
+        . $wrongExpr . ' AS wrong_count '
         . 'FROM `' . $eventSchema['table'] . '` e '
         . 'WHERE e.' . pc_q($userIdCol) . ' = ? AND ' . $scopeFilters['where_sql'] . ' '
         . 'GROUP BY DATE(e.' . pc_q($attemptedAtCol) . ')';
@@ -759,14 +797,8 @@ function pc_fetch_trend_points(PDO $pdo, string $userId, array $eventSchema, arr
             . 'SELECT '
             . 'DATE(e.' . pc_q($attemptedAtCol) . ') AS d, '
             . 'e.' . pc_q($userIdCol) . ' AS uid, '
-            . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) + '
-            . 'COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0) AS solved_count, '
-            . 'CASE '
-                . 'WHEN (COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0)) > 0 '
-                . 'THEN ROUND( '
-                    . '(COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) / '
-                    . '(COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 1 THEN 1 ELSE 0 END), 0) + COALESCE(SUM(CASE WHEN e.' . pc_q($isCorrectCol) . ' = 0 THEN 1 ELSE 0 END), 0))) * 100, 2) '
-                . 'ELSE 0 END AS success_rate '
+            . $solvedExpr . ' AS solved_count, '
+            . $successExpr . ' AS success_rate '
             . 'FROM `' . $eventSchema['table'] . '` e '
             . 'INNER JOIN `' . $profileSchema['table'] . '` up ON up.' . pc_q((string)$profileSchema['id']) . ' = e.' . pc_q($userIdCol) . ' '
             . 'WHERE ' . implode(' AND ', $benchWhere) . ' '
