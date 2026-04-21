@@ -114,16 +114,19 @@ function pc_build_workload_bars(string $scope, array $courseBreakdown, array $to
 function pc_build_status_label(?float $delta): string
 {
     if ($delta === null) {
-        return 'Veri yetersiz';
+        return 'Henüz Erken';
     }
-    if ($delta >= 3) {
-        return 'Benchmark üstü';
+    if ($delta <= -8) {
+        return 'Geliştirilmeli';
     }
-    if ($delta <= -3) {
-        return 'Benchmark altı';
+    if ($delta < 5) {
+        return 'Ortalamaya Yakın';
+    }
+    if ($delta < 12) {
+        return 'Güçlü';
     }
 
-    return 'Benchmarka yakın';
+    return 'Çok Güçlü';
 }
 
 function pc_normalize_breakdown_items(array $items): array
@@ -144,7 +147,9 @@ function pc_normalize_breakdown_items(array $items): array
         $item['user_success_rate'] = $userRate;
         $item['delta'] = $delta;
         $item['solved_count'] = (int)($item['solved_count'] ?? 0);
-        $item['status_label'] = pc_build_status_label($delta);
+        $item['status_label'] = $item['solved_count'] < 5
+            ? 'Henüz Erken'
+            : pc_build_status_label($delta);
 
         $result[] = $item;
     }
@@ -189,13 +194,33 @@ function pc_fetch_context_collections(PDO $pdo, array $context): array
 
 function pc_normalize_insights(array $insights): array
 {
-    $strongAreas = array_values(array_filter(array_map(static function (array $item): string {
+    $strongAreasRaw = array_values(array_filter(array_map(static function (array $item): string {
         return trim((string)($item['name'] ?? ''));
     }, $insights['strongest_items'] ?? []), static fn(string $name): bool => $name !== ''));
 
-    $weakAreas = array_values(array_filter(array_map(static function (array $item): string {
+    $weakAreasRaw = array_values(array_filter(array_map(static function (array $item): string {
         return trim((string)($item['name'] ?? ''));
     }, $insights['weakest_items'] ?? []), static fn(string $name): bool => $name !== ''));
+
+    $strongSeen = [];
+    $strongAreas = [];
+    foreach ($strongAreasRaw as $name) {
+        $key = function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
+        if (isset($strongSeen[$key])) {
+            continue;
+        }
+        $strongSeen[$key] = true;
+        $strongAreas[] = $name;
+    }
+
+    $weakAreas = [];
+    foreach ($weakAreasRaw as $name) {
+        $key = function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
+        if (isset($strongSeen[$key])) {
+            continue;
+        }
+        $weakAreas[] = $name;
+    }
 
     return [
         'headline' => (string)($insights['summary_text'] ?? ''),
@@ -260,11 +285,11 @@ function pc_build_empty_comparison(string $scope, array $window, array $context,
         'delta_bars' => [],
         'workload_bars' => [],
         'insights' => [
-            'headline' => 'Bu aralıkta çözüm verin yok. Insight üretilemedi.',
+            'headline' => 'Bu alan için henüz yeterince veri oluşmadı.',
             'strong_areas' => [],
             'weak_areas' => [],
-            'focus_suggestion' => 'Önce düzenli çözüm yaparak veri oluşmasını bekleyin.',
-            'trend_comment' => 'Trend üretilemedi.',
+            'focus_suggestion' => 'Şimdilik daha fazla soru çözerek daha net bir analiz oluşturabilirsin.',
+            'trend_comment' => 'Trend analizi için daha fazla veri gerekiyor.',
         ],
     ];
 

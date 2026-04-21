@@ -861,7 +861,7 @@ function pc_fetch_trend_points(PDO $pdo, string $userId, array $eventSchema, arr
 function pc_build_rank_label(?float $percentile): string
 {
     if ($percentile === null) {
-        return 'Yeterli veri yok';
+        return 'Henüz Erken';
     }
     if ($percentile >= 80) {
         return 'Çok Güçlü';
@@ -870,95 +870,184 @@ function pc_build_rank_label(?float $percentile): string
         return 'Güçlü';
     }
     if ($percentile >= 40) {
-        return 'Orta';
+        return 'Ortalamaya Yakın';
     }
     if ($percentile >= 20) {
         return 'Geliştirilmeli';
     }
 
-    return 'Kritik Gelişim Alanı';
+    return 'Geliştirilmeli';
+}
+
+function pc_detect_scope_label(array $userSummary): string
+{
+    if (!empty($userSummary['topic_id'])) {
+        return 'konu';
+    }
+    if (!empty($userSummary['course_id'])) {
+        return 'ders';
+    }
+
+    return 'yeterlilik';
+}
+
+function pc_build_headline_text(?float $delta, int $solvedCount, int $participantsCount, string $scopeLabel): string
+{
+    if ($solvedCount <= 0) {
+        return 'Bu ' . $scopeLabel . ' için henüz yeterince veri oluşmadı.';
+    }
+
+    if ($participantsCount <= 0 || $delta === null) {
+        return 'Henüz net yorum için daha fazla veriye ihtiyaç var.';
+    }
+
+    if ($delta <= -10) {
+        return 'Bu ' . $scopeLabel . 'da ortalamanın belirgin şekilde altındasın.';
+    }
+    if ($delta <= -4) {
+        return 'Bu ' . $scopeLabel . 'da ortalamanın biraz altındasın.';
+    }
+    if ($delta < 4) {
+        return 'Bu ' . $scopeLabel . 'da genel seviyeye yakın gidiyorsun.';
+    }
+    if ($delta < 10) {
+        return 'Bu ' . $scopeLabel . 'da ortalamanın üstündesin.';
+    }
+
+    return 'Bu ' . $scopeLabel . 'da oldukça güçlü görünüyorsun.';
+}
+
+function pc_pick_distinct_area_items(array $items, string $direction, array $excludedIds = [], int $limit = 3): array
+{
+    $normalizedExcluded = [];
+    foreach ($excludedIds as $excludedId) {
+        $key = trim((string)$excludedId);
+        if ($key !== '') {
+            $normalizedExcluded[$key] = true;
+        }
+    }
+
+    $comparable = array_values(array_filter($items, static function (array $item): bool {
+        return ($item['delta_vs_benchmark'] ?? null) !== null;
+    }));
+
+    $filtered = array_values(array_filter($comparable, static function (array $item): bool {
+        return pc_to_int($item['solved_count'] ?? 0) >= 5;
+    }));
+
+    if (empty($filtered)) {
+        $filtered = $comparable;
+    }
+
+    usort($filtered, static function (array $a, array $b) use ($direction): int {
+        $deltaA = (float)($a['delta_vs_benchmark'] ?? 0);
+        $deltaB = (float)($b['delta_vs_benchmark'] ?? 0);
+        if ($direction === 'desc') {
+            $cmp = $deltaB <=> $deltaA;
+        } else {
+            $cmp = $deltaA <=> $deltaB;
+        }
+        if ($cmp !== 0) {
+            return $cmp;
+        }
+
+        return pc_to_int($b['solved_count'] ?? 0) <=> pc_to_int($a['solved_count'] ?? 0);
+    });
+
+    $result = [];
+    $seen = [];
+    foreach ($filtered as $item) {
+        $id = trim((string)($item['id'] ?? ''));
+        $name = trim((string)($item['name'] ?? ''));
+        $uniqueKey = $id !== '' ? 'id:' . $id : 'name:' . mb_strtolower($name, 'UTF-8');
+
+        if ($name === '' || isset($seen[$uniqueKey])) {
+            continue;
+        }
+        if ($id !== '' && isset($normalizedExcluded[$id])) {
+            continue;
+        }
+
+        $seen[$uniqueKey] = true;
+        $result[] = [
+            'id' => $id !== '' ? $id : null,
+            'name' => $name,
+            'delta_vs_benchmark' => $item['delta_vs_benchmark'] ?? null,
+            'success_rate' => $item['success_rate'] ?? 0,
+            'solved_count' => pc_to_int($item['solved_count'] ?? 0),
+        ];
+
+        if (count($result) >= $limit) {
+            break;
+        }
+    }
+
+    return $result;
+}
+
+function pc_build_trend_comment(array $trendPoints): string
+{
+    $comparable = array_values(array_filter($trendPoints, static function (array $point): bool {
+        return ($point['benchmark_success_rate'] ?? null) !== null;
+    }));
+
+    if (count($comparable) < 3) {
+        return 'Trend analizi için daha fazla veri gerekiyor.';
+    }
+
+    $gaps = [];
+    foreach ($comparable as $point) {
+        $gap = pc_safe_delta((float)($point['user_success_rate'] ?? 0), (float)($point['benchmark_success_rate'] ?? 0));
+        if ($gap !== null) {
+            $gaps[] = $gap;
+        }
+    }
+
+    if (count($gaps) < 3) {
+        return 'Trend analizi için daha fazla veri gerekiyor.';
+    }
+
+    $firstGap = $gaps[0];
+    $lastGap = $gaps[count($gaps) - 1];
+    $gapChange = $lastGap - $firstGap;
+    $gapRange = max($gaps) - min($gaps);
+
+    if ($gapChange >= 2) {
+        return 'Son günlerde ortalamaya yaklaşıyorsun.';
+    }
+    if ($gapChange <= -2) {
+        return 'Son günlerde fark biraz açılmış görünüyor.';
+    }
+    if ($gapRange >= 8) {
+        return 'Son günlerde performansın dalgalı seyrediyor.';
+    }
+
+    return 'Son günlerde istikrarlı bir görünüm var.';
 }
 
 function pc_build_insights(array $userSummary, array $benchmarkSummary, array $items, array $trendPoints): array
 {
-    $strongest = $items;
-    usort($strongest, static function (array $a, array $b): int {
-        return (float)($b['delta_vs_benchmark'] ?? -9999) <=> (float)($a['delta_vs_benchmark'] ?? -9999);
-    });
-
-    $strongestComparable = array_values(array_filter($strongest, static function (array $item): bool {
-        return (($item['delta_vs_benchmark'] ?? null) !== null);
-    }));
-    $strongestMapped = array_map(static function (array $item): array {
-        return [
-            'id' => $item['id'] ?? null,
-            'name' => $item['name'] ?? '',
-            'delta_vs_benchmark' => $item['delta_vs_benchmark'] ?? null,
-            'success_rate' => $item['success_rate'] ?? 0,
-        ];
-    }, $strongestComparable);
-    $strongest = array_slice($strongestMapped, 0, 3);
-
-    $weakest = $items;
-    usort($weakest, static function (array $a, array $b): int {
-        return (float)($a['delta_vs_benchmark'] ?? 9999) <=> (float)($b['delta_vs_benchmark'] ?? 9999);
-    });
-
-    $weakestComparable = array_values(array_filter($weakest, static function (array $item): bool {
-        return (($item['delta_vs_benchmark'] ?? null) !== null);
-    }));
-    $weakestMapped = array_map(static function (array $item): array {
-        return [
-            'id' => $item['id'] ?? null,
-            'name' => $item['name'] ?? '',
-            'delta_vs_benchmark' => $item['delta_vs_benchmark'] ?? null,
-            'success_rate' => $item['success_rate'] ?? 0,
-        ];
-    }, $weakestComparable);
-    $weakest = array_slice($weakestMapped, 0, 3);
-
-    $summaryText = 'Bu aralıkta karşılaştırma için yeterli veri yok.';
-    $focusText = 'Önce düzenli çözüm yaparak veri oluşmasını bekleyin.';
-    $trendText = 'Trend üretilemedi.';
-
     $solved = pc_to_int($userSummary['solved_count'] ?? 0);
     $delta = $userSummary['delta_vs_benchmark'] ?? null;
-    if ($solved <= 0) {
-        $summaryText = 'Bu aralıkta çözüm verin yok. Insight üretilemedi.';
-    } elseif ($delta === null) {
-        $summaryText = 'Benchmark karşılaştırması için yeterli katılımcı bulunamadı.';
-    } elseif ($delta >= 3) {
-        $summaryText = 'Bu kapsamda benchmark ortalamasının üzerindesin.';
-    } elseif ($delta <= -3) {
-        $summaryText = 'Bu kapsamda benchmark ortalamasının altındasın.';
-    } else {
-        $summaryText = 'Benchmark ile benzer bir performans çizgisindesin.';
-    }
+    $participants = pc_to_int($benchmarkSummary['participants_count'] ?? 0);
+    $scopeLabel = pc_detect_scope_label($userSummary);
+
+    $weakest = pc_pick_distinct_area_items($items, 'asc');
+    $excludedWeakIds = array_values(array_filter(array_map(static function (array $item): string {
+        return trim((string)($item['id'] ?? ''));
+    }, $weakest), static fn(string $id): bool => $id !== ''));
+    $strongest = pc_pick_distinct_area_items($items, 'desc', $excludedWeakIds);
+
+    $summaryText = pc_build_headline_text($delta, $solved, $participants, $scopeLabel);
+    $focusText = 'Şimdilik daha fazla soru çözerek daha net bir analiz oluşturabilirsin.';
 
     if (!empty($weakest)) {
-        $focusText = 'En büyük gelişim alanı: ' . (string)($weakest[0]['name'] ?? '');
+        $focusText = 'En çok fark yaratan gelişim alanın: ' . (string)($weakest[0]['name'] ?? '') . '. Önce burada çalışman faydalı olur.';
     } elseif (!empty($strongest)) {
-        $focusText = 'Güçlü alanını koru: ' . (string)($strongest[0]['name'] ?? '');
+        $focusText = 'Öncelikle ' . (string)($strongest[0]['name'] ?? '') . ' tarafındaki güçlü seviyeni koruman iyi olur.';
     }
 
-    $comparable = array_values(array_filter($trendPoints, static function (array $point): bool {
-        return ($point['benchmark_success_rate'] ?? null) !== null;
-    }));
-    if (count($comparable) >= 2) {
-        $first = $comparable[0];
-        $last = $comparable[count($comparable) - 1];
-        $firstGap = pc_safe_delta((float)($first['user_success_rate'] ?? 0), (float)($first['benchmark_success_rate'] ?? 0));
-        $lastGap = pc_safe_delta((float)($last['user_success_rate'] ?? 0), (float)($last['benchmark_success_rate'] ?? 0));
-        if ($firstGap !== null && $lastGap !== null) {
-            if ($lastGap > $firstGap + 1) {
-                $trendText = 'Son günlerde benchmarka yaklaşıyorsun.';
-            } elseif ($lastGap < $firstGap - 1) {
-                $trendText = 'Son günlerde benchmark ile fark açılıyor.';
-            } else {
-                $trendText = 'Trend dengeli ilerliyor.';
-            }
-        }
-    }
+    $trendText = pc_build_trend_comment($trendPoints);
 
     return [
         'strongest_items' => $strongest,
