@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/api_bootstrap.php';
+require_once dirname(__DIR__, 2) . '/includes/auth.php';
 require_once dirname(__DIR__, 2) . '/includes/app_runtime_settings_helper.php';
 
 api_require_method('GET');

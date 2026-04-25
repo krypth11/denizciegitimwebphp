@@ -28,7 +28,7 @@ try {
     $allQuestionsPoolTypes = ['all', 'all_questions', 'all-questions', 'tum_sorular', 'tum-sorular'];
     if (in_array($poolType, $allQuestionsPoolTypes, true)) {
         $runtime = app_runtime_settings_get($pdo);
-        $allQuestionsMaxLimit = app_runtime_settings_int($runtime, 'study_all_questions_max_limit', 100);
+        $allQuestionsMaxLimit = app_runtime_settings_int($runtime, 'study_all_questions_max_limit', 1000);
         $limit = api_get_int_query('limit', $allQuestionsMaxLimit, 1, $allQuestionsMaxLimit);
     } else {
         $limit = api_get_int_query('limit', 200, 1, 10000);

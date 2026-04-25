@@ -1,12 +1,23 @@
 <?php
 
+function app_runtime_settings_log(string $message, array $context = []): void
+{
+    $prefix = '[app_runtime_settings] ';
+    if (!empty($context)) {
+        error_log($prefix . $message . ' | ' . json_encode($context, JSON_UNESCAPED_UNICODE));
+        return;
+    }
+
+    error_log($prefix . $message);
+}
+
 function app_runtime_settings_defaults(): array
 {
     return [
         'dashboard_daily_goal_questions' => 30,
         'free_daily_study_question_limit' => 60,
         'free_daily_mock_exam_limit' => 3,
-        'study_all_questions_max_limit' => 100,
+        'study_all_questions_max_limit' => 1000,
         'mock_exam_question_count' => 20,
     ];
 }
@@ -35,19 +46,43 @@ function app_runtime_settings_table_columns(PDO $pdo): array
         return $cache[$cacheKey];
     }
 
+    $cols = [];
+
     try {
-        $cols = get_table_columns($pdo, 'app_runtime_settings');
-        if (!is_array($cols) || !$cols) {
+        if (function_exists('get_table_columns')) {
+            $cols = get_table_columns($pdo, 'app_runtime_settings');
+        }
+    } catch (Throwable $e) {
+        app_runtime_settings_log('get_table_columns() ile kolonlar okunamadı, lokal keşif denenecek.', [
+            'error' => $e->getMessage(),
+        ]);
+        $cols = [];
+    }
+
+    if (!is_array($cols) || !$cols) {
+        try {
+            $stmt = $pdo->query('SHOW COLUMNS FROM `app_runtime_settings`');
+            $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+            foreach ($rows as $row) {
+                if (!empty($row['Field'])) {
+                    $cols[] = (string)$row['Field'];
+                }
+            }
+        } catch (Throwable $e) {
+            app_runtime_settings_log('app_runtime_settings tablo kolonları okunamadı.', [
+                'error' => $e->getMessage(),
+            ]);
             $cache[$cacheKey] = [];
             return [];
         }
-
-        $cache[$cacheKey] = array_values(array_unique(array_map(static fn($c): string => (string)$c, $cols)));
-        return $cache[$cacheKey];
-    } catch (Throwable $e) {
-        $cache[$cacheKey] = [];
-        return [];
     }
+
+    $cache[$cacheKey] = array_values(array_unique(array_map(static fn($c): string => (string)$c, $cols)));
+    if (!$cache[$cacheKey]) {
+        app_runtime_settings_log('app_runtime_settings kolon listesi boş döndü.');
+    }
+
+    return $cache[$cacheKey];
 }
 
 function app_runtime_settings_q(string $column): string
@@ -99,6 +134,12 @@ function app_runtime_settings_normalize(array $settings): array
 function app_runtime_settings_try_insert_defaults(PDO $pdo, array $columns): bool
 {
     if (!$columns) {
+        app_runtime_settings_log('Varsayılan ayarlar eklenemedi: kolon listesi boş.');
+        return false;
+    }
+
+    if (!in_array('id', $columns, true)) {
+        app_runtime_settings_log('Varsayılan ayarlar eklenemedi: id kolonu bulunamadı.');
         return false;
     }
 
@@ -107,11 +148,9 @@ function app_runtime_settings_try_insert_defaults(PDO $pdo, array $columns): boo
     $insertVals = [];
     $params = [];
 
-    if (in_array('id', $columns, true)) {
-        $insertCols[] = app_runtime_settings_q('id');
-        $insertVals[] = '?';
-        $params[] = 1;
-    }
+    $insertCols[] = app_runtime_settings_q('id');
+    $insertVals[] = '?';
+    $params[] = 1;
 
     foreach (app_runtime_settings_allowed_keys() as $key) {
         if (!in_array($key, $columns, true)) {
@@ -141,6 +180,9 @@ function app_runtime_settings_try_insert_defaults(PDO $pdo, array $columns): boo
         $stmt->execute($params);
         return true;
     } catch (Throwable $e) {
+        app_runtime_settings_log('Varsayılan ayarlar eklenemedi.', [
+            'error' => $e->getMessage(),
+        ]);
         return false;
     }
 }
@@ -148,6 +190,12 @@ function app_runtime_settings_try_insert_defaults(PDO $pdo, array $columns): boo
 function app_runtime_settings_fetch_row(PDO $pdo, array $columns): ?array
 {
     if (!$columns) {
+        app_runtime_settings_log('Ayar satırı okunamadı: kolon listesi boş.');
+        return null;
+    }
+
+    if (!in_array('id', $columns, true)) {
+        app_runtime_settings_log('Ayar satırı okunamadı: id kolonu bulunamadı.');
         return null;
     }
 
@@ -164,15 +212,16 @@ function app_runtime_settings_fetch_row(PDO $pdo, array $columns): ?array
 
     try {
         $sql = 'SELECT ' . implode(', ', $select) . ' FROM `app_runtime_settings`';
-        if (in_array('id', $columns, true)) {
-            $sql .= ' WHERE `id` = 1';
-        }
+        $sql .= ' WHERE `id` = 1';
         $sql .= ' LIMIT 1';
 
         $stmt = $pdo->query($sql);
         $row = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
         return is_array($row) ? $row : null;
     } catch (Throwable $e) {
+        app_runtime_settings_log('Ayar satırı sorgusunda DB hatası.', [
+            'error' => $e->getMessage(),
+        ]);
         return null;
     }
 }
@@ -182,6 +231,7 @@ function app_runtime_settings_get(PDO $pdo): array
     $defaults = app_runtime_settings_defaults();
     $columns = app_runtime_settings_table_columns($pdo);
     if (!$columns) {
+        app_runtime_settings_log('Varsayılan fallback: tablo/kolonlar okunamadı.');
         return $defaults;
     }
 
@@ -192,6 +242,7 @@ function app_runtime_settings_get(PDO $pdo): array
     }
 
     if (!$row) {
+        app_runtime_settings_log('Varsayılan fallback: id=1 ayar satırı bulunamadı.');
         return $defaults;
     }
 
@@ -202,6 +253,12 @@ function app_runtime_settings_update(PDO $pdo, array $input): array
 {
     $columns = app_runtime_settings_table_columns($pdo);
     if (!$columns) {
+        app_runtime_settings_log('Güncelleme fallback: tablo/kolonlar okunamadı.');
+        return app_runtime_settings_defaults();
+    }
+
+    if (!in_array('id', $columns, true)) {
+        app_runtime_settings_log('Güncelleme fallback: id kolonu bulunamadı.');
         return app_runtime_settings_defaults();
     }
 
@@ -232,9 +289,7 @@ function app_runtime_settings_update(PDO $pdo, array $input): array
     if ($set) {
         try {
             $sql = 'UPDATE `app_runtime_settings` SET ' . implode(', ', $set);
-            if (in_array('id', $columns, true)) {
-                $sql .= ' WHERE `id` = 1';
-            }
+            $sql .= ' WHERE `id` = 1';
             $sql .= ' LIMIT 1';
 
             $stmt = $pdo->prepare($sql);
@@ -258,15 +313,16 @@ function app_runtime_settings_update(PDO $pdo, array $input): array
 
                 if ($setFallback) {
                     $sqlFallback = 'UPDATE `app_runtime_settings` SET ' . implode(', ', $setFallback);
-                    if (in_array('id', $columns, true)) {
-                        $sqlFallback .= ' WHERE `id` = 1';
-                    }
+                    $sqlFallback .= ' WHERE `id` = 1';
                     $sqlFallback .= ' LIMIT 1';
                     $stmtFallback = $pdo->prepare($sqlFallback);
                     $stmtFallback->execute($fallbackParams);
                 }
             }
         } catch (Throwable $e) {
+            app_runtime_settings_log('Ayar güncelleme işleminde DB hatası.', [
+                'error' => $e->getMessage(),
+            ]);
             return app_runtime_settings_get($pdo);
         }
     }
