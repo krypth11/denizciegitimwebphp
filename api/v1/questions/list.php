@@ -2,11 +2,13 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once dirname(__DIR__) . '/study_helper.php';
 
 api_require_method('GET');
 
 try {
     $auth = api_require_auth($pdo);
+    $userId = (string)$auth['user']['id'];
     $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'questions.list');
 
     $columns = get_table_columns($pdo, 'questions');
@@ -19,28 +21,31 @@ try {
     $courseId = api_validate_optional_id((string)($_GET['course_id'] ?? ''), 'course_id', 191);
     $topicId = api_validate_optional_id((string)($_GET['topic_id'] ?? ''), 'topic_id', 191);
     $questionType = trim((string)($_GET['question_type'] ?? ''));
+    $poolType = strtolower(trim((string)($_GET['pool_type'] ?? '')));
     $orderParam = strtolower(trim((string)($_GET['order'] ?? 'desc')));
 
     $limit = api_get_int_query('limit', 200, 1, 10000);
 
     $order = in_array($orderParam, ['asc', 'desc'], true) ? strtoupper($orderParam) : 'DESC';
 
+    $q = 'q';
+    $qc = static fn(string $col): string => $q . '.`' . str_replace('`', '', $col) . '`';
     $select = [
-        $hasCol('id') ? 'id' : "'' AS id",
-        $hasCol('topic_id') ? 'topic_id' : 'NULL AS topic_id',
-        $hasCol('course_id') ? 'course_id' : 'NULL AS course_id',
-        $hasCol('question_type') ? 'question_type' : "'' AS question_type",
-        $hasCol('question_text') ? 'question_text' : "'' AS question_text",
-        $hasCol('option_a') ? 'option_a' : "'' AS option_a",
-        $hasCol('option_b') ? 'option_b' : "'' AS option_b",
-        $hasCol('option_c') ? 'option_c' : "'' AS option_c",
-        $hasCol('option_d') ? 'option_d' : "'' AS option_d",
-        $hasCol('option_e') ? 'option_e' : 'NULL AS option_e',
-        $hasCol('correct_answer') ? 'correct_answer' : "'' AS correct_answer",
-        $hasCol('explanation') ? 'explanation' : "'' AS explanation",
-        $hasCol('image_url') ? 'image_url' : 'NULL AS image_url',
-        $hasCol('difficulty') ? 'difficulty' : 'NULL AS difficulty',
-        $hasCol('created_at') ? 'created_at' : 'NULL AS created_at',
+        $hasCol('id') ? ($qc('id') . ' AS id') : "'' AS id",
+        $hasCol('topic_id') ? ($qc('topic_id') . ' AS topic_id') : 'NULL AS topic_id',
+        $hasCol('course_id') ? ($qc('course_id') . ' AS course_id') : 'NULL AS course_id',
+        $hasCol('question_type') ? ($qc('question_type') . ' AS question_type') : "'' AS question_type",
+        $hasCol('question_text') ? ($qc('question_text') . ' AS question_text') : "'' AS question_text",
+        $hasCol('option_a') ? ($qc('option_a') . ' AS option_a') : "'' AS option_a",
+        $hasCol('option_b') ? ($qc('option_b') . ' AS option_b') : "'' AS option_b",
+        $hasCol('option_c') ? ($qc('option_c') . ' AS option_c') : "'' AS option_c",
+        $hasCol('option_d') ? ($qc('option_d') . ' AS option_d') : "'' AS option_d",
+        $hasCol('option_e') ? ($qc('option_e') . ' AS option_e') : 'NULL AS option_e',
+        $hasCol('correct_answer') ? ($qc('correct_answer') . ' AS correct_answer') : "'' AS correct_answer",
+        $hasCol('explanation') ? ($qc('explanation') . ' AS explanation') : "'' AS explanation",
+        $hasCol('image_url') ? ($qc('image_url') . ' AS image_url') : 'NULL AS image_url',
+        $hasCol('difficulty') ? ($qc('difficulty') . ' AS difficulty') : 'NULL AS difficulty',
+        $hasCol('created_at') ? ($qc('created_at') . ' AS created_at') : 'NULL AS created_at',
     ];
 
     $where = [];
@@ -48,7 +53,7 @@ try {
 
     $qualificationFilterApplied = false;
     if ($hasCol('qualification_id')) {
-        $where[] = 'qualification_id = ?';
+        $where[] = $qc('qualification_id') . ' = ?';
         $params[] = $currentQualificationId;
         $qualificationFilterApplied = true;
     }
@@ -70,7 +75,7 @@ try {
         }
 
         if (!$qualificationFilterApplied) {
-            $where[] = 'course_id IN (SELECT id FROM courses WHERE qualification_id = ?)';
+            $where[] = $qc('course_id') . ' IN (SELECT id FROM courses WHERE qualification_id = ?)';
             $params[] = $currentQualificationId;
             $qualificationFilterApplied = true;
         }
@@ -99,14 +104,14 @@ try {
 
     if ($courseId !== '') {
         if ($hasCol('course_id')) {
-            $where[] = 'course_id = ?';
+            $where[] = $qc('course_id') . ' = ?';
             $params[] = $courseId;
         }
     }
 
     if ($topicId !== '') {
         if ($hasCol('topic_id')) {
-            $where[] = 'topic_id = ?';
+            $where[] = $qc('topic_id') . ' = ?';
             $params[] = $topicId;
         }
     }
@@ -116,22 +121,73 @@ try {
             api_error('Geçersiz question_type.', 422);
         }
         if ($hasCol('question_type')) {
-            $where[] = 'question_type = ?';
+            $where[] = $qc('question_type') . ' = ?';
             $params[] = $questionType;
         }
     }
 
-    $sql = 'SELECT ' . implode(', ', $select) . ' FROM questions';
-    if ($where) {
-        $sql .= ' WHERE ' . implode(' AND ', $where);
+    $rows = [];
+    if ($poolType === 'most_wrong') {
+        $ws = study_get_wrong_score_schema($pdo);
+        if ($ws && !empty($ws['user_id']) && !empty($ws['question_id']) && !empty($ws['wrong_score'])) {
+            $select[] = 'COALESCE(ws.' . study_q($ws['wrong_score']) . ', 0) AS wrong_score';
+
+            $sql = 'SELECT ' . implode(', ', $select)
+                . ' FROM questions ' . $q
+                . ' INNER JOIN ' . study_q($ws['table']) . ' ws'
+                . ' ON ws.' . study_q($ws['question_id']) . ' = ' . $qc('id')
+                . ' AND ws.' . study_q($ws['user_id']) . ' = ?';
+
+            $paramsMostWrong = array_merge([$userId], $params);
+            if (!empty($ws['qualification_id'])) {
+                $sql .= ' AND ws.' . study_q($ws['qualification_id']) . ' = ?';
+                $paramsMostWrong[] = $currentQualificationId;
+            }
+
+            $whereMostWrong = $where;
+            $whereMostWrong[] = 'COALESCE(ws.' . study_q($ws['wrong_score']) . ', 0) > 0';
+            if ($whereMostWrong) {
+                $sql .= ' WHERE ' . implode(' AND ', $whereMostWrong);
+            }
+
+            $orderByMostWrong = ['COALESCE(ws.' . study_q($ws['wrong_score']) . ', 0) DESC'];
+            if (!empty($ws['last_answered_at'])) {
+                $orderByMostWrong[] = 'ws.' . study_q($ws['last_answered_at']) . ' DESC';
+            }
+            $sql .= ' ORDER BY ' . implode(', ', $orderByMostWrong);
+
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($paramsMostWrong);
+            $rankedRows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            $topRows = array_slice($rankedRows, 0, 50);
+            $remainingRows = array_slice($rankedRows, 50);
+
+            if (count($topRows) > 1) {
+                shuffle($topRows);
+            }
+            if (count($remainingRows) > 1) {
+                shuffle($remainingRows);
+            }
+
+            $rows = array_merge($topRows, $remainingRows);
+            if ($limit > 0) {
+                $rows = array_slice($rows, 0, $limit);
+            }
+        }
+    } else {
+        $sql = 'SELECT ' . implode(', ', $select) . ' FROM questions ' . $q;
+        if ($where) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
+        }
+
+        $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+        $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
-
-    $orderBy = $hasCol('created_at') ? 'created_at' : ($hasCol('id') ? 'id' : '1');
-    $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     $questions = array_map(static function (array $row): array {
         $explanation = (string)($row['explanation'] ?? '');
@@ -152,6 +208,7 @@ try {
             'image_url' => $row['image_url'] ?? null,
             'difficulty' => $row['difficulty'] ?? null,
             'created_at' => $row['created_at'] ?? null,
+            'wrong_score' => array_key_exists('wrong_score', $row) ? (int)$row['wrong_score'] : null,
         ];
     }, $rows);
 

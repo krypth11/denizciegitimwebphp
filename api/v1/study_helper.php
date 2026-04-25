@@ -230,6 +230,141 @@ function study_get_question_meta_with_relations(PDO $pdo, string $questionId): a
     ];
 }
 
+function study_get_wrong_score_schema(PDO $pdo): array
+{
+    $cols = get_table_columns($pdo, 'user_question_wrong_scores');
+    if (!$cols) {
+        return [];
+    }
+
+    return [
+        'table' => 'user_question_wrong_scores',
+        'user_id' => study_pick_column($cols, ['user_id'], true),
+        'question_id' => study_pick_column($cols, ['question_id'], true),
+        'qualification_id' => study_pick_column($cols, ['qualification_id'], false),
+        'course_id' => study_pick_column($cols, ['course_id'], false),
+        'topic_id' => study_pick_column($cols, ['topic_id'], false),
+        'wrong_score' => study_pick_column($cols, ['wrong_score'], true),
+        'wrong_count' => study_pick_column($cols, ['wrong_count'], false),
+        'correct_recovery_count' => study_pick_column($cols, ['correct_recovery_count'], false),
+        'last_answered_at' => study_pick_column($cols, ['last_answered_at'], false),
+        'last_wrong_at' => study_pick_column($cols, ['last_wrong_at'], false),
+        'last_correct_at' => study_pick_column($cols, ['last_correct_at'], false),
+        'updated_at' => study_pick_column($cols, ['updated_at'], false),
+    ];
+}
+
+function study_update_question_wrong_score(PDO $pdo, array $payload): void
+{
+    $userId = trim((string)($payload['user_id'] ?? ''));
+    $questionId = trim((string)($payload['question_id'] ?? ''));
+    $qualificationId = array_key_exists('qualification_id', $payload) ? $payload['qualification_id'] : null;
+    $courseId = array_key_exists('course_id', $payload) ? $payload['course_id'] : null;
+    $topicId = array_key_exists('topic_id', $payload) ? $payload['topic_id'] : null;
+    $isCorrect = !empty($payload['is_correct']);
+
+    if ($userId === '' || $questionId === '') {
+        throw new RuntimeException('wrong score güncellemesi için user_id ve question_id zorunludur.');
+    }
+
+    $schema = study_get_wrong_score_schema($pdo);
+    if (!$schema) {
+        throw new RuntimeException('user_question_wrong_scores tablosu okunamadı.');
+    }
+
+    $insertCols = [
+        $schema['user_id'],
+        $schema['question_id'],
+    ];
+    $insertVals = ['?', '?'];
+    $params = [$userId, $questionId];
+
+    foreach (['qualification_id' => $qualificationId, 'course_id' => $courseId, 'topic_id' => $topicId] as $k => $value) {
+        if (!empty($schema[$k])) {
+            $insertCols[] = $schema[$k];
+            $insertVals[] = '?';
+            $params[] = $value;
+        }
+    }
+
+    $insertCols[] = $schema['wrong_score'];
+    $insertVals[] = '?';
+    $params[] = $isCorrect ? 0 : 1;
+
+    if (!empty($schema['wrong_count'])) {
+        $insertCols[] = $schema['wrong_count'];
+        $insertVals[] = '?';
+        $params[] = $isCorrect ? 0 : 1;
+    }
+    if (!empty($schema['correct_recovery_count'])) {
+        $insertCols[] = $schema['correct_recovery_count'];
+        $insertVals[] = '?';
+        $params[] = $isCorrect ? 1 : 0;
+    }
+
+    foreach (['last_answered_at', 'updated_at'] as $k) {
+        if (!empty($schema[$k])) {
+            $insertCols[] = $schema[$k];
+            $insertVals[] = 'NOW()';
+        }
+    }
+
+    if ($isCorrect) {
+        if (!empty($schema['last_correct_at'])) {
+            $insertCols[] = $schema['last_correct_at'];
+            $insertVals[] = 'NOW()';
+        }
+    } else {
+        if (!empty($schema['last_wrong_at'])) {
+            $insertCols[] = $schema['last_wrong_at'];
+            $insertVals[] = 'NOW()';
+        }
+    }
+
+    $updates = [];
+    foreach (['qualification_id', 'course_id', 'topic_id'] as $k) {
+        if (!empty($schema[$k])) {
+            $updates[] = study_q($schema[$k]) . ' = VALUES(' . study_q($schema[$k]) . ')';
+        }
+    }
+
+    if ($isCorrect) {
+        $updates[] = study_q($schema['wrong_score'])
+            . ' = GREATEST(COALESCE(' . study_q($schema['wrong_score']) . ', 0) - 1, 0)';
+        if (!empty($schema['correct_recovery_count'])) {
+            $updates[] = study_q($schema['correct_recovery_count'])
+                . ' = COALESCE(' . study_q($schema['correct_recovery_count']) . ', 0) + 1';
+        }
+        if (!empty($schema['last_correct_at'])) {
+            $updates[] = study_q($schema['last_correct_at']) . ' = NOW()';
+        }
+    } else {
+        $updates[] = study_q($schema['wrong_score']) . ' = COALESCE(' . study_q($schema['wrong_score']) . ', 0) + 1';
+        if (!empty($schema['wrong_count'])) {
+            $updates[] = study_q($schema['wrong_count'])
+                . ' = COALESCE(' . study_q($schema['wrong_count']) . ', 0) + 1';
+        }
+        if (!empty($schema['last_wrong_at'])) {
+            $updates[] = study_q($schema['last_wrong_at']) . ' = NOW()';
+        }
+    }
+
+    if (!empty($schema['last_answered_at'])) {
+        $updates[] = study_q($schema['last_answered_at']) . ' = NOW()';
+    }
+    if (!empty($schema['updated_at'])) {
+        $updates[] = study_q($schema['updated_at']) . ' = NOW()';
+    }
+
+    $sql = 'INSERT INTO ' . study_q($schema['table'])
+        . ' (' . implode(', ', array_map('study_q', $insertCols)) . ')'
+        . ' VALUES (' . implode(', ', $insertVals) . ')'
+        . ' ON DUPLICATE KEY UPDATE ' . implode(', ', $updates);
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+}
+
 function study_get_attempt_event_schema(PDO $pdo): array
 {
     $cols = get_table_columns($pdo, 'question_attempt_events');

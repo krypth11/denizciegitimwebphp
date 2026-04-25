@@ -502,6 +502,59 @@ function mock_exam_fetch_wrong_question_ids(PDO $pdo, string $userId, string $qu
     $wrong = [];
     $ph = implode(',', array_fill(0, count($candidateIds), '?'));
 
+    // 0) Yeni dinamik wrong_score tablosu (öncelikli)
+    try {
+        $ws = study_get_wrong_score_schema($pdo);
+        if (!empty($ws['user_id']) && !empty($ws['question_id']) && !empty($ws['wrong_score'])) {
+            $sql = 'SELECT ws.' . mock_exam_q($ws['question_id']) . ' AS question_id, '
+                . 'COALESCE(ws.' . mock_exam_q($ws['wrong_score']) . ', 0) AS wrong_score '
+                . 'FROM ' . mock_exam_q($ws['table']) . ' ws '
+                . 'WHERE ws.' . mock_exam_q($ws['user_id']) . ' = ? '
+                . 'AND COALESCE(ws.' . mock_exam_q($ws['wrong_score']) . ', 0) > 0 '
+                . 'AND ws.' . mock_exam_q($ws['question_id']) . ' IN (' . $ph . ')';
+
+            $params = array_merge([$userId], $candidateIds);
+            if (!empty($ws['qualification_id'])) {
+                $sql .= ' AND ws.' . mock_exam_q($ws['qualification_id']) . ' = ?';
+                $params[] = $qualificationId;
+            }
+
+            $orderFragments = ['wrong_score DESC'];
+            if (!empty($ws['last_answered_at'])) {
+                $orderFragments[] = 'ws.' . mock_exam_q($ws['last_answered_at']) . ' DESC';
+            }
+            $sql .= ' ORDER BY ' . implode(', ', $orderFragments);
+
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            if ($rows) {
+                $ranked = [];
+                foreach ($rows as $r) {
+                    $qid = (string)($r['question_id'] ?? '');
+                    if ($qid !== '') {
+                        $ranked[] = $qid;
+                    }
+                }
+
+                if ($ranked) {
+                    $head = array_slice($ranked, 0, 50);
+                    $tail = array_slice($ranked, 50);
+                    if (count($head) > 1) {
+                        shuffle($head);
+                    }
+                    if (count($tail) > 1) {
+                        shuffle($tail);
+                    }
+                    return array_values(array_unique(array_merge($head, $tail)));
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        // yeni tablo yoksa/okunamazsa legacy fallback'e devam
+    }
+
     // 1) user_progress öncelikli
     try {
         $up = study_get_user_progress_schema($pdo);
@@ -1430,6 +1483,14 @@ function mock_exam_write_events_and_progress(PDO $pdo, string $userId, string $a
             'is_correct' => $isCorrect,
         ]);
         study_upsert_answer_progress($pdo, $userId, (string)$q['question_id'], $selected, $isCorrect);
+        study_update_question_wrong_score($pdo, [
+            'user_id' => $userId,
+            'question_id' => (string)$q['question_id'],
+            'qualification_id' => $qualificationId,
+            'course_id' => $q['course_id'] ?? null,
+            'topic_id' => $q['topic_id'] ?? null,
+            'is_correct' => $isCorrect,
+        ]);
     }
 }
 

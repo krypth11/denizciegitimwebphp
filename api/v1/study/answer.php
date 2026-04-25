@@ -176,6 +176,21 @@ try {
         ], 500);
     }
 
+    $wrongScoreUpdateWarning = null;
+    $debugStep = 'wrong_score_update';
+    try {
+        study_update_question_wrong_score($pdo, [
+            'user_id' => $userId,
+            'question_id' => $questionId,
+            'qualification_id' => $questionMeta['qualification_id'] ?? null,
+            'course_id' => $questionMeta['course_id'] ?? null,
+            'topic_id' => $questionMeta['topic_id'] ?? null,
+            'is_correct' => $computedIsCorrect,
+        ]);
+    } catch (Throwable $wrongScoreError) {
+        $wrongScoreUpdateWarning = $wrongScoreError->getMessage();
+    }
+
     // user_progress akışını bozmadan event-level kayıt ekle (tablo/kolon yoksa sessizce geç)
     $eventInsertWarning = null;
     $debugStep = 'event_insert';
@@ -205,6 +220,7 @@ try {
 
     api_success('Cevap kaydedildi.', [
         'progress' => $progress,
+        'wrong_score_update_warning' => $wrongScoreUpdateWarning,
         'event_insert_warning' => $eventInsertWarning,
     ]);
 } catch (Throwable $e) {

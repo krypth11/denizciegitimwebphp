@@ -472,6 +472,14 @@ function offline_sync_handle_study_answer_upsert(PDO $pdo, string $userId, array
     }
 
     $progress = study_upsert_answer_progress($pdo, $userId, $questionId, $selectedAnswer, $isCorrect);
+    study_update_question_wrong_score($pdo, [
+        'user_id' => $userId,
+        'question_id' => $questionId,
+        'qualification_id' => $meta['qualification_id'] ?? null,
+        'course_id' => $meta['course_id'] ?? null,
+        'topic_id' => $meta['topic_id'] ?? null,
+        'is_correct' => $isCorrect,
+    ]);
     study_insert_attempt_event($pdo, [
         'user_id' => $userId,
         'question_id' => $questionId,
@@ -490,7 +498,7 @@ function offline_sync_handle_study_answer_upsert(PDO $pdo, string $userId, array
         'selected_answer' => $selectedAnswer,
         'is_correct' => $isCorrect,
         'progress' => $progress,
-        'domain_writes_performed' => ['user_progress', 'question_attempt_events', 'statistics'],
+        'domain_writes_performed' => ['user_progress', 'user_question_wrong_scores', 'question_attempt_events', 'statistics'],
     ];
 }
 
