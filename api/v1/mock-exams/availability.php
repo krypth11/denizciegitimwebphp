@@ -4,6 +4,7 @@ require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/response_helper.php';
 require_once dirname(__DIR__) . '/mock_exam_helper.php';
+require_once dirname(__DIR__, 2) . '/includes/app_runtime_settings_helper.php';
 
 api_require_method('GET');
 
@@ -19,7 +20,9 @@ try {
         'current_qualification_id' => $currentQualificationId,
     ]);
     $qualificationId = $currentQualificationId;
-    $requested = api_get_int_query('requested_question_count', 20, 1, 100);
+    $runtimeSettings = app_runtime_settings_get($pdo);
+    $mockExamQuestionCount = app_runtime_settings_int($runtimeSettings, 'mock_exam_question_count', 20);
+    $requested = api_get_int_query('requested_question_count', $mockExamQuestionCount, 1, $mockExamQuestionCount);
 
     $counts = mock_exam_calculate_pool_counts($pdo, $userId, $qualificationId);
     $courses = mock_exam_fetch_qualification_courses($pdo, $qualificationId);
@@ -77,7 +80,7 @@ try {
         'wrong_message' => $wrongMsg,
         'requested_question_count' => $requested,
         'qualification_id' => $qualificationId,
-        'supported_question_count' => max(0, min(100, (int)$counts['total'])),
+        'supported_question_count' => max(0, min($mockExamQuestionCount, (int)$counts['total'])),
         'course_distribution_preview' => $distribution,
     ]);
 } catch (Throwable $e) {

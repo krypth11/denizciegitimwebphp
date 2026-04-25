@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/auth_helper.php';
+require_once dirname(__DIR__, 2) . '/includes/app_runtime_settings_helper.php';
 
 if (!defined('USAGE_LIMITS_SUBSCRIPTION_DEBUG_PARAM')) {
     define('USAGE_LIMITS_SUBSCRIPTION_DEBUG_PARAM', 'debug_subscription_sync');
@@ -87,13 +88,23 @@ function usage_limits_get_daily_counter_schema(PDO $pdo): array
     ];
 }
 
-function usage_limits_get_daily_limit(string $featureKey): int
+function usage_limits_get_daily_limit(string $featureKey, ?PDO $db = null): int
 {
+    if (!($db instanceof PDO)) {
+        global $pdo;
+        $db = ($pdo instanceof PDO) ? $pdo : null;
+    }
+
+    $runtime = app_runtime_settings_defaults();
+    if ($db instanceof PDO) {
+        $runtime = app_runtime_settings_get($db);
+    }
+
     if ($featureKey === USAGE_LIMIT_FEATURE_STUDY_QUESTION_OPEN) {
-        return USAGE_LIMIT_DAILY_STUDY_QUESTION_OPEN;
+        return app_runtime_settings_int($runtime, 'free_daily_study_question_limit', USAGE_LIMIT_DAILY_STUDY_QUESTION_OPEN);
     }
     if ($featureKey === USAGE_LIMIT_FEATURE_MOCK_EXAM_START) {
-        return USAGE_LIMIT_DAILY_MOCK_EXAM_START;
+        return app_runtime_settings_int($runtime, 'free_daily_mock_exam_limit', USAGE_LIMIT_DAILY_MOCK_EXAM_START);
     }
 
     throw new RuntimeException('Geçersiz feature_key: ' . $featureKey);
@@ -1475,7 +1486,7 @@ function usage_limits_build_feature_summary(
     ?string $usageDateTr = null
 ): array {
     $usageDateTr = $usageDateTr ?: usage_limits_tr_date();
-    $dailyLimit = usage_limits_get_daily_limit($featureKey);
+    $dailyLimit = usage_limits_get_daily_limit($featureKey, $pdo);
     $counter = usage_limits_get_or_create_counter($pdo, $userId, $qualificationId, $featureKey, $usageDateTr);
     $usedCount = (int)($counter['used_count'] ?? 0);
 
@@ -1557,7 +1568,7 @@ function usage_limits_consume(PDO $pdo, string $userId, string $qualificationId,
         ];
     }
 
-    $dailyLimit = usage_limits_get_daily_limit($featureKey);
+    $dailyLimit = usage_limits_get_daily_limit($featureKey, $pdo);
     $counter = usage_limits_get_or_create_counter($pdo, $userId, $qualificationId, $featureKey, $usageDateTr);
     $used = (int)($counter['used_count'] ?? 0);
 

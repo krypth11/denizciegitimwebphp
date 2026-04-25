@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/auth_helper.php';
 require_once __DIR__ . '/study_helper.php';
+require_once dirname(__DIR__, 2) . '/includes/app_runtime_settings_helper.php';
 
 function mock_exam_debug_log(string $stage, array $context = []): void
 {
@@ -55,12 +56,21 @@ function mock_exam_normalize_mode(string $mode): string
     return in_array($v, ['standard', 'similar', 'wrong_only', 'wrong_blank'], true) ? $v : 'standard';
 }
 
-function mock_exam_validate_question_count(int $count): int
+function mock_exam_validate_question_count(int $count, ?PDO $pdo = null): int
 {
-    if ($count < 1 || $count > 100) {
-        throw new RuntimeException('requested_question_count 1-100 aralığında olmalıdır.');
+    $settings = app_runtime_settings_defaults();
+    if ($pdo instanceof PDO) {
+        $settings = app_runtime_settings_get($pdo);
     }
-    return $count;
+
+    $maxAllowed = app_runtime_settings_int($settings, 'mock_exam_question_count', 20);
+    $maxAllowed = max(1, $maxAllowed);
+
+    if ($count < 1) {
+        return $maxAllowed;
+    }
+
+    return min($count, $maxAllowed);
 }
 
 function mock_exam_get_attempt_schema(PDO $pdo): array
@@ -135,9 +145,12 @@ function mock_exam_get_attempt_question_schema(PDO $pdo): array
 
 function mock_exam_get_user_exam_preferences(PDO $pdo, string $userId): array
 {
+    $runtimeSettings = app_runtime_settings_get($pdo);
+    $defaultQuestionCount = app_runtime_settings_int($runtimeSettings, 'mock_exam_question_count', 20);
+
     $cols = get_table_columns($pdo, 'user_exam_preferences');
     if (!$cols) {
-        return ['last_pool_type' => 'random', 'last_question_count' => 20];
+        return ['last_pool_type' => 'random', 'last_question_count' => $defaultQuestionCount];
     }
     $userCol = mock_exam_pick($cols, ['user_id'], true);
     $poolCol = mock_exam_pick($cols, ['last_pool_type', 'pool_type'], false);
@@ -145,7 +158,7 @@ function mock_exam_get_user_exam_preferences(PDO $pdo, string $userId): array
 
     $sql = 'SELECT '
         . ($poolCol ? mock_exam_q($poolCol) : "'random'") . ' AS last_pool_type, '
-        . ($countCol ? mock_exam_q($countCol) : '20') . ' AS last_question_count '
+        . ($countCol ? mock_exam_q($countCol) : (string)$defaultQuestionCount) . ' AS last_question_count '
         . 'FROM `user_exam_preferences` WHERE ' . mock_exam_q($userCol) . ' = ? LIMIT 1';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$userId]);
@@ -153,14 +166,14 @@ function mock_exam_get_user_exam_preferences(PDO $pdo, string $userId): array
 
     return [
         'last_pool_type' => mock_exam_normalize_pool_type((string)($row['last_pool_type'] ?? 'random')),
-        'last_question_count' => max(1, min(100, (int)($row['last_question_count'] ?? 20))),
+        'last_question_count' => mock_exam_validate_question_count((int)($row['last_question_count'] ?? $defaultQuestionCount), $pdo),
     ];
 }
 
 function mock_exam_save_user_exam_preferences(PDO $pdo, string $userId, string $poolType, int $questionCount): void
 {
     $poolType = mock_exam_normalize_pool_type($poolType);
-    $questionCount = mock_exam_validate_question_count($questionCount);
+    $questionCount = mock_exam_validate_question_count($questionCount, $pdo);
 
     $cols = get_table_columns($pdo, 'user_exam_preferences');
     if (!$cols) {
@@ -1185,7 +1198,7 @@ function mock_exam_create_attempt(PDO $pdo, string $userId, array $payload): arr
     if ($qualificationId === '') {
         throw new RuntimeException('qualification_id zorunludur.');
     }
-    $requested = mock_exam_validate_question_count((int)($payload['requested_question_count'] ?? 0));
+    $requested = mock_exam_validate_question_count((int)($payload['requested_question_count'] ?? 0), $pdo);
     $poolType = mock_exam_normalize_pool_type((string)($payload['pool_type'] ?? 'random'));
     $mode = mock_exam_normalize_mode((string)($payload['mode'] ?? 'standard'));
     $sourceAttemptId = trim((string)($payload['source_attempt_id'] ?? ''));

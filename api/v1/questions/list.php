@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/study_helper.php';
+require_once dirname(__DIR__, 2) . '/includes/app_runtime_settings_helper.php';
 
 api_require_method('GET');
 
@@ -24,7 +25,14 @@ try {
     $poolType = strtolower(trim((string)($_GET['pool_type'] ?? '')));
     $orderParam = strtolower(trim((string)($_GET['order'] ?? 'desc')));
 
-    $limit = api_get_int_query('limit', 200, 1, 10000);
+    $allQuestionsPoolTypes = ['all', 'all_questions', 'all-questions', 'tum_sorular', 'tum-sorular'];
+    if (in_array($poolType, $allQuestionsPoolTypes, true)) {
+        $runtime = app_runtime_settings_get($pdo);
+        $allQuestionsMaxLimit = app_runtime_settings_int($runtime, 'study_all_questions_max_limit', 100);
+        $limit = api_get_int_query('limit', $allQuestionsMaxLimit, 1, $allQuestionsMaxLimit);
+    } else {
+        $limit = api_get_int_query('limit', 200, 1, 10000);
+    }
 
     $order = in_array($orderParam, ['asc', 'desc'], true) ? strtoupper($orderParam) : 'DESC';
 
