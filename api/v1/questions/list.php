@@ -138,11 +138,12 @@ try {
                 . ' ON ws.' . study_q($ws['question_id']) . ' = ' . $qc('id')
                 . ' AND ws.' . study_q($ws['user_id']) . ' = ?';
 
-            $paramsMostWrong = array_merge([$userId], $params);
+            $joinParams = [$userId];
             if (!empty($ws['qualification_id'])) {
                 $sql .= ' AND ws.' . study_q($ws['qualification_id']) . ' = ?';
-                $paramsMostWrong[] = $currentQualificationId;
+                $joinParams[] = $currentQualificationId;
             }
+            $paramsMostWrong = array_merge($joinParams, $params);
 
             $whereMostWrong = $where;
             $whereMostWrong[] = 'COALESCE(ws.' . study_q($ws['wrong_score']) . ', 0) > 0';
