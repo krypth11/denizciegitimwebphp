@@ -30,6 +30,12 @@ function news_normalize_category(string $category): string
     return isset($labels[$value]) ? $value : 'general';
 }
 
+function news_normalize_region(string $region): string
+{
+    $value = strtolower(trim($region));
+    return in_array($value, ['local', 'global'], true) ? $value : '';
+}
+
 function news_clean_text(?string $value, int $maxLen = 5000): string
 {
     $text = trim((string)$value);
@@ -390,6 +396,16 @@ function news_upsert_pending_article(PDO $pdo, array $source, array $item): arra
         return [
             'inserted' => false,
             'skipped_duplicate' => false,
+            'skipped_no_image' => false,
+        ];
+    }
+
+    $imageUrl = trim((string)($item['image_url'] ?? ''));
+    if ($imageUrl === '') {
+        return [
+            'inserted' => false,
+            'skipped_duplicate' => false,
+            'skipped_no_image' => true,
         ];
     }
 
@@ -400,11 +416,11 @@ function news_upsert_pending_article(PDO $pdo, array $source, array $item): arra
         return [
             'inserted' => false,
             'skipped_duplicate' => true,
+            'skipped_no_image' => false,
         ];
     }
 
     $summary = news_clean_text((string)($item['summary'] ?? ''), 1200);
-    $imageUrl = trim((string)($item['image_url'] ?? ''));
     $category = news_normalize_category((string)($item['category'] ?? $source['category'] ?? 'general'));
     $publishedAt = news_parse_datetime((string)($item['published_at'] ?? ''));
 
@@ -427,6 +443,7 @@ function news_upsert_pending_article(PDO $pdo, array $source, array $item): arra
     return [
         'inserted' => true,
         'skipped_duplicate' => false,
+        'skipped_no_image' => false,
     ];
 }
 
@@ -456,6 +473,7 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
         $items = news_extract_rss_items($xml);
         $inserted = 0;
         $skippedDuplicates = 0;
+        $skippedNoImage = 0;
         foreach ($items as $item) {
             try {
                 $upsert = news_upsert_pending_article($pdo, $source, $item);
@@ -464,6 +482,9 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
                 }
                 if (!empty($upsert['skipped_duplicate'])) {
                     $skippedDuplicates++;
+                }
+                if (!empty($upsert['skipped_no_image'])) {
+                    $skippedNoImage++;
                 }
             } catch (Throwable $e) {
                 error_log('[news] item upsert failed: source_id=' . $sourceId . ' error=' . $e->getMessage());
@@ -478,6 +499,7 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
             'fetched' => count($items),
             'inserted' => $inserted,
             'skipped_duplicates' => $skippedDuplicates,
+            'skipped_no_image' => $skippedNoImage,
             'source_id' => $sourceId,
         ];
     } catch (Throwable $e) {
@@ -488,6 +510,7 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
             'fetched' => 0,
             'inserted' => 0,
             'skipped_duplicates' => 0,
+            'skipped_no_image' => 0,
             'source_id' => $sourceId,
             'error' => $e->getMessage(),
         ];
@@ -507,6 +530,7 @@ function news_fetch_all_active_sources(PDO $pdo): array
         'sources_failed' => 0,
         'inserted' => 0,
         'skipped_duplicates' => 0,
+        'skipped_no_image' => 0,
         'errors' => [],
     ];
 
@@ -532,6 +556,7 @@ function news_fetch_all_active_sources(PDO $pdo): array
 
             $summary['inserted'] += (int)($result['inserted'] ?? 0);
             $summary['skipped_duplicates'] += (int)($result['skipped_duplicates'] ?? 0);
+            $summary['skipped_no_image'] += (int)($result['skipped_no_image'] ?? 0);
         } catch (Throwable $e) {
             $summary['sources_failed']++;
             $summary['errors'][] = [
@@ -596,6 +621,26 @@ function news_delete_article(PDO $pdo, string $id): void
 {
     $stmt = $pdo->prepare('DELETE FROM news_articles WHERE id = ?');
     $stmt->execute([trim($id)]);
+}
+
+function news_bulk_delete_articles(PDO $pdo, array $ids): int
+{
+    $cleanIds = [];
+    foreach ($ids as $id) {
+        $value = trim((string)$id);
+        if ($value !== '') {
+            $cleanIds[] = $value;
+        }
+    }
+    $cleanIds = array_values(array_unique($cleanIds));
+    if (!$cleanIds) {
+        return 0;
+    }
+
+    $placeholders = implode(',', array_fill(0, count($cleanIds), '?'));
+    $stmt = $pdo->prepare('DELETE FROM news_articles WHERE id IN (' . $placeholders . ')');
+    $stmt->execute($cleanIds);
+    return (int)$stmt->rowCount();
 }
 
 function news_update_article(PDO $pdo, string $id, array $input): array
@@ -694,19 +739,30 @@ function news_list_mobile_articles(PDO $pdo, array $filters): array
     $limit = (int)($filters['limit'] ?? 20);
     $limit = max(1, min(50, $limit));
     $category = news_normalize_category((string)($filters['category'] ?? ''));
+    $region = news_normalize_region((string)($filters['region'] ?? ''));
     $offset = ($page - 1) * $limit;
 
     $where = ['status = "approved"', 'is_active = 1'];
     $params = [];
+
+    if ($region === 'local') {
+        $where[] = 'LOWER(COALESCE(NULLIF(s.language, ""), CASE WHEN a.category = "turkey" THEN "tr" ELSE "en" END)) = ?';
+        $params[] = 'tr';
+    } elseif ($region === 'global') {
+        $where[] = 'LOWER(COALESCE(NULLIF(s.language, ""), CASE WHEN a.category = "turkey" THEN "tr" ELSE "en" END)) = ?';
+        $params[] = 'en';
+    }
+
     if (!empty($filters['category'])) {
-        $where[] = 'category = ?';
+        $where[] = 'a.category = ?';
         $params[] = $category;
     }
 
-    $sql = 'SELECT id, title, summary, source_name, source_url, image_url, category, published_at, created_at
-        FROM news_articles
+    $sql = 'SELECT a.id, a.title, a.summary, a.source_name, a.source_url, a.image_url, a.category, a.published_at, a.created_at
+        FROM news_articles a
+        LEFT JOIN news_sources s ON s.id = a.source_id
         WHERE ' . implode(' AND ', $where) . '
-        ORDER BY published_at DESC, created_at DESC
+        ORDER BY a.published_at DESC, a.created_at DESC
         LIMIT ' . ($limit + 1) . ' OFFSET ' . $offset;
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);

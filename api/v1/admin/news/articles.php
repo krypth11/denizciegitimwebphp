@@ -38,7 +38,7 @@ try {
         api_error('action zorunludur.', 422);
     }
 
-    if (!in_array($action, ['approve', 'reject', 'delete', 'update', 'fetch_now'], true)) {
+    if (!in_array($action, ['approve', 'reject', 'delete', 'update', 'fetch_now', 'bulk_delete'], true)) {
         api_error('Geçersiz action.', 422);
     }
 
@@ -46,6 +46,28 @@ try {
         $summary = news_fetch_all_active_sources($pdo);
         api_success('Haber çekme tamamlandı.', [
             'summary' => $summary,
+        ]);
+    }
+
+    if ($action === 'bulk_delete') {
+        $ids = $payload['ids'] ?? null;
+        if (!is_array($ids)) {
+            api_error('ids alanı dizi olmalıdır.', 422);
+        }
+
+        $cleanIds = array_values(array_filter(array_map(static function ($id): string {
+            return trim((string)$id);
+        }, $ids), static function (string $id): bool {
+            return $id !== '';
+        }));
+
+        if (!$cleanIds) {
+            api_error('Silinecek haber seçilmedi.', 422);
+        }
+
+        $deletedCount = news_bulk_delete_articles($pdo, $cleanIds);
+        api_success('Seçili haberler silindi.', [
+            'deleted_count' => $deletedCount,
         ]);
     }
 

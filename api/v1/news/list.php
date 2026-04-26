@@ -10,6 +10,7 @@ try {
     $page = api_get_int_query('page', 1, 1, 100000);
     $limit = api_get_int_query('limit', 20, 1, 50);
     $categoryRaw = trim((string)($_GET['category'] ?? ''));
+    $regionRaw = trim((string)($_GET['region'] ?? ''));
 
     $filters = [
         'page' => $page,
@@ -18,6 +19,13 @@ try {
 
     if ($categoryRaw !== '') {
         $filters['category'] = news_normalize_category($categoryRaw);
+    }
+
+    if ($regionRaw !== '') {
+        $region = news_normalize_region($regionRaw);
+        if ($region !== '') {
+            $filters['region'] = $region;
+        }
     }
 
     $result = news_list_mobile_articles($pdo, $filters);

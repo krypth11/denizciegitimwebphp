@@ -41,10 +41,16 @@ include '../includes/sidebar.php';
     <div class="tab-content pt-3">
         <div class="tab-pane fade show active" id="tabPending">
             <div class="card"><div class="card-body">
+                <div class="d-flex justify-content-end mb-3">
+                    <button class="btn btn-danger bulk-delete-btn" id="pendingBulkDeleteBtn" data-status="pending" disabled>
+                        <i class="bi bi-trash"></i> Seçilenleri Sil
+                    </button>
+                </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle">
                         <thead>
                         <tr>
+                            <th style="width:40px;"><input type="checkbox" class="form-check-input article-select-all" id="pendingSelectAll" data-status="pending"></th>
                             <th>Başlık / Özet</th>
                             <th>Kaynak</th>
                             <th>Kategori</th>
@@ -62,10 +68,16 @@ include '../includes/sidebar.php';
 
         <div class="tab-pane fade" id="tabApproved">
             <div class="card"><div class="card-body">
+                <div class="d-flex justify-content-end mb-3">
+                    <button class="btn btn-danger bulk-delete-btn" id="approvedBulkDeleteBtn" data-status="approved" disabled>
+                        <i class="bi bi-trash"></i> Seçilenleri Sil
+                    </button>
+                </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle">
                         <thead>
                         <tr>
+                            <th style="width:40px;"><input type="checkbox" class="form-check-input article-select-all" id="approvedSelectAll" data-status="approved"></th>
                             <th>Başlık / Özet</th>
                             <th>Kaynak</th>
                             <th>Kategori</th>
@@ -83,10 +95,16 @@ include '../includes/sidebar.php';
 
         <div class="tab-pane fade" id="tabRejected">
             <div class="card"><div class="card-body">
+                <div class="d-flex justify-content-end mb-3">
+                    <button class="btn btn-danger bulk-delete-btn" id="rejectedBulkDeleteBtn" data-status="rejected" disabled>
+                        <i class="bi bi-trash"></i> Seçilenleri Sil
+                    </button>
+                </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle">
                         <thead>
                         <tr>
+                            <th style="width:40px;"><input type="checkbox" class="form-check-input article-select-all" id="rejectedSelectAll" data-status="rejected"></th>
                             <th>Başlık / Özet</th>
                             <th>Kaynak</th>
                             <th>Kategori</th>
@@ -244,6 +262,11 @@ $(function () {
     let pendingArticles = [];
     let approvedArticles = [];
     let rejectedArticles = [];
+    const selectedArticleIds = {
+        pending: new Set(),
+        approved: new Set(),
+        rejected: new Set()
+    };
     let currentStatusTab = 'pending';
 
     const esc = (txt) => $('<div>').text(txt ?? '').html();
@@ -275,6 +298,39 @@ $(function () {
         return actions.join(' ');
     }
 
+    function articleListByStatus(status) {
+        if (status === 'approved') return approvedArticles;
+        if (status === 'rejected') return rejectedArticles;
+        return pendingArticles;
+    }
+
+    function tabSelectorByStatus(status) {
+        if (status === 'approved') return '#tabApproved';
+        if (status === 'rejected') return '#tabRejected';
+        return '#tabPending';
+    }
+
+    function updateBulkDeleteButton(status) {
+        const count = (selectedArticleIds[status] || new Set()).size;
+        const $btn = $('#' + status + 'BulkDeleteBtn');
+        if (!$btn.length) return;
+        $btn.prop('disabled', count === 0);
+        $btn.html(`<i class="bi bi-trash"></i> Seçilenleri Sil${count > 0 ? ' (' + count + ')' : ''}`);
+    }
+
+    function syncSelectAllCheckbox(status) {
+        const items = articleListByStatus(status);
+        const selected = selectedArticleIds[status] || new Set();
+        const total = items.length;
+        const selectedCount = items.filter((item) => selected.has(String(item.id))).length;
+        const checkbox = document.getElementById(status + 'SelectAll');
+        if (!checkbox) return;
+
+        checkbox.checked = total > 0 && selectedCount === total;
+        checkbox.indeterminate = selectedCount > 0 && selectedCount < total;
+        updateBulkDeleteButton(status);
+    }
+
     function renderArticles(items, status, bodyId, emptyId) {
         const $body = $(bodyId).empty();
         $(emptyId).toggleClass('d-none', items.length > 0);
@@ -286,6 +342,7 @@ $(function () {
 
             $body.append(`
                 <tr>
+                    <td><input type="checkbox" class="form-check-input article-select-checkbox" data-status="${status}" data-id="${esc(a.id)}" ${selectedArticleIds[status].has(String(a.id)) ? 'checked' : ''}></td>
                     <td>
                         <div class="fw-semibold">${esc(a.title || '')}</div>
                         <div class="small text-muted">${esc(a.summary || '')}</div>
@@ -301,6 +358,10 @@ $(function () {
                 </tr>
             `);
         });
+
+        const validIds = new Set(items.map((item) => String(item.id)));
+        selectedArticleIds[status] = new Set(Array.from(selectedArticleIds[status]).filter((id) => validIds.has(id)));
+        syncSelectAllCheckbox(status);
     }
 
     function renderSources() {
@@ -414,11 +475,12 @@ $(function () {
         const summary = res.data?.summary || {};
         const inserted = Number(summary.inserted || 0);
         const skipped = Number(summary.skipped_duplicates || 0);
+        const skippedNoImage = Number(summary.skipped_no_image || 0);
         const failed = Number(summary.sources_failed || 0);
 
         await appAlert(
             'Haber çekme tamamlandı.',
-            `Yeni haber: ${inserted}, Tekrar atlanan: ${skipped}, Hatalı kaynak: ${failed}`,
+            `Yeni haber: ${inserted}, Tekrar atlanan: ${skipped}, Görselsiz atlanan: ${skippedNoImage}, Hatalı kaynak: ${failed}`,
             'success'
         );
 
@@ -495,6 +557,61 @@ $(function () {
         await refreshAllArticles();
     });
 
+    $(document).on('change', '.article-select-checkbox', function () {
+        const status = String($(this).data('status') || 'pending');
+        const id = String($(this).data('id') || '');
+        if (!id || !selectedArticleIds[status]) return;
+
+        if ($(this).is(':checked')) {
+            selectedArticleIds[status].add(id);
+        } else {
+            selectedArticleIds[status].delete(id);
+        }
+        syncSelectAllCheckbox(status);
+    });
+
+    $(document).on('change', '.article-select-all', function () {
+        const status = String($(this).data('status') || 'pending');
+        const items = articleListByStatus(status);
+        if (!selectedArticleIds[status]) return;
+
+        if ($(this).is(':checked')) {
+            items.forEach((item) => selectedArticleIds[status].add(String(item.id)));
+        } else {
+            selectedArticleIds[status].clear();
+        }
+
+        renderArticles(
+            articleListByStatus(status),
+            status,
+            status === 'pending' ? '#pendingArticlesBody' : (status === 'approved' ? '#approvedArticlesBody' : '#rejectedArticlesBody'),
+            status === 'pending' ? '#pendingEmpty' : (status === 'approved' ? '#approvedEmpty' : '#rejectedEmpty')
+        );
+    });
+
+    $(document).on('click', '.bulk-delete-btn', async function () {
+        const status = String($(this).data('status') || 'pending');
+        const ids = Array.from(selectedArticleIds[status] || []);
+
+        if (!ids.length) {
+            return appAlert('Uyarı', 'Lütfen silmek için en az bir haber seçin.', 'warning');
+        }
+
+        const ok = await appConfirm(
+            'Seçilenleri Sil',
+            `${ids.length} haber kalıcı olarak silinecek. Devam edilsin mi?`,
+            { type: 'warning', confirmText: 'Sil', cancelText: 'İptal' }
+        );
+        if (!ok) return;
+
+        const res = await api(articleApi, 'POST', { action: 'bulk_delete', ids });
+        if (!res.success) return appAlert('Hata', res.message || 'Toplu silme başarısız.', 'error');
+
+        selectedArticleIds[status].clear();
+        await appAlert('Başarılı', res.message || 'Seçili haberler silindi.', 'success');
+        await refreshActiveTabContent();
+    });
+
     $(document).on('click', '.article-edit-btn', function () {
         const id = $(this).data('id');
         const status = $(this).data('status');
@@ -537,6 +654,9 @@ $(function () {
 
     $('#newsTabs button[data-bs-toggle="tab"]').on('shown.bs.tab', function () {
         currentStatusTab = getActiveTabStatus();
+        if (currentStatusTab !== 'sources') {
+            syncSelectAllCheckbox(currentStatusTab);
+        }
     });
 
     loadSources();
