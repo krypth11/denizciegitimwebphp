@@ -4,6 +4,7 @@ require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/study_helper.php';
 require_once dirname(__DIR__, 2) . '/includes/app_runtime_settings_helper.php';
+require_once __DIR__ . '/question_filters_helper.php';
 
 api_require_method('GET');
 
@@ -19,14 +20,19 @@ try {
 
     $hasCol = static fn(string $col): bool => in_array($col, $columns, true);
 
+    $qualificationId = api_validate_optional_id((string)($_GET['qualification_id'] ?? ''), 'qualification_id', 191);
     $courseId = api_validate_optional_id((string)($_GET['course_id'] ?? ''), 'course_id', 191);
     $topicId = api_validate_optional_id((string)($_GET['topic_id'] ?? ''), 'topic_id', 191);
     $questionType = trim((string)($_GET['question_type'] ?? ''));
-    $poolType = strtolower(trim((string)($_GET['pool_type'] ?? '')));
+    $poolTypeRaw = (string)($_GET['pool_type'] ?? 'all');
+    $poolType = questions_normalize_pool_type($poolTypeRaw);
+    if ($poolType === null) {
+        api_error('Geçersiz pool_type.', 422);
+    }
     $orderParam = strtolower(trim((string)($_GET['order'] ?? 'desc')));
 
     $allQuestionsPoolTypes = ['all', 'all_questions', 'all-questions', 'tum_sorular', 'tum-sorular'];
-    if (in_array($poolType, $allQuestionsPoolTypes, true)) {
+    if (in_array(strtolower(trim($poolTypeRaw)), $allQuestionsPoolTypes, true)) {
         $runtime = app_runtime_settings_get($pdo);
         $allQuestionsMaxLimit = app_runtime_settings_int($runtime, 'study_all_questions_max_limit', 1000);
         $limit = api_get_int_query('limit', $allQuestionsMaxLimit, 1, $allQuestionsMaxLimit);
@@ -56,83 +62,22 @@ try {
         $hasCol('created_at') ? ($qc('created_at') . ' AS created_at') : 'NULL AS created_at',
     ];
 
-    $where = [];
-    $params = [];
+    $filterBuild = build_question_filters($pdo, [
+        'auth' => $auth,
+        'current_qualification_id' => $currentQualificationId,
+        'qualification_id' => $qualificationId,
+        'course_id' => $courseId,
+        'topic_id' => $topicId,
+        'question_type' => $questionType,
+        'question_columns' => $columns,
+        'question_alias' => 'q',
+        'qualification_guard_context' => 'questions.list.qualification_guard',
+        'course_guard_context' => 'questions.list.course_guard',
+        'topic_guard_context' => 'questions.list.topic_guard',
+    ]);
 
-    $qualificationFilterApplied = false;
-    if ($hasCol('qualification_id')) {
-        $where[] = $qc('qualification_id') . ' = ?';
-        $params[] = $currentQualificationId;
-        $qualificationFilterApplied = true;
-    }
-
-    if ($hasCol('course_id')) {
-        if ($courseId !== '') {
-            $courseGuardStmt = $pdo->prepare('SELECT qualification_id FROM courses WHERE id = ? LIMIT 1');
-            $courseGuardStmt->execute([$courseId]);
-            $courseGuardRow = $courseGuardStmt->fetch(PDO::FETCH_ASSOC);
-            if (!$courseGuardRow) {
-                api_error('Kurs bulunamadı.', 404);
-            }
-            api_assert_requested_qualification_matches_current(
-                $pdo,
-                $auth,
-                (string)($courseGuardRow['qualification_id'] ?? ''),
-                'questions.list.course_guard'
-            );
-        }
-
-        if (!$qualificationFilterApplied) {
-            $where[] = $qc('course_id') . ' IN (SELECT id FROM courses WHERE qualification_id = ?)';
-            $params[] = $currentQualificationId;
-            $qualificationFilterApplied = true;
-        }
-    }
-
-    if ($topicId !== '' && $hasCol('topic_id')) {
-        $topicGuardStmt = $pdo->prepare(
-            'SELECT c.qualification_id
-             FROM topics t
-             INNER JOIN courses c ON t.course_id = c.id
-             WHERE t.id = ?
-             LIMIT 1'
-        );
-        $topicGuardStmt->execute([$topicId]);
-        $topicGuardRow = $topicGuardStmt->fetch(PDO::FETCH_ASSOC);
-        if (!$topicGuardRow) {
-            api_error('Konu bulunamadı.', 404);
-        }
-        api_assert_requested_qualification_matches_current(
-            $pdo,
-            $auth,
-            (string)($topicGuardRow['qualification_id'] ?? ''),
-            'questions.list.topic_guard'
-        );
-    }
-
-    if ($courseId !== '') {
-        if ($hasCol('course_id')) {
-            $where[] = $qc('course_id') . ' = ?';
-            $params[] = $courseId;
-        }
-    }
-
-    if ($topicId !== '') {
-        if ($hasCol('topic_id')) {
-            $where[] = $qc('topic_id') . ' = ?';
-            $params[] = $topicId;
-        }
-    }
-
-    if ($questionType !== '') {
-        if (mb_strlen($questionType) > 50) {
-            api_error('Geçersiz question_type.', 422);
-        }
-        if ($hasCol('question_type')) {
-            $where[] = $qc('question_type') . ' = ?';
-            $params[] = $questionType;
-        }
-    }
+    $where = $filterBuild['where'];
+    $params = $filterBuild['params'];
 
     $rows = [];
     if ($poolType === 'most_wrong') {
@@ -184,7 +129,45 @@ try {
                 $rows = array_slice($rows, 0, $limit);
             }
         }
-    } else {
+
+        if (!$rows) {
+            $upColumns = get_table_columns($pdo, 'user_progress');
+            if ($upColumns) {
+                $up = study_get_user_progress_schema($pdo);
+                $fallbackConditions = [];
+
+                if (!empty($up['wrong_answer_count'])) {
+                    $fallbackConditions[] = 'COALESCE(up.' . study_q($up['wrong_answer_count']) . ', 0) > 0';
+                }
+
+                if (!empty($up['is_answered']) && !empty($up['is_correct'])) {
+                    $fallbackConditions[] = '(COALESCE(up.' . study_q($up['is_answered']) . ', 0) = 1 AND COALESCE(up.' . study_q($up['is_correct']) . ', 1) = 0)';
+                }
+
+                if ($fallbackConditions) {
+                    $sql = 'SELECT DISTINCT ' . implode(', ', $select)
+                        . ' FROM questions ' . $q
+                        . ' INNER JOIN ' . study_q($up['table']) . ' up'
+                        . ' ON up.' . study_q($up['question_id']) . ' = ' . $qc('id')
+                        . ' AND up.' . study_q($up['user_id']) . ' = ?';
+
+                    $whereFallback = $where;
+                    $whereFallback[] = '(' . implode(' OR ', $fallbackConditions) . ')';
+
+                    if ($whereFallback) {
+                        $sql .= ' WHERE ' . implode(' AND ', $whereFallback);
+                    }
+
+                    $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+                    $sql .= ' ORDER BY ' . $orderBy . ' DESC LIMIT ' . (int)$limit;
+
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute(array_merge([$userId], $params));
+                    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                }
+            }
+        }
+    } elseif ($poolType === 'all') {
         $sql = 'SELECT ' . implode(', ', $select) . ' FROM questions ' . $q;
         if ($where) {
             $sql .= ' WHERE ' . implode(' AND ', $where);
@@ -196,6 +179,110 @@ try {
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } else {
+        $upColumns = get_table_columns($pdo, 'user_progress');
+        if (!$upColumns) {
+            if ($poolType === 'unanswered') {
+                $sql = 'SELECT ' . implode(', ', $select) . ' FROM questions ' . $q;
+                if ($where) {
+                    $sql .= ' WHERE ' . implode(' AND ', $where);
+                }
+
+                $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+                $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($params);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            } else {
+                $rows = [];
+            }
+        } else {
+            $up = study_get_user_progress_schema($pdo);
+
+            $answeredExpr = '';
+            if (!empty($up['is_answered'])) {
+                $answeredExpr = 'COALESCE(up.' . study_q($up['is_answered']) . ', 0) = 1';
+            } elseif (!empty($up['total_answer_count'])) {
+                $answeredExpr = 'COALESCE(up.' . study_q($up['total_answer_count']) . ', 0) > 0';
+            } elseif (!empty($up['question_id'])) {
+                $answeredExpr = 'up.' . study_q($up['question_id']) . ' IS NOT NULL';
+            }
+
+            if ($poolType === 'unanswered') {
+                $sql = 'SELECT DISTINCT ' . implode(', ', $select)
+                    . ' FROM questions ' . $q
+                    . ' LEFT JOIN ' . study_q($up['table']) . ' up'
+                    . ' ON up.' . study_q($up['question_id']) . ' = ' . $qc('id')
+                    . ' AND up.' . study_q($up['user_id']) . ' = ?';
+
+                $whereUnanswered = $where;
+                if ($answeredExpr !== '') {
+                    $whereUnanswered[] = '(up.' . study_q($up['question_id']) . ' IS NULL OR NOT (' . $answeredExpr . '))';
+                } else {
+                    $whereUnanswered[] = 'up.' . study_q($up['question_id']) . ' IS NULL';
+                }
+
+                if ($whereUnanswered) {
+                    $sql .= ' WHERE ' . implode(' AND ', $whereUnanswered);
+                }
+
+                $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+                $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute(array_merge([$userId], $params));
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            } elseif ($poolType === 'answered') {
+                if ($answeredExpr === '') {
+                    $rows = [];
+                } else {
+                    $sql = 'SELECT DISTINCT ' . implode(', ', $select)
+                        . ' FROM questions ' . $q
+                        . ' INNER JOIN ' . study_q($up['table']) . ' up'
+                        . ' ON up.' . study_q($up['question_id']) . ' = ' . $qc('id')
+                        . ' AND up.' . study_q($up['user_id']) . ' = ?';
+
+                    $whereAnswered = $where;
+                    $whereAnswered[] = $answeredExpr;
+
+                    if ($whereAnswered) {
+                        $sql .= ' WHERE ' . implode(' AND ', $whereAnswered);
+                    }
+
+                    $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+                    $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute(array_merge([$userId], $params));
+                    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                }
+            } elseif ($poolType === 'bookmarked') {
+                if (empty($up['is_bookmarked'])) {
+                    $rows = [];
+                } else {
+                    $sql = 'SELECT DISTINCT ' . implode(', ', $select)
+                        . ' FROM questions ' . $q
+                        . ' INNER JOIN ' . study_q($up['table']) . ' up'
+                        . ' ON up.' . study_q($up['question_id']) . ' = ' . $qc('id')
+                        . ' AND up.' . study_q($up['user_id']) . ' = ?';
+
+                    $whereBookmarked = $where;
+                    $whereBookmarked[] = 'COALESCE(up.' . study_q($up['is_bookmarked']) . ', 0) = 1';
+
+                    if ($whereBookmarked) {
+                        $sql .= ' WHERE ' . implode(' AND ', $whereBookmarked);
+                    }
+
+                    $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+                    $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute(array_merge([$userId], $params));
+                    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                }
+            }
+        }
     }
 
     $questions = array_map(static function (array $row): array {

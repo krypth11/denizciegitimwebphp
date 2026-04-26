@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/study_helper.php';
+require_once __DIR__ . '/question_filters_helper.php';
 
 api_require_method('GET');
 
@@ -21,88 +22,32 @@ try {
         api_error('Sorular tablosu şeması uyumsuz.', 500);
     }
 
+    $qualificationId = api_validate_optional_id((string)($_GET['qualification_id'] ?? ''), 'qualification_id', 191);
     $courseId = api_validate_optional_id((string)($_GET['course_id'] ?? ''), 'course_id', 191);
     $topicId = api_validate_optional_id((string)($_GET['topic_id'] ?? ''), 'topic_id', 191);
     $questionType = trim((string)($_GET['question_type'] ?? ''));
-    $poolType = strtolower(trim((string)($_GET['pool_type'] ?? 'all')));
+    $poolType = questions_normalize_pool_type((string)($_GET['pool_type'] ?? 'all'));
 
-    $supportedPoolTypes = ['all', 'unanswered', 'answered', 'most_wrong', 'bookmarked'];
-    if (!in_array($poolType, $supportedPoolTypes, true)) {
+    if ($poolType === null) {
         api_error('Geçersiz pool_type.', 422);
     }
 
-    if ($questionType !== '' && mb_strlen($questionType) > 50) {
-        api_error('Geçersiz question_type.', 422);
-    }
+    $filterBuild = build_question_filters($pdo, [
+        'auth' => $auth,
+        'current_qualification_id' => $currentQualificationId,
+        'qualification_id' => $qualificationId,
+        'course_id' => $courseId,
+        'topic_id' => $topicId,
+        'question_type' => $questionType,
+        'question_columns' => $questionColumns,
+        'question_alias' => 'q',
+        'qualification_guard_context' => 'questions.count.qualification_guard',
+        'course_guard_context' => 'questions.count.course_guard',
+        'topic_guard_context' => 'questions.count.topic_guard',
+    ]);
 
-    // Guard: course belongs to user's current qualification
-    if ($courseId !== '') {
-        $courseGuardStmt = $pdo->prepare('SELECT qualification_id FROM courses WHERE id = ? LIMIT 1');
-        $courseGuardStmt->execute([$courseId]);
-        $courseGuardRow = $courseGuardStmt->fetch(PDO::FETCH_ASSOC);
-        if (!$courseGuardRow) {
-            api_error('Kurs bulunamadı.', 404);
-        }
-
-        api_assert_requested_qualification_matches_current(
-            $pdo,
-            $auth,
-            (string)($courseGuardRow['qualification_id'] ?? ''),
-            'questions.count.course_guard'
-        );
-    }
-
-    // Guard: topic belongs to user's current qualification
-    if ($topicId !== '') {
-        $topicGuardStmt = $pdo->prepare(
-            'SELECT c.qualification_id
-             FROM topics t
-             INNER JOIN courses c ON t.course_id = c.id
-             WHERE t.id = ?
-             LIMIT 1'
-        );
-        $topicGuardStmt->execute([$topicId]);
-        $topicGuardRow = $topicGuardStmt->fetch(PDO::FETCH_ASSOC);
-        if (!$topicGuardRow) {
-            api_error('Konu bulunamadı.', 404);
-        }
-
-        api_assert_requested_qualification_matches_current(
-            $pdo,
-            $auth,
-            (string)($topicGuardRow['qualification_id'] ?? ''),
-            'questions.count.topic_guard'
-        );
-    }
-
-    $baseWhere = [];
-    $baseParams = [];
-
-    // Qualification filter on questions.
-    if ($hasQ('qualification_id')) {
-        $baseWhere[] = 'q.`qualification_id` = ?';
-        $baseParams[] = $currentQualificationId;
-    } elseif ($hasQ('course_id')) {
-        $baseWhere[] = 'q.`course_id` IN (SELECT id FROM courses WHERE qualification_id = ?)';
-        $baseParams[] = $currentQualificationId;
-    } else {
-        api_error('Qualification guard için gerekli kolonlar bulunamadı.', 500);
-    }
-
-    if ($courseId !== '' && $hasQ('course_id')) {
-        $baseWhere[] = 'q.`course_id` = ?';
-        $baseParams[] = $courseId;
-    }
-
-    if ($topicId !== '' && $hasQ('topic_id')) {
-        $baseWhere[] = 'q.`topic_id` = ?';
-        $baseParams[] = $topicId;
-    }
-
-    if ($questionType !== '' && $hasQ('question_type')) {
-        $baseWhere[] = 'q.`question_type` = ?';
-        $baseParams[] = $questionType;
-    }
+    $baseWhere = $filterBuild['where'];
+    $baseParams = $filterBuild['params'];
 
     $countQuery = static function (PDO $pdo, string $sql, array $params): int {
         $stmt = $pdo->prepare($sql);
