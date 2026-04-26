@@ -4,7 +4,7 @@ require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/response_helper.php';
 require_once dirname(__DIR__) . '/mock_exam_helper.php';
-require_once dirname(__DIR__, 2) . '/includes/app_runtime_settings_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/app_runtime_settings_helper.php';
 
 api_require_method('GET');
 
