@@ -18,6 +18,9 @@ include '../includes/sidebar.php';
             <h2>Denizcilik Haberleri</h2>
             <p class="text-muted mb-0">Haber kaynaklarını yönetin, gelen haberleri onaylayın/yayınlayın.</p>
         </div>
+        <div class="ms-auto">
+            <button class="btn btn-primary" id="fetchNowBtn"><i class="bi bi-arrow-repeat"></i> Şimdi Haber Çek</button>
+        </div>
     </div>
 
     <ul class="nav nav-tabs" id="newsTabs" role="tablist">
@@ -241,6 +244,7 @@ $(function () {
     let pendingArticles = [];
     let approvedArticles = [];
     let rejectedArticles = [];
+    let currentStatusTab = 'pending';
 
     const esc = (txt) => $('<div>').text(txt ?? '').html();
     const fmtDate = (v) => !v ? '-' : (typeof window.formatDate === 'function' ? window.formatDate(v) : v);
@@ -356,6 +360,26 @@ $(function () {
         await loadArticles('rejected');
     }
 
+    function getActiveTabStatus() {
+        const activeTarget = $('#newsTabs .nav-link.active').data('bsTarget') || '#tabPending';
+        if (activeTarget === '#tabApproved') return 'approved';
+        if (activeTarget === '#tabRejected') return 'rejected';
+        if (activeTarget === '#tabSources') return 'sources';
+        return 'pending';
+    }
+
+    async function refreshActiveTabContent() {
+        const activeStatus = getActiveTabStatus();
+        currentStatusTab = activeStatus;
+
+        if (activeStatus === 'sources') {
+            await loadSources();
+            return;
+        }
+
+        await loadArticles(activeStatus);
+    }
+
     function resetSourceForm() {
         $('#sourceForm')[0].reset();
         $('#sourceId').val('');
@@ -371,6 +395,34 @@ $(function () {
     $('#addSourceBtn').on('click', function () {
         resetSourceForm();
         bootstrap.Modal.getOrCreateInstance(document.getElementById('sourceModal')).show();
+    });
+
+    $('#fetchNowBtn').on('click', async function () {
+        const $btn = $(this);
+        const defaultHtml = $btn.html();
+
+        $btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span> Haberler çekiliyor...');
+
+        const res = await api(articleApi, 'POST', { action: 'fetch_now' });
+
+        $btn.prop('disabled', false).html(defaultHtml);
+
+        if (!res.success) {
+            return appAlert('Hata', res.message || 'Haberler çekilemedi.', 'error');
+        }
+
+        const summary = res.data?.summary || {};
+        const inserted = Number(summary.inserted || 0);
+        const skipped = Number(summary.skipped_duplicates || 0);
+        const failed = Number(summary.sources_failed || 0);
+
+        await appAlert(
+            'Haber çekme tamamlandı.',
+            `Yeni haber: ${inserted}, Tekrar atlanan: ${skipped}, Hatalı kaynak: ${failed}`,
+            'success'
+        );
+
+        await refreshActiveTabContent();
     });
 
     $('#sourceForm').on('submit', async function (e) {
@@ -481,6 +533,10 @@ $(function () {
         bootstrap.Modal.getOrCreateInstance(document.getElementById('articleModal')).hide();
         await appAlert('Başarılı', res.message || 'Haber güncellendi.', 'success');
         await refreshAllArticles();
+    });
+
+    $('#newsTabs button[data-bs-toggle="tab"]').on('shown.bs.tab', function () {
+        currentStatusTab = getActiveTabStatus();
     });
 
     loadSources();

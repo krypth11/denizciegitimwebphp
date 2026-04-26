@@ -51,9 +51,25 @@ function news_clean_text(?string $value, int $maxLen = 5000): string
     return trim($text);
 }
 
-function news_source_hash(string $url, string $title): string
+function news_normalize_for_hash(string $value): string
 {
-    return hash('sha256', mb_strtolower(trim($url) . '|' . trim($title), 'UTF-8'));
+    $value = news_clean_text($value, 1000);
+    $value = mb_strtolower($value, 'UTF-8');
+    $value = preg_replace('/\s+/u', ' ', $value) ?? $value;
+    return trim($value);
+}
+
+function news_source_hash(string $sourceUrl, string $title, string $sourceName = ''): string
+{
+    $normalizedTitle = news_normalize_for_hash($title);
+    $normalizedUrl = news_normalize_for_hash($sourceUrl);
+    $normalizedSourceName = news_normalize_for_hash($sourceName);
+
+    $base = $normalizedUrl !== ''
+        ? ($normalizedUrl . '|' . $normalizedTitle)
+        : ($normalizedTitle . '|' . $normalizedSourceName);
+
+    return hash('sha256', $base);
 }
 
 function news_validate_feed_url(string $url): string
@@ -231,7 +247,7 @@ function news_extract_rss_items(string $feedXml): array
 
             $link = (string)($node->link ?? '');
             $title = news_clean_text((string)($node->title ?? ''), 500);
-            if ($title === '' || trim($link) === '') {
+            if ($title === '') {
                 continue;
             }
 
@@ -268,7 +284,7 @@ function news_extract_rss_items(string $feedXml): array
             }
 
             $title = news_clean_text((string)($node->title ?? ''), 500);
-            if ($title === '' || $link === '') {
+            if ($title === '') {
                 continue;
             }
 
@@ -286,19 +302,27 @@ function news_extract_rss_items(string $feedXml): array
     return $items;
 }
 
-function news_upsert_pending_article(PDO $pdo, array $source, array $item): bool
+function news_upsert_pending_article(PDO $pdo, array $source, array $item): array
 {
     $title = news_clean_text((string)($item['title'] ?? ''), 500);
     $link = trim((string)($item['link'] ?? ''));
-    if ($title === '' || $link === '') {
-        return false;
+    $sourceName = news_clean_text((string)($source['name'] ?? ''), 191);
+
+    if ($title === '') {
+        return [
+            'inserted' => false,
+            'skipped_duplicate' => false,
+        ];
     }
 
-    $hash = news_source_hash($link, $title);
+    $hash = news_source_hash($link, $title, $sourceName);
     $exists = $pdo->prepare('SELECT id FROM news_articles WHERE source_hash = ? LIMIT 1');
     $exists->execute([$hash]);
     if ($exists->fetchColumn()) {
-        return false;
+        return [
+            'inserted' => false,
+            'skipped_duplicate' => true,
+        ];
     }
 
     $summary = news_clean_text((string)($item['summary'] ?? ''), 1200);
@@ -315,14 +339,17 @@ function news_upsert_pending_article(PDO $pdo, array $source, array $item): bool
         $title,
         $summary,
         ($imageUrl !== '' ? $imageUrl : null),
-        news_clean_text((string)($source['name'] ?? ''), 191),
+        $sourceName,
         $link,
         $hash,
         $category,
         $publishedAt,
     ]);
 
-    return true;
+    return [
+        'inserted' => true,
+        'skipped_duplicate' => false,
+    ];
 }
 
 function news_fetch_rss_source(PDO $pdo, array $source): array
@@ -350,9 +377,18 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
 
         $items = news_extract_rss_items($xml);
         $inserted = 0;
+        $skippedDuplicates = 0;
         foreach ($items as $item) {
-            if (news_upsert_pending_article($pdo, $source, $item)) {
-                $inserted++;
+            try {
+                $upsert = news_upsert_pending_article($pdo, $source, $item);
+                if (!empty($upsert['inserted'])) {
+                    $inserted++;
+                }
+                if (!empty($upsert['skipped_duplicate'])) {
+                    $skippedDuplicates++;
+                }
+            } catch (Throwable $e) {
+                error_log('[news] item upsert failed: source_id=' . $sourceId . ' error=' . $e->getMessage());
             }
         }
 
@@ -363,6 +399,7 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
             'success' => true,
             'fetched' => count($items),
             'inserted' => $inserted,
+            'skipped_duplicates' => $skippedDuplicates,
             'source_id' => $sourceId,
         ];
     } catch (Throwable $e) {
@@ -372,10 +409,63 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
             'success' => false,
             'fetched' => 0,
             'inserted' => 0,
+            'skipped_duplicates' => 0,
             'source_id' => $sourceId,
             'error' => $e->getMessage(),
         ];
     }
+}
+
+function news_fetch_all_active_sources(PDO $pdo): array
+{
+    $sources = news_list_sources($pdo);
+    $activeSources = array_values(array_filter($sources, static function (array $source): bool {
+        return ((int)($source['is_active'] ?? 0) === 1);
+    }));
+
+    $summary = [
+        'sources_total' => count($activeSources),
+        'sources_success' => 0,
+        'sources_failed' => 0,
+        'inserted' => 0,
+        'skipped_duplicates' => 0,
+        'errors' => [],
+    ];
+
+    foreach ($activeSources as $source) {
+        try {
+            $result = news_fetch_rss_source($pdo, $source);
+            $isSuccess = !empty($result['success']);
+
+            if ($isSuccess) {
+                $summary['sources_success']++;
+            } else {
+                $summary['sources_failed']++;
+                $safeMessage = 'Kaynak işlenirken bir hata oluştu.';
+                $sourceName = (string)($source['name'] ?? 'Bilinmeyen kaynak');
+                $rawError = (string)($result['error'] ?? $safeMessage);
+                $summary['errors'][] = [
+                    'source_id' => (string)($source['id'] ?? ''),
+                    'source_name' => $sourceName,
+                    'message' => $safeMessage,
+                ];
+                error_log('[news] source fetch failed: source_id=' . (string)($source['id'] ?? '') . ' source_name=' . $sourceName . ' error=' . $rawError);
+            }
+
+            $summary['inserted'] += (int)($result['inserted'] ?? 0);
+            $summary['skipped_duplicates'] += (int)($result['skipped_duplicates'] ?? 0);
+        } catch (Throwable $e) {
+            $summary['sources_failed']++;
+            $summary['errors'][] = [
+                'source_id' => (string)($source['id'] ?? ''),
+                'source_name' => (string)($source['name'] ?? 'Bilinmeyen kaynak'),
+                'message' => 'Kaynak işlenirken bir hata oluştu.',
+            ];
+            error_log('[news] source fetch exception: source_id=' . (string)($source['id'] ?? '') . ' error=' . $e->getMessage());
+        }
+    }
+
+    return $summary;
 }
 
 function news_list_admin_articles(PDO $pdo, string $status = 'pending'): array
@@ -489,7 +579,7 @@ function news_update_article(PDO $pdo, string $id, array $input): array
         throw new InvalidArgumentException('Haber başlığı zorunludur.');
     }
 
-    $sourceHash = news_source_hash($sourceUrl, $title);
+    $sourceHash = news_source_hash($sourceUrl, $title, $sourceName);
     $dup = $pdo->prepare('SELECT id FROM news_articles WHERE source_hash = ? AND id <> ? LIMIT 1');
     $dup->execute([$sourceHash, $id]);
     if ($dup->fetchColumn()) {

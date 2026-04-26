@@ -18,50 +18,24 @@ echo "=== News Fetch Cron ===\n";
 echo 'Start: ' . date('Y-m-d H:i:s') . "\n";
 
 try {
-    $sources = news_list_sources($pdo);
-    $activeSources = array_values(array_filter($sources, static function (array $source): bool {
-        return ((int)($source['is_active'] ?? 0) === 1);
-    }));
+    $summary = news_fetch_all_active_sources($pdo);
 
-    echo 'Aktif kaynak sayısı: ' . count($activeSources) . "\n";
+    echo 'Aktif kaynak sayısı: ' . (int)($summary['sources_total'] ?? 0) . "\n";
+    echo 'Başarılı kaynak: ' . (int)($summary['sources_success'] ?? 0) . "\n";
+    echo 'Hatalı kaynak: ' . (int)($summary['sources_failed'] ?? 0) . "\n";
+    echo 'Toplam inserted(pending): ' . (int)($summary['inserted'] ?? 0) . "\n";
+    echo 'Toplam duplicate skip: ' . (int)($summary['skipped_duplicates'] ?? 0) . "\n";
 
-    $totalFetched = 0;
-    $totalInserted = 0;
-    $totalErrors = 0;
-
-    foreach ($activeSources as $source) {
-        $sourceName = (string)($source['name'] ?? '');
-        $sourceId = (string)($source['id'] ?? '');
-
-        try {
-            $result = news_fetch_rss_source($pdo, $source);
-            $fetched = (int)($result['fetched'] ?? 0);
-            $inserted = (int)($result['inserted'] ?? 0);
-            $ok = !empty($result['success']);
-
-            $totalFetched += $fetched;
-            $totalInserted += $inserted;
-
-            if (!$ok) {
-                $totalErrors++;
-                $msg = (string)($result['error'] ?? 'Bilinmeyen hata');
-                error_log('[cron.fetch_news] source_id=' . $sourceId . ' error=' . $msg);
-                echo '[HATA] ' . $sourceName . ' => ' . $msg . "\n";
-                continue;
-            }
-
-            echo '[OK] ' . $sourceName . ' | fetched=' . $fetched . ' | inserted=' . $inserted . "\n";
-        } catch (Throwable $e) {
-            $totalErrors++;
-            error_log('[cron.fetch_news] source_id=' . $sourceId . ' exception=' . $e->getMessage());
-            echo '[EXCEPTION] ' . $sourceName . ' => ' . $e->getMessage() . "\n";
-            continue;
+    $errors = $summary['errors'] ?? [];
+    if (is_array($errors) && !empty($errors)) {
+        echo "\nKaynak hataları:\n";
+        foreach ($errors as $err) {
+            $sourceName = (string)($err['source_name'] ?? 'Bilinmeyen kaynak');
+            $message = (string)($err['message'] ?? 'Kaynak işlenirken bir hata oluştu.');
+            echo '- ' . $sourceName . ': ' . $message . "\n";
         }
     }
 
-    echo "\nToplam fetched: {$totalFetched}\n";
-    echo "Toplam inserted(pending): {$totalInserted}\n";
-    echo "Toplam error: {$totalErrors}\n";
     echo 'Finish: ' . date('Y-m-d H:i:s') . "\n";
     exit(0);
 } catch (Throwable $e) {

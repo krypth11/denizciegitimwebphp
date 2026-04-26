@@ -38,8 +38,15 @@ try {
         api_error('action zorunludur.', 422);
     }
 
-    if (!in_array($action, ['approve', 'reject', 'delete', 'update'], true)) {
+    if (!in_array($action, ['approve', 'reject', 'delete', 'update', 'fetch_now'], true)) {
         api_error('Geçersiz action.', 422);
+    }
+
+    if ($action === 'fetch_now') {
+        $summary = news_fetch_all_active_sources($pdo);
+        api_success('Haber çekme tamamlandı.', [
+            'summary' => $summary,
+        ]);
     }
 
     if ($id === '') {
