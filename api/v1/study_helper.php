@@ -683,6 +683,100 @@ function study_upsert_answer_progress(PDO $pdo, string $userId, string $question
     return study_progress_row_payload($fresh, $schema);
 }
 
+function study_get_question_answer_history(PDO $pdo, string $userId, string $questionId): array
+{
+    $progressSchema = study_get_user_progress_schema($pdo);
+    $progressRow = study_get_progress_by_user_question($pdo, $progressSchema, $userId, $questionId);
+
+    $totalSolvedCount = 0;
+    $correctCount = 0;
+    $wrongCount = 0;
+    $lastSelectedAnswer = null;
+    $lastAnsweredAt = null;
+
+    if ($progressRow) {
+        if (!empty($progressSchema['total_answer_count'])) {
+            $totalSolvedCount = (int)($progressRow[$progressSchema['total_answer_count']] ?? 0);
+        }
+        if (!empty($progressSchema['correct_answer_count'])) {
+            $correctCount = (int)($progressRow[$progressSchema['correct_answer_count']] ?? 0);
+        }
+        if (!empty($progressSchema['wrong_answer_count'])) {
+            $wrongCount = (int)($progressRow[$progressSchema['wrong_answer_count']] ?? 0);
+        }
+        if (!empty($progressSchema['last_selected_answer'])) {
+            $rawLastSelectedAnswer = $progressRow[$progressSchema['last_selected_answer']] ?? null;
+            $lastSelectedAnswer = ($rawLastSelectedAnswer === '' ? null : $rawLastSelectedAnswer);
+        }
+        if (!empty($progressSchema['last_answered_at'])) {
+            $rawLastAnsweredAt = $progressRow[$progressSchema['last_answered_at']] ?? null;
+            $lastAnsweredAt = ($rawLastAnsweredAt === '' ? null : $rawLastAnsweredAt);
+        }
+    }
+
+    $wrongScore = 0;
+    $wrongScoreSchema = study_get_wrong_score_schema($pdo);
+    if (!empty($wrongScoreSchema)) {
+        $selectCols = [
+            study_q($wrongScoreSchema['wrong_score']) . ' AS wrong_score',
+        ];
+
+        if (!empty($wrongScoreSchema['wrong_count'])) {
+            $selectCols[] = study_q($wrongScoreSchema['wrong_count']) . ' AS wrong_count';
+        }
+        if (!empty($wrongScoreSchema['correct_recovery_count'])) {
+            $selectCols[] = study_q($wrongScoreSchema['correct_recovery_count']) . ' AS correct_recovery_count';
+        }
+
+        $sql = 'SELECT ' . implode(', ', $selectCols)
+            . ' FROM ' . study_q($wrongScoreSchema['table'])
+            . ' WHERE ' . study_q($wrongScoreSchema['user_id']) . ' = ?'
+            . ' AND ' . study_q($wrongScoreSchema['question_id']) . ' = ?'
+            . ' LIMIT 1';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId, $questionId]);
+        $wrongScoreRow = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($wrongScoreRow) {
+            $wrongScore = (int)($wrongScoreRow['wrong_score'] ?? 0);
+        }
+    }
+
+    $isFirstTime = ($totalSolvedCount <= 1);
+    $successRate = null;
+    if ($totalSolvedCount > 0) {
+        $successRate = (int)round(($correctCount * 100) / $totalSolvedCount);
+    }
+
+    if ($totalSolvedCount === 1) {
+        $message = 'Bu soruyu ilk kez çözdünüz.';
+    } elseif ($totalSolvedCount > 1) {
+        $message = 'Bu soruyu toplam ' . $totalSolvedCount . ' kez çözdünüz. '
+            . $correctCount . ' doğru, ' . $wrongCount . ' yanlış yaptınız.';
+        if ($successRate !== null) {
+            $message .= ' Başarı oranınız %' . $successRate . '.';
+        }
+    } else {
+        $message = 'Bu soruya henüz çözüm kaydınız bulunmuyor.';
+    }
+
+    if ($wrongScore > 0) {
+        $message .= ' Güncel yanlış puanı: ' . $wrongScore . '.';
+    }
+
+    return [
+        'is_first_time' => $isFirstTime,
+        'total_solved_count' => $totalSolvedCount,
+        'correct_count' => $correctCount,
+        'wrong_count' => $wrongCount,
+        'success_rate' => $successRate,
+        'wrong_score' => $wrongScore,
+        'last_selected_answer' => $lastSelectedAnswer,
+        'last_answered_at' => $lastAnsweredAt,
+        'message' => $message,
+    ];
+}
+
 function study_toggle_bookmark(PDO $pdo, string $userId, string $questionId): array
 {
     $schema = study_get_user_progress_schema($pdo);

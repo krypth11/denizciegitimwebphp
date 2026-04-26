@@ -211,6 +211,16 @@ try {
         $eventInsertWarning = $eventError->getMessage();
     }
 
+    $questionHistory = null;
+    $questionHistoryWarning = null;
+    $debugStep = 'question_history_build';
+    try {
+        $questionHistory = study_get_question_answer_history($pdo, $userId, $questionId);
+    } catch (Throwable $questionHistoryError) {
+        // History üretimi best-effort, ana cevap kaydetme akışını bozma.
+        $questionHistoryWarning = $questionHistoryError->getMessage();
+    }
+
     $debugStep = 'response_success';
     api_qualification_access_log('study qualification returned', [
         'context' => 'study.answer',
@@ -220,6 +230,8 @@ try {
 
     api_success('Cevap kaydedildi.', [
         'progress' => $progress,
+        'question_history' => $questionHistory,
+        'question_history_warning' => $questionHistoryWarning,
         'wrong_score_update_warning' => $wrongScoreUpdateWarning,
         'event_insert_warning' => $eventInsertWarning,
     ]);
