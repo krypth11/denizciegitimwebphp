@@ -215,6 +215,41 @@ function news_parse_datetime(?string $value): ?string
     return date('Y-m-d H:i:s', $ts);
 }
 
+function news_is_http_image_url(?string $url): string
+{
+    $url = html_entity_decode(trim((string)$url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    if ($url === '') {
+        return '';
+    }
+
+    $lower = strtolower($url);
+    if (strpos($lower, 'http://') !== 0 && strpos($lower, 'https://') !== 0) {
+        return '';
+    }
+
+    return $url;
+}
+
+function news_extract_first_image_url(?string $html): string
+{
+    $html = trim((string)$html);
+    if ($html === '') {
+        return '';
+    }
+
+    $html = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+    if (preg_match('/<img\b[^>]*\bsrc\s*=\s*(["\'])(.*?)\1/isu', $html, $matches)) {
+        return news_is_http_image_url($matches[2] ?? '');
+    }
+
+    if (preg_match('/<img\b[^>]*\bsrc\s*=\s*([^\s>]+)/isu', $html, $matches)) {
+        return news_is_http_image_url($matches[1] ?? '');
+    }
+
+    return '';
+}
+
 function news_extract_rss_items(string $feedXml): array
 {
     $feedXml = trim($feedXml);
@@ -232,17 +267,42 @@ function news_extract_rss_items(string $feedXml): array
 
     if (isset($xml->channel->item)) {
         foreach ($xml->channel->item as $node) {
-            $mediaUrl = '';
+            $itemImage = news_is_http_image_url((string)($node->image ?? ''));
+
+            $mediaContentUrl = '';
+            $mediaThumbnailUrl = '';
             $media = $node->children('http://search.yahoo.com/mrss/');
             if (isset($media->content)) {
                 $attr = $media->content->attributes();
-                $mediaUrl = (string)($attr['url'] ?? '');
+                $mediaContentUrl = news_is_http_image_url((string)($attr['url'] ?? ''));
+            }
+            if (isset($media->thumbnail)) {
+                $attr = $media->thumbnail->attributes();
+                $mediaThumbnailUrl = news_is_http_image_url((string)($attr['url'] ?? ''));
             }
 
             $enclosureUrl = '';
             if (isset($node->enclosure)) {
                 $attr = $node->enclosure->attributes();
-                $enclosureUrl = (string)($attr['url'] ?? '');
+                $enclosureUrl = news_is_http_image_url((string)($attr['url'] ?? ''));
+            }
+
+            $descriptionRaw = (string)($node->description ?? '');
+            $descriptionImg = news_extract_first_image_url($descriptionRaw);
+
+            $contentEncodedRaw = '';
+            $content = $node->children('http://purl.org/rss/1.0/modules/content/');
+            if (isset($content->encoded)) {
+                $contentEncodedRaw = (string)$content->encoded;
+            }
+            $contentImg = news_extract_first_image_url($contentEncodedRaw);
+
+            $imageUrl = '';
+            foreach ([$itemImage, $mediaContentUrl, $mediaThumbnailUrl, $enclosureUrl, $descriptionImg, $contentImg] as $candidate) {
+                if ($candidate !== '') {
+                    $imageUrl = $candidate;
+                    break;
+                }
             }
 
             $link = (string)($node->link ?? '');
@@ -254,9 +314,9 @@ function news_extract_rss_items(string $feedXml): array
             $items[] = [
                 'title' => $title,
                 'link' => trim($link),
-                'summary' => news_clean_text((string)($node->description ?? ''), 1200),
+                'summary' => news_clean_text($descriptionRaw, 1200),
                 'published_at' => news_parse_datetime((string)($node->pubDate ?? '')),
-                'image_url' => trim($mediaUrl !== '' ? $mediaUrl : $enclosureUrl),
+                'image_url' => $imageUrl,
                 'category' => news_normalize_category((string)($node->category ?? 'general')),
             ];
         }
@@ -276,11 +336,29 @@ function news_extract_rss_items(string $feedXml): array
                 }
             }
 
-            $mediaUrl = '';
+            $mediaContentUrl = '';
+            $mediaThumbnailUrl = '';
             $media = $node->children('http://search.yahoo.com/mrss/');
             if (isset($media->content)) {
                 $attr = $media->content->attributes();
-                $mediaUrl = (string)($attr['url'] ?? '');
+                $mediaContentUrl = news_is_http_image_url((string)($attr['url'] ?? ''));
+            }
+            if (isset($media->thumbnail)) {
+                $attr = $media->thumbnail->attributes();
+                $mediaThumbnailUrl = news_is_http_image_url((string)($attr['url'] ?? ''));
+            }
+
+            $summaryRaw = (string)($node->summary ?? '');
+            $contentRaw = (string)($node->content ?? '');
+            $summaryImg = news_extract_first_image_url($summaryRaw);
+            $contentImg = news_extract_first_image_url($contentRaw);
+
+            $imageUrl = '';
+            foreach ([$mediaContentUrl, $mediaThumbnailUrl, $summaryImg, $contentImg] as $candidate) {
+                if ($candidate !== '') {
+                    $imageUrl = $candidate;
+                    break;
+                }
             }
 
             $title = news_clean_text((string)($node->title ?? ''), 500);
@@ -291,9 +369,9 @@ function news_extract_rss_items(string $feedXml): array
             $items[] = [
                 'title' => $title,
                 'link' => $link,
-                'summary' => news_clean_text((string)($node->summary ?? $node->content ?? ''), 1200),
+                'summary' => news_clean_text(($summaryRaw !== '' ? $summaryRaw : $contentRaw), 1200),
                 'published_at' => news_parse_datetime((string)($node->updated ?? $node->published ?? '')),
-                'image_url' => trim($mediaUrl),
+                'image_url' => $imageUrl,
                 'category' => news_normalize_category((string)($node->category ?? 'general')),
             ];
         }
