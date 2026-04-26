@@ -110,8 +110,13 @@ function news_article_row_with_labels(array $row): array
 {
     $labels = news_category_labels();
     $cat = news_normalize_category((string)($row['category'] ?? 'general'));
+    $language = strtolower(trim((string)($row['language'] ?? 'tr')));
+    if (!in_array($language, ['tr', 'en'], true)) {
+        $language = 'tr';
+    }
     $row['category'] = $cat;
     $row['category_label'] = $labels[$cat] ?? $labels['general'];
+    $row['language'] = $language;
     $row['is_active'] = ((int)($row['is_active'] ?? 0) === 1) ? 1 : 0;
     return $row;
 }
@@ -422,11 +427,15 @@ function news_upsert_pending_article(PDO $pdo, array $source, array $item): arra
 
     $summary = news_clean_text((string)($item['summary'] ?? ''), 1200);
     $category = news_normalize_category((string)($item['category'] ?? $source['category'] ?? 'general'));
+    $language = strtolower(trim((string)($source['language'] ?? 'tr')));
+    if (!in_array($language, ['tr', 'en'], true)) {
+        $language = 'tr';
+    }
     $publishedAt = news_parse_datetime((string)($item['published_at'] ?? ''));
 
     $stmt = $pdo->prepare('INSERT INTO news_articles
-        (id, source_id, title, summary, image_url, source_name, source_url, source_hash, category, published_at, status, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending", 0, NOW(), NOW())');
+        (id, source_id, title, summary, image_url, source_name, source_url, source_hash, category, language, published_at, status, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "pending", 0, NOW(), NOW())');
     $stmt->execute([
         news_uuid(),
         (string)$source['id'],
@@ -437,6 +446,7 @@ function news_upsert_pending_article(PDO $pdo, array $source, array $item): arra
         $link,
         $hash,
         $category,
+        $language,
         $publishedAt,
     ]);
 
@@ -579,6 +589,7 @@ function news_list_admin_articles(PDO $pdo, string $status = 'pending'): array
     }
 
     $stmt = $pdo->prepare('SELECT a.*,
+            COALESCE(NULLIF(LOWER(a.language), ""), NULLIF(LOWER(s.language), ""), "tr") AS language,
             s.name AS source_feed_name,
             s.feed_url AS source_feed_url
         FROM news_articles a
@@ -744,12 +755,13 @@ function news_list_mobile_articles(PDO $pdo, array $filters): array
 
     $where = ['status = "approved"', 'is_active = 1'];
     $params = [];
+    $articleLanguageExpr = 'COALESCE(NULLIF(LOWER(a.language), ""), NULLIF(LOWER(s.language), ""), "tr")';
 
     if ($region === 'local') {
-        $where[] = 'LOWER(COALESCE(NULLIF(s.language, ""), CASE WHEN a.category = "turkey" THEN "tr" ELSE "en" END)) = ?';
+        $where[] = $articleLanguageExpr . ' = ?';
         $params[] = 'tr';
     } elseif ($region === 'global') {
-        $where[] = 'LOWER(COALESCE(NULLIF(s.language, ""), CASE WHEN a.category = "turkey" THEN "tr" ELSE "en" END)) = ?';
+        $where[] = $articleLanguageExpr . ' = ?';
         $params[] = 'en';
     }
 
@@ -758,7 +770,9 @@ function news_list_mobile_articles(PDO $pdo, array $filters): array
         $params[] = $category;
     }
 
-    $sql = 'SELECT a.id, a.title, a.summary, a.source_name, a.source_url, a.image_url, a.category, a.published_at, a.created_at
+    $sql = 'SELECT a.id, a.title, a.summary, a.source_name, a.source_url, a.image_url, a.category,
+            ' . $articleLanguageExpr . ' AS language,
+            a.published_at, a.created_at
         FROM news_articles a
         LEFT JOIN news_sources s ON s.id = a.source_id
         WHERE ' . implode(' AND ', $where) . '
@@ -784,6 +798,7 @@ function news_list_mobile_articles(PDO $pdo, array $filters): array
             'image_url' => (string)($item['image_url'] ?? ''),
             'category' => (string)$item['category'],
             'category_label' => (string)$item['category_label'],
+            'language' => (string)$item['language'],
             'published_at' => (string)($item['published_at'] ?? ''),
         ];
     }, $rows);
@@ -798,9 +813,12 @@ function news_list_mobile_articles(PDO $pdo, array $filters): array
 
 function news_get_mobile_article(PDO $pdo, string $id): ?array
 {
-    $stmt = $pdo->prepare('SELECT id, title, summary, source_name, source_url, image_url, category, published_at, created_at
-        FROM news_articles
-        WHERE id = ? AND status = "approved" AND is_active = 1
+    $stmt = $pdo->prepare('SELECT a.id, a.title, a.summary, a.source_name, a.source_url, a.image_url, a.category,
+            COALESCE(NULLIF(LOWER(a.language), ""), NULLIF(LOWER(s.language), ""), "tr") AS language,
+            a.published_at, a.created_at
+        FROM news_articles a
+        LEFT JOIN news_sources s ON s.id = a.source_id
+        WHERE a.id = ? AND a.status = "approved" AND a.is_active = 1
         LIMIT 1');
     $stmt->execute([trim($id)]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -818,6 +836,7 @@ function news_get_mobile_article(PDO $pdo, string $id): ?array
         'image_url' => (string)($item['image_url'] ?? ''),
         'category' => (string)$item['category'],
         'category_label' => (string)$item['category_label'],
+        'language' => (string)$item['language'],
         'published_at' => (string)($item['published_at'] ?? ''),
     ];
 }
