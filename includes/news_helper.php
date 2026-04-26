@@ -753,15 +753,19 @@ function news_list_mobile_articles(PDO $pdo, array $filters): array
     $region = news_normalize_region((string)($filters['region'] ?? ''));
     $offset = ($page - 1) * $limit;
 
-    $where = ['status = "approved"', 'is_active = 1'];
+    $where = [
+        'a.status = "approved"',
+        'a.is_active = 1',
+        'a.language IS NOT NULL',
+        'LOWER(a.language) IN ("tr", "en")',
+    ];
     $params = [];
-    $articleLanguageExpr = 'COALESCE(NULLIF(LOWER(a.language), ""), NULLIF(LOWER(s.language), ""), "tr")';
 
     if ($region === 'local') {
-        $where[] = $articleLanguageExpr . ' = ?';
+        $where[] = 'LOWER(a.language) = ?';
         $params[] = 'tr';
     } elseif ($region === 'global') {
-        $where[] = $articleLanguageExpr . ' = ?';
+        $where[] = 'LOWER(a.language) = ?';
         $params[] = 'en';
     }
 
@@ -771,7 +775,7 @@ function news_list_mobile_articles(PDO $pdo, array $filters): array
     }
 
     $sql = 'SELECT a.id, a.title, a.summary, a.source_name, a.source_url, a.image_url, a.category,
-            ' . $articleLanguageExpr . ' AS language,
+            LOWER(a.language) AS language,
             a.published_at, a.created_at
         FROM news_articles a
         LEFT JOIN news_sources s ON s.id = a.source_id
