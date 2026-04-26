@@ -75,6 +75,9 @@ function news_source_row_with_labels(array $row): array
 {
     $labels = news_category_labels();
     $cat = news_normalize_category((string)($row['category'] ?? 'general'));
+    $feedUrl = trim((string)($row['feed_url'] ?? $row['rss_url'] ?? ''));
+    $row['feed_url'] = $feedUrl;
+    $row['rss_url'] = $feedUrl;
     $row['category'] = $cat;
     $row['category_label'] = $labels[$cat] ?? $labels['general'];
     $row['is_active'] = ((int)($row['is_active'] ?? 0) === 1) ? 1 : 0;
@@ -114,7 +117,8 @@ function news_get_source(PDO $pdo, string $id): ?array
 function news_create_source(PDO $pdo, array $input): array
 {
     $name = news_clean_text((string)($input['name'] ?? ''), 191);
-    $rssUrl = news_validate_feed_url((string)($input['rss_url'] ?? ''));
+    $feedUrlInput = array_key_exists('rss_url', $input) ? (string)$input['rss_url'] : (string)($input['feed_url'] ?? '');
+    $feedUrl = news_validate_feed_url($feedUrlInput);
     $category = news_normalize_category((string)($input['category'] ?? 'general'));
     $language = news_clean_text((string)($input['language'] ?? 'tr'), 16);
     $language = $language !== '' ? strtolower($language) : 'tr';
@@ -124,17 +128,16 @@ function news_create_source(PDO $pdo, array $input): array
         throw new InvalidArgumentException('Kaynak adı zorunludur.');
     }
 
-    $urlHash = hash('sha256', mb_strtolower($rssUrl, 'UTF-8'));
-    $dup = $pdo->prepare('SELECT id FROM news_sources WHERE url_hash = ? LIMIT 1');
-    $dup->execute([$urlHash]);
+    $dup = $pdo->prepare('SELECT id FROM news_sources WHERE feed_url = ? LIMIT 1');
+    $dup->execute([$feedUrl]);
     if ($dup->fetchColumn()) {
         throw new InvalidArgumentException('Bu RSS URL zaten kayıtlı.');
     }
 
     $id = news_uuid();
-    $stmt = $pdo->prepare('INSERT INTO news_sources (id, name, rss_url, url_hash, category, language, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
-    $stmt->execute([$id, $name, $rssUrl, $urlHash, $category, $language, $isActive]);
+    $stmt = $pdo->prepare('INSERT INTO news_sources (id, name, feed_url, category, language, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())');
+    $stmt->execute([$id, $name, $feedUrl, $category, $language, $isActive]);
 
     return (array)news_get_source($pdo, $id);
 }
@@ -147,7 +150,11 @@ function news_update_source(PDO $pdo, string $id, array $input): array
     }
 
     $name = array_key_exists('name', $input) ? news_clean_text((string)$input['name'], 191) : (string)$source['name'];
-    $rssUrl = array_key_exists('rss_url', $input) ? news_validate_feed_url((string)$input['rss_url']) : (string)$source['rss_url'];
+    $currentFeedUrl = (string)($source['feed_url'] ?? $source['rss_url'] ?? '');
+    $nextFeedUrlRaw = array_key_exists('rss_url', $input)
+        ? (string)$input['rss_url']
+        : (array_key_exists('feed_url', $input) ? (string)$input['feed_url'] : $currentFeedUrl);
+    $feedUrl = news_validate_feed_url($nextFeedUrlRaw);
     $category = array_key_exists('category', $input) ? news_normalize_category((string)$input['category']) : (string)$source['category'];
     $language = array_key_exists('language', $input) ? news_clean_text((string)$input['language'], 16) : (string)$source['language'];
     $language = $language !== '' ? strtolower($language) : 'tr';
@@ -157,17 +164,16 @@ function news_update_source(PDO $pdo, string $id, array $input): array
         throw new InvalidArgumentException('Kaynak adı zorunludur.');
     }
 
-    $urlHash = hash('sha256', mb_strtolower($rssUrl, 'UTF-8'));
-    $dup = $pdo->prepare('SELECT id FROM news_sources WHERE url_hash = ? AND id <> ? LIMIT 1');
-    $dup->execute([$urlHash, $id]);
+    $dup = $pdo->prepare('SELECT id FROM news_sources WHERE feed_url = ? AND id <> ? LIMIT 1');
+    $dup->execute([$feedUrl, $id]);
     if ($dup->fetchColumn()) {
         throw new InvalidArgumentException('Bu RSS URL başka bir kaynakta kullanılıyor.');
     }
 
     $stmt = $pdo->prepare('UPDATE news_sources
-        SET name = ?, rss_url = ?, url_hash = ?, category = ?, language = ?, is_active = ?, updated_at = NOW()
+        SET name = ?, feed_url = ?, category = ?, language = ?, is_active = ?, updated_at = NOW()
         WHERE id = ?');
-    $stmt->execute([$name, $rssUrl, $urlHash, $category, $language, $isActive, $id]);
+    $stmt->execute([$name, $feedUrl, $category, $language, $isActive, $id]);
 
     return (array)news_get_source($pdo, $id);
 }
@@ -321,7 +327,7 @@ function news_upsert_pending_article(PDO $pdo, array $source, array $item): bool
 
 function news_fetch_rss_source(PDO $pdo, array $source): array
 {
-    $rssUrl = (string)($source['rss_url'] ?? '');
+    $feedUrl = (string)($source['feed_url'] ?? $source['rss_url'] ?? '');
     $sourceId = (string)($source['id'] ?? '');
 
     try {
@@ -337,7 +343,7 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
             ],
         ]);
 
-        $xml = @file_get_contents($rssUrl, false, $ctx);
+        $xml = @file_get_contents($feedUrl, false, $ctx);
         if (!is_string($xml) || trim($xml) === '') {
             throw new RuntimeException('Feed içeriği alınamadı.');
         }
@@ -350,7 +356,7 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
             }
         }
 
-        $upd = $pdo->prepare('UPDATE news_sources SET last_fetched_at = NOW(), last_error = NULL, updated_at = NOW() WHERE id = ?');
+        $upd = $pdo->prepare('UPDATE news_sources SET last_fetched_at = NOW(), updated_at = NOW() WHERE id = ?');
         $upd->execute([$sourceId]);
 
         return [
@@ -360,8 +366,7 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
             'source_id' => $sourceId,
         ];
     } catch (Throwable $e) {
-        $upd = $pdo->prepare('UPDATE news_sources SET last_error = ?, updated_at = NOW() WHERE id = ?');
-        $upd->execute([news_clean_text($e->getMessage(), 2000), $sourceId]);
+        error_log('[news] feed failed: source_id=' . $sourceId . ' feed_url=' . $feedUrl . ' error=' . $e->getMessage());
 
         return [
             'success' => false,
@@ -382,7 +387,7 @@ function news_list_admin_articles(PDO $pdo, string $status = 'pending'): array
 
     $stmt = $pdo->prepare('SELECT a.*,
             s.name AS source_feed_name,
-            s.rss_url AS source_feed_url
+            s.feed_url AS source_feed_url
         FROM news_articles a
         LEFT JOIN news_sources s ON s.id = a.source_id
         WHERE a.status = ?
@@ -403,10 +408,8 @@ function news_update_article_status(PDO $pdo, string $id, string $status): array
 
     $isActive = ($status === 'approved') ? 1 : 0;
     $approvedAt = ($status === 'approved') ? 'NOW()' : 'NULL';
-    $rejectedAt = ($status === 'rejected') ? 'NOW()' : 'NULL';
-
     $sql = 'UPDATE news_articles
-        SET status = ?, is_active = ?, approved_at = ' . $approvedAt . ', rejected_at = ' . $rejectedAt . ', updated_at = NOW()
+        SET status = ?, is_active = ?, approved_at = ' . $approvedAt . ', updated_at = NOW()
         WHERE id = ?';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$status, $isActive, $id]);
