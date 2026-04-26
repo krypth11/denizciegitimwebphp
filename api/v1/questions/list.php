@@ -83,9 +83,10 @@ try {
     if ($poolType === 'most_wrong') {
         $ws = study_get_wrong_score_schema($pdo);
         if ($ws && !empty($ws['user_id']) && !empty($ws['question_id']) && !empty($ws['wrong_score'])) {
-            $select[] = 'COALESCE(ws.' . study_q($ws['wrong_score']) . ', 0) AS wrong_score';
+            $selectWithWrongScore = $select;
+            $selectWithWrongScore[] = 'COALESCE(ws.' . study_q($ws['wrong_score']) . ', 0) AS wrong_score';
 
-            $sql = 'SELECT ' . implode(', ', $select)
+            $sql = 'SELECT ' . implode(', ', $selectWithWrongScore)
                 . ' FROM questions ' . $q
                 . ' INNER JOIN ' . study_q($ws['table']) . ' ws'
                 . ' ON ws.' . study_q($ws['question_id']) . ' = ' . $qc('id')
@@ -145,7 +146,12 @@ try {
                 }
 
                 if ($fallbackConditions) {
-                    $sql = 'SELECT DISTINCT ' . implode(', ', $select)
+                    $selectFallback = $select;
+                    if (!empty($up['wrong_answer_count'])) {
+                        $selectFallback[] = 'COALESCE(up.' . study_q($up['wrong_answer_count']) . ', 0) AS wrong_score';
+                    }
+
+                    $sql = 'SELECT DISTINCT ' . implode(', ', $selectFallback)
                         . ' FROM questions ' . $q
                         . ' INNER JOIN ' . study_q($up['table']) . ' up'
                         . ' ON up.' . study_q($up['question_id']) . ' = ' . $qc('id')
@@ -323,5 +329,6 @@ try {
         'questions' => $questions,
     ]);
 } catch (Throwable $e) {
+    error_log('questions.list failed: ' . $e->getMessage());
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
 }
