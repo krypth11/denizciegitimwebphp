@@ -281,3 +281,63 @@ function question_scope_replace_primary_from_question(PDO $pdo, string $question
 
     question_scope_ensure_primary($pdo, $questionId);
 }
+
+function question_scope_user_can_access_question(
+    PDO $pdo,
+    string $questionId,
+    string $qualificationId,
+    string $courseId,
+    ?string $topicId
+): bool {
+    $questionId = trim($questionId);
+    $qualificationId = trim($qualificationId);
+    $courseId = trim($courseId);
+    $topicId = question_scope_normalize_topic_id($topicId);
+
+    if ($questionId === '' || $qualificationId === '' || $courseId === '') {
+        return false;
+    }
+
+    if (question_scope_has_links_table($pdo)) {
+        $scopeStmt = $pdo->prepare(
+            'SELECT 1
+             FROM question_scope_links
+             WHERE question_id = ?
+               AND qualification_id = ?
+               AND course_id = ?
+               AND topic_id = ?
+             LIMIT 1'
+        );
+        $scopeStmt->execute([$questionId, $qualificationId, $courseId, $topicId]);
+        if ($scopeStmt->fetchColumn()) {
+            return true;
+        }
+
+        $hasAnyScopeStmt = $pdo->prepare('SELECT 1 FROM question_scope_links WHERE question_id = ? LIMIT 1');
+        $hasAnyScopeStmt->execute([$questionId]);
+        if ($hasAnyScopeStmt->fetchColumn()) {
+            return false;
+        }
+    }
+
+    $fallbackStmt = $pdo->prepare(
+        'SELECT q.course_id, q.topic_id, c.qualification_id
+         FROM questions q
+         LEFT JOIN courses c ON c.id = q.course_id
+         WHERE q.id = ?
+         LIMIT 1'
+    );
+    $fallbackStmt->execute([$questionId]);
+    $row = $fallbackStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return false;
+    }
+
+    $questionQualificationId = trim((string)($row['qualification_id'] ?? ''));
+    $questionCourseId = trim((string)($row['course_id'] ?? ''));
+    $questionTopicId = question_scope_normalize_topic_id($row['topic_id'] ?? null);
+
+    return $questionQualificationId === $qualificationId
+        && $questionCourseId === $courseId
+        && $questionTopicId === $topicId;
+}

@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/study_helper.php';
 require_once dirname(__DIR__) . '/maritime_content_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/question_scope_helper.php';
 
 api_require_method('POST');
 
@@ -120,11 +121,41 @@ try {
         api_error('Soru bulunamadı.', 404);
     }
 
-    $questionQualificationId = trim((string)($questionMeta['qualification_id'] ?? ''));
-    if ($questionQualificationId !== '' && $questionQualificationId !== $currentQualificationId) {
+    $selectedQualificationId = trim((string)($payload['qualification_id'] ?? $currentQualificationId));
+    if ($selectedQualificationId === '') {
+        $selectedQualificationId = $currentQualificationId;
+    }
+
+    $selectedCourseId = trim((string)($payload['course_id'] ?? ($questionMeta['course_id'] ?? '')));
+    $selectedTopicId = array_key_exists('topic_id', $payload)
+        ? trim((string)$payload['topic_id'])
+        : trim((string)($questionMeta['topic_id'] ?? ''));
+    if ($selectedTopicId === '') {
+        $selectedTopicId = null;
+    }
+
+    if ($selectedQualificationId !== $currentQualificationId) {
         api_qualification_access_log('qualification access rejected', [
-            'context' => 'study.answer.question_id',
-            'requested_qualification_id' => $questionQualificationId,
+            'context' => 'study.answer.scope_qualification',
+            'requested_qualification_id' => $selectedQualificationId,
+            'current_qualification_id' => $currentQualificationId,
+            'question_id' => $questionId,
+        ]);
+        api_error('Bu soru için erişim yetkiniz yok.', 403);
+    }
+
+    if (!question_scope_user_can_access_question(
+        $pdo,
+        $questionId,
+        $selectedQualificationId,
+        $selectedCourseId,
+        $selectedTopicId
+    )) {
+        api_qualification_access_log('qualification access rejected', [
+            'context' => 'study.answer.question_scope',
+            'requested_qualification_id' => $selectedQualificationId,
+            'requested_course_id' => $selectedCourseId,
+            'requested_topic_id' => $selectedTopicId,
             'current_qualification_id' => $currentQualificationId,
             'question_id' => $questionId,
         ]);
@@ -182,9 +213,9 @@ try {
         study_update_question_wrong_score($pdo, [
             'user_id' => $userId,
             'question_id' => $questionId,
-            'qualification_id' => $questionMeta['qualification_id'] ?? null,
-            'course_id' => $questionMeta['course_id'] ?? null,
-            'topic_id' => $questionMeta['topic_id'] ?? null,
+            'qualification_id' => $selectedQualificationId,
+            'course_id' => ($selectedCourseId !== '' ? $selectedCourseId : null),
+            'topic_id' => $selectedTopicId,
             'is_correct' => $computedIsCorrect,
         ]);
     } catch (Throwable $wrongScoreError) {
@@ -198,9 +229,9 @@ try {
         study_insert_attempt_event($pdo, [
             'user_id' => $userId,
             'question_id' => $questionId,
-            'course_id' => $questionMeta['course_id'] ?? null,
-            'qualification_id' => $questionMeta['qualification_id'] ?? null,
-            'topic_id' => $questionMeta['topic_id'] ?? null,
+            'course_id' => ($selectedCourseId !== '' ? $selectedCourseId : null),
+            'qualification_id' => $selectedQualificationId,
+            'topic_id' => $selectedTopicId,
             'session_id' => $sessionId,
             'source' => $source,
             'selected_answer' => $selectedAnswer,
