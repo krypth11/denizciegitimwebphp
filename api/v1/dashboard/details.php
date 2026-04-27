@@ -121,10 +121,6 @@ try {
     $metCols = get_table_columns($pdo, 'maritime_english_topics');
     $mecCols = get_table_columns($pdo, 'maritime_english_categories');
 
-    if (empty($upCols) || empty($qCols) || !in_array('user_id', $upCols, true)) {
-        api_success('Dashboard detay istatistikleri alındı.', ['details' => $details]);
-    }
-
     $upQuestionId = dd_first($upCols, ['question_id']);
     $upCorrectCount = dd_first($upCols, ['correct_answer_count', 'correct_count']);
     $upWrongCount = dd_first($upCols, ['wrong_answer_count', 'wrong_count', 'incorrect_count']);
@@ -143,6 +139,9 @@ try {
     $qualName = dd_first($qualCols, ['name', 'title']);
 
     $evUserId = dd_first($evCols, ['user_id']);
+    $evQuestionId = dd_first($evCols, ['question_id']);
+    $evCourseId = dd_first($evCols, ['course_id']);
+    $evQualificationId = dd_first($evCols, ['qualification_id']);
     $evTopicId = dd_first($evCols, ['topic_id']);
     $evSource = dd_first($evCols, ['source']);
     $evCorrect = dd_first($evCols, ['is_correct']);
@@ -159,76 +158,114 @@ try {
     $mecId = dd_first($mecCols, ['id', 'category_id']);
     $mecName = dd_first($mecCols, ['name', 'title', 'category_name']);
 
-    if (!$upQuestionId || !$qId || !$qCourseId || !$cId || !$cName) {
-        api_success('Dashboard detay istatistikleri alındı.', ['details' => $details]);
-    }
+    if ($evUserId && $evCorrect && $evQuestionId && $qId && $qCourseId && $cId && $cName && $cQualificationId && $qualId && $qualName) {
+        $resolvedCourseExpr = $evCourseId
+            ? ('COALESCE(e.' . dd_q($evCourseId) . ', q.' . dd_q($qCourseId) . ')')
+            : ('q.' . dd_q($qCourseId));
+        $resolvedQualificationExpr = $evQualificationId
+            ? ('COALESCE(e.' . dd_q($evQualificationId) . ', c.' . dd_q($cQualificationId) . ')')
+            : ('c.' . dd_q($cQualificationId));
 
-    $attemptExpr = $upTotalAnswerCount
-        ? 'COALESCE(SUM(up.' . dd_q($upTotalAnswerCount) . '), 0)'
-        : 'COUNT(*)';
-    $correctExpr = $upCorrectCount
-        ? 'COALESCE(SUM(up.' . dd_q($upCorrectCount) . '), 0)'
-        : '0';
-    $wrongExpr = $upWrongCount
-        ? 'COALESCE(SUM(up.' . dd_q($upWrongCount) . '), 0)'
-        : '0';
-    $bookmarkExpr = $upIsBookmarked
-        ? 'COALESCE(SUM(CASE WHEN up.' . dd_q($upIsBookmarked) . ' = 1 THEN 1 ELSE 0 END), 0)'
-        : '0';
-
-    $courseSql = 'SELECT '
-        . 'c.' . dd_q($cId) . ' AS course_id, '
-        . 'c.' . dd_q($cName) . ' AS course_name, '
-        . ($cQualificationId ? 'c.' . dd_q($cQualificationId) . ' AS qualification_id, ' : 'NULL AS qualification_id, ')
-        . (($cQualificationId && $qualId && $qualName) ? 'qf.' . dd_q($qualName) . ' AS qualification_name, ' : "'' AS qualification_name, ")
-        . $attemptExpr . ' AS total_answer_attempts, '
-        . $correctExpr . ' AS total_correct, '
-        . $wrongExpr . ' AS total_wrong, '
-        . $bookmarkExpr . ' AS bookmark_count, '
-        . ($upDateCol ? 'MAX(up.' . dd_q($upDateCol) . ')' : 'NULL') . ' AS last_activity_at '
-        . 'FROM `user_progress` up '
-        . 'INNER JOIN `questions` q ON up.' . dd_q($upQuestionId) . ' = q.' . dd_q($qId) . ' '
-        . 'INNER JOIN `courses` c ON q.' . dd_q($qCourseId) . ' = c.' . dd_q($cId) . ' '
-        . (($cQualificationId && $qualId && $qualName) ? 'LEFT JOIN `qualifications` qf ON c.' . dd_q($cQualificationId) . ' = qf.' . dd_q($qualId) . ' ' : '')
-        . 'WHERE up.`user_id` = ? '
-        . 'GROUP BY c.' . dd_q($cId) . ', c.' . dd_q($cName)
-        . ($cQualificationId ? ', c.' . dd_q($cQualificationId) : '')
-        . (($cQualificationId && $qualId && $qualName) ? ', qf.' . dd_q($qualName) : '')
-        . ' ORDER BY total_answer_attempts DESC, course_name ASC';
-
-    $stmt = $pdo->prepare($courseSql);
-    $stmt->execute([$userId]);
-    $courseRows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-    foreach ($courseRows as $row) {
-        $correct = (int)($row['total_correct'] ?? 0);
-        $wrong = (int)($row['total_wrong'] ?? 0);
-        $details['course_stats'][] = [
-            'course_id' => (string)($row['course_id'] ?? ''),
-            'course_name' => (string)($row['course_name'] ?? ''),
-            'qualification_id' => $row['qualification_id'] ?? null,
-            'qualification_name' => (string)($row['qualification_name'] ?? ''),
-            'total_answer_attempts' => (int)($row['total_answer_attempts'] ?? 0),
-            'solved_count' => (int)($row['total_answer_attempts'] ?? 0),
-            'answered_count' => (int)($row['total_answer_attempts'] ?? 0),
-            'total_correct' => $correct,
-            'total_wrong' => $wrong,
-            'success_rate' => dd_rate($correct, $wrong),
-            'bookmark_count' => (int)($row['bookmark_count'] ?? 0),
-            'last_activity_at' => $row['last_activity_at'] ?? null,
+        $where = [
+            'e.' . dd_q($evUserId) . ' = ?',
+            $resolvedCourseExpr . ' IS NOT NULL',
+            'TRIM(COALESCE(' . $resolvedCourseExpr . ', "")) <> ""',
         ];
+        $params = [$userId];
+        if ($evSource) {
+            $where[] = 'LOWER(TRIM(COALESCE(e.' . dd_q($evSource) . ', ""))) NOT IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")';
+        }
+
+        $courseSql = 'SELECT '
+            . $resolvedCourseExpr . ' AS course_id, '
+            . 'COALESCE(c.' . dd_q($cName) . ', "") AS course_name, '
+            . $resolvedQualificationExpr . ' AS qualification_id, '
+            . 'COALESCE(qf.' . dd_q($qualName) . ', "") AS qualification_name, '
+            . 'COUNT(*) AS total_answer_attempts, '
+            . 'SUM(CASE WHEN e.' . dd_q($evCorrect) . ' = 1 THEN 1 ELSE 0 END) AS total_correct, '
+            . 'SUM(CASE WHEN e.' . dd_q($evCorrect) . ' = 0 THEN 1 ELSE 0 END) AS total_wrong, '
+            . ($evAttemptedAt ? 'MAX(e.' . dd_q($evAttemptedAt) . ')' : 'NULL') . ' AS last_activity_at '
+            . 'FROM `question_attempt_events` e '
+            . 'LEFT JOIN `questions` q ON e.' . dd_q($evQuestionId) . ' = q.' . dd_q($qId) . ' '
+            . 'LEFT JOIN `courses` c ON ' . $resolvedCourseExpr . ' = c.' . dd_q($cId) . ' '
+            . 'LEFT JOIN `qualifications` qf ON ' . $resolvedQualificationExpr . ' = qf.' . dd_q($qualId) . ' '
+            . 'WHERE ' . implode(' AND ', $where) . ' '
+            . 'GROUP BY ' . $resolvedCourseExpr . ', c.' . dd_q($cName) . ', ' . $resolvedQualificationExpr . ', qf.' . dd_q($qualName) . ' '
+            . 'ORDER BY total_answer_attempts DESC, course_name ASC';
+
+        $stmt = $pdo->prepare($courseSql);
+        $stmt->execute($params);
+        $courseRows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        foreach ($courseRows as $row) {
+            $correct = (int)($row['total_correct'] ?? 0);
+            $wrong = (int)($row['total_wrong'] ?? 0);
+            $details['course_stats'][] = [
+                'course_id' => (string)($row['course_id'] ?? ''),
+                'course_name' => (string)($row['course_name'] ?? ''),
+                'qualification_id' => $row['qualification_id'] ?? null,
+                'qualification_name' => (string)($row['qualification_name'] ?? ''),
+                'total_answer_attempts' => (int)($row['total_answer_attempts'] ?? 0),
+                'solved_count' => (int)($row['total_answer_attempts'] ?? 0),
+                'answered_count' => (int)($row['total_answer_attempts'] ?? 0),
+                'total_correct' => $correct,
+                'total_wrong' => $wrong,
+                'success_rate' => dd_rate($correct, $wrong),
+                'bookmark_count' => 0,
+                'last_activity_at' => $row['last_activity_at'] ?? null,
+            ];
+        }
     }
 
-    if ($evUserId && $evTopicId && $evCorrect && $evAttemptedAt) {
+    if ($upQuestionId && $upIsBookmarked && $qId && $qCourseId) {
+        $bookmarkSql = 'SELECT '
+            . 'q.' . dd_q($qCourseId) . ' AS course_id, '
+            . 'COALESCE(SUM(CASE WHEN up.' . dd_q($upIsBookmarked) . ' = 1 THEN 1 ELSE 0 END), 0) AS bookmark_count '
+            . 'FROM `user_progress` up '
+            . 'INNER JOIN `questions` q ON up.' . dd_q($upQuestionId) . ' = q.' . dd_q($qId) . ' '
+            . 'WHERE up.`user_id` = ? '
+            . 'GROUP BY q.' . dd_q($qCourseId);
+        $bookmarkStmt = $pdo->prepare($bookmarkSql);
+        $bookmarkStmt->execute([$userId]);
+        $bookmarkRows = $bookmarkStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $bookmarkByCourseId = [];
+        foreach ($bookmarkRows as $bookmarkRow) {
+            $cid = (string)($bookmarkRow['course_id'] ?? '');
+            if ($cid === '') {
+                continue;
+            }
+            $bookmarkByCourseId[$cid] = (int)($bookmarkRow['bookmark_count'] ?? 0);
+        }
+
+        foreach ($details['course_stats'] as &$course) {
+            $cid = (string)($course['course_id'] ?? '');
+            $course['bookmark_count'] = $bookmarkByCourseId[$cid] ?? 0;
+        }
+        unset($course);
+    }
+
+    if ($evUserId && $evCorrect && $evAttemptedAt) {
         $dateParams = [];
         $dateSql = stats_build_date_between_sql('e.' . dd_q($evAttemptedAt), $window['start_date'], $window['end_date'], $dateParams);
 
         // Standart (topics tablosu) topic istatistikleri
-        if ($tId && $tName && $tCourseId && $cId && $cName) {
+        $qTopicId = dd_first($qCols, ['topic_id']);
+        if ($evQuestionId && $tId && $tName && $tCourseId && $cId && $cName && $qId && $qCourseId && $cQualificationId && $qualId && $qualName && $qTopicId) {
+            $resolvedTopicExpr = $evTopicId
+                ? ('COALESCE(e.' . dd_q($evTopicId) . ', q.' . dd_q($qTopicId) . ')')
+                : ('q.' . dd_q($qTopicId));
+            $resolvedTopicCourseExpr = $evCourseId
+                ? ('COALESCE(e.' . dd_q($evCourseId) . ', t.' . dd_q($tCourseId) . ', q.' . dd_q($qCourseId) . ')')
+                : ('COALESCE(t.' . dd_q($tCourseId) . ', q.' . dd_q($qCourseId) . ')');
+            $resolvedTopicQualificationExpr = $evQualificationId
+                ? ('COALESCE(e.' . dd_q($evQualificationId) . ', c.' . dd_q($cQualificationId) . ')')
+                : ('c.' . dd_q($cQualificationId));
+
             $where = [
                 'e.' . dd_q($evUserId) . ' = ?',
-                'e.' . dd_q($evTopicId) . ' IS NOT NULL',
-                'TRIM(COALESCE(e.' . dd_q($evTopicId) . ', "")) <> ""',
+                $resolvedTopicExpr . ' IS NOT NULL',
+                'TRIM(COALESCE(' . $resolvedTopicExpr . ', "")) <> ""',
             ];
             $params = [$userId];
             if ($dateSql !== '') {
@@ -242,24 +279,23 @@ try {
             $sql = 'SELECT '
                 . 't.' . dd_q($tId) . ' AS topic_id, '
                 . 't.' . dd_q($tName) . ' AS topic_name, '
-                . 'c.' . dd_q($cId) . ' AS course_id, '
-                . 'c.' . dd_q($cName) . ' AS course_name, '
-                . ($cQualificationId ? 'c.' . dd_q($cQualificationId) . ' AS qualification_id, ' : 'NULL AS qualification_id, ')
-                . (($cQualificationId && $qualId && $qualName) ? 'qf.' . dd_q($qualName) . ' AS qualification_name, ' : "'' AS qualification_name, ")
+                . $resolvedTopicCourseExpr . ' AS course_id, '
+                . 'COALESCE(c.' . dd_q($cName) . ', "") AS course_name, '
+                . $resolvedTopicQualificationExpr . ' AS qualification_id, '
+                . 'COALESCE(qf.' . dd_q($qualName) . ', "") AS qualification_name, '
                 . 'COUNT(*) AS total_answer_attempts, '
                 . 'SUM(CASE WHEN e.' . dd_q($evCorrect) . ' = 1 THEN 1 ELSE 0 END) AS total_correct, '
                 . 'SUM(CASE WHEN e.' . dd_q($evCorrect) . ' = 0 THEN 1 ELSE 0 END) AS total_wrong, '
                 . 'MAX(e.' . dd_q($evAttemptedAt) . ') AS last_activity_at '
                 . 'FROM `question_attempt_events` e '
-                . 'INNER JOIN `topics` t ON e.' . dd_q($evTopicId) . ' = t.' . dd_q($tId) . ' '
-                . 'INNER JOIN `courses` c ON t.' . dd_q($tCourseId) . ' = c.' . dd_q($cId) . ' '
-                . (($cQualificationId && $qualId && $qualName) ? 'LEFT JOIN `qualifications` qf ON c.' . dd_q($cQualificationId) . ' = qf.' . dd_q($qualId) . ' ' : '')
+                . 'LEFT JOIN `questions` q ON e.' . dd_q($evQuestionId) . ' = q.' . dd_q($qId) . ' '
+                . 'LEFT JOIN `topics` t ON ' . $resolvedTopicExpr . ' = t.' . dd_q($tId) . ' '
+                . 'LEFT JOIN `courses` c ON ' . $resolvedTopicCourseExpr . ' = c.' . dd_q($cId) . ' '
+                . 'LEFT JOIN `qualifications` qf ON ' . $resolvedTopicQualificationExpr . ' = qf.' . dd_q($qualId) . ' '
                 . 'WHERE ' . implode(' AND ', $where) . ' '
-                . 'GROUP BY '
-                . 't.' . dd_q($tId) . ', t.' . dd_q($tName) . ', '
-                . 'c.' . dd_q($cId) . ', c.' . dd_q($cName)
-                . ($cQualificationId ? ', c.' . dd_q($cQualificationId) : '')
-                . (($cQualificationId && $qualId && $qualName) ? ', qf.' . dd_q($qualName) : '')
+                . 'GROUP BY t.' . dd_q($tId) . ', t.' . dd_q($tName) . ', '
+                . $resolvedTopicCourseExpr . ', c.' . dd_q($cName) . ', '
+                . $resolvedTopicQualificationExpr . ', qf.' . dd_q($qualName)
                 . ' ORDER BY total_answer_attempts DESC, topic_name ASC';
 
             $stmt = $pdo->prepare($sql);

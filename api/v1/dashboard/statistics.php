@@ -208,6 +208,9 @@ try {
     $meCategoryCols = get_table_columns($pdo, 'maritime_english_categories');
 
     $evUserIdCol = stats_first_col($eventCols, ['user_id']);
+    $evQuestionIdCol = stats_first_col($eventCols, ['question_id']);
+    $evCourseIdCol = stats_first_col($eventCols, ['course_id']);
+    $evQualificationIdCol = stats_first_col($eventCols, ['qualification_id']);
     $evTopicIdCol = stats_first_col($eventCols, ['topic_id']);
     $evSourceCol = stats_first_col($eventCols, ['source']);
     $evCorrectCol = stats_first_col($eventCols, ['is_correct']);
@@ -392,19 +395,30 @@ try {
     $metNameCol = stats_first_col($metCols, ['name', 'title', 'topic_name']);
     $metCategoryIdCol = stats_first_col($metCols, ['category_id', 'maritime_english_category_id']);
 
-    if ($qIdCol && $qCourseIdCol && $cIdCol && $cNameCol && $cQualificationIdCol && $qualIdCol && $qualNameCol) {
+    if ($qIdCol && $qCourseIdCol && $cIdCol && $cNameCol && $cQualificationIdCol && $qualIdCol && $qualNameCol && $evQuestionIdCol) {
+        $resolvedCourseExpr = $evCourseIdCol
+            ? ('COALESCE(e.' . stats_q($evCourseIdCol) . ', q.' . stats_q($qCourseIdCol) . ')')
+            : ('q.' . stats_q($qCourseIdCol));
+        $resolvedQualificationExpr = $evQualificationIdCol
+            ? ('COALESCE(e.' . stats_q($evQualificationIdCol) . ', c.' . stats_q($cQualificationIdCol) . ')')
+            : ('c.' . stats_q($cQualificationIdCol));
+        $standardScopeWhere = ['e.`user_id` = ?'];
+        if ($evSourceCol) {
+            $standardScopeWhere[] = 'LOWER(TRIM(COALESCE(e.' . stats_q($evSourceCol) . ', ""))) NOT IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")';
+        }
+
         $sqlQualificationStats = 'SELECT '
-            . 'qf.' . stats_q($qualIdCol) . ' AS qualification_id, '
-            . 'qf.' . stats_q($qualNameCol) . ' AS qualification_name, '
+            . $resolvedQualificationExpr . ' AS qualification_id, '
+            . 'COALESCE(qf.' . stats_q($qualNameCol) . ', "") AS qualification_name, '
             . 'SUM(CASE WHEN e.`is_correct` IN (0,1) THEN 1 ELSE 0 END) AS total_solved, '
             . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
             . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
             . 'FROM `question_attempt_events` e '
-            . 'INNER JOIN `questions` q ON e.`question_id` = q.' . stats_q($qIdCol) . ' '
-            . 'INNER JOIN `courses` c ON q.' . stats_q($qCourseIdCol) . ' = c.' . stats_q($cIdCol) . ' '
-            . 'INNER JOIN `qualifications` qf ON c.' . stats_q($cQualificationIdCol) . ' = qf.' . stats_q($qualIdCol) . ' '
-            . 'WHERE e.`user_id` = ? '
-            . 'GROUP BY qf.' . stats_q($qualIdCol) . ', qf.' . stats_q($qualNameCol) . ' '
+            . 'LEFT JOIN `questions` q ON e.' . stats_q($evQuestionIdCol) . ' = q.' . stats_q($qIdCol) . ' '
+            . 'LEFT JOIN `courses` c ON ' . $resolvedCourseExpr . ' = c.' . stats_q($cIdCol) . ' '
+            . 'LEFT JOIN `qualifications` qf ON ' . $resolvedQualificationExpr . ' = qf.' . stats_q($qualIdCol) . ' '
+            . 'WHERE ' . implode(' AND ', $standardScopeWhere) . ' '
+            . 'GROUP BY ' . $resolvedQualificationExpr . ', qf.' . stats_q($qualNameCol) . ' '
             . 'ORDER BY total_solved DESC, qualification_name ASC';
 
         $stmtQualificationStats = $pdo->prepare($sqlQualificationStats);
@@ -425,19 +439,19 @@ try {
         }
 
         $sqlCourseStats = 'SELECT '
-            . 'c.' . stats_q($cIdCol) . ' AS course_id, '
-            . 'c.' . stats_q($cNameCol) . ' AS course_name, '
-            . 'qf.' . stats_q($qualIdCol) . ' AS qualification_id, '
-            . 'qf.' . stats_q($qualNameCol) . ' AS qualification_name, '
+            . $resolvedCourseExpr . ' AS course_id, '
+            . 'COALESCE(c.' . stats_q($cNameCol) . ', "") AS course_name, '
+            . $resolvedQualificationExpr . ' AS qualification_id, '
+            . 'COALESCE(qf.' . stats_q($qualNameCol) . ', "") AS qualification_name, '
             . 'SUM(CASE WHEN e.`is_correct` IN (0,1) THEN 1 ELSE 0 END) AS total_solved, '
             . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
             . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
             . 'FROM `question_attempt_events` e '
-            . 'INNER JOIN `questions` q ON e.`question_id` = q.' . stats_q($qIdCol) . ' '
-            . 'INNER JOIN `courses` c ON q.' . stats_q($qCourseIdCol) . ' = c.' . stats_q($cIdCol) . ' '
-            . 'INNER JOIN `qualifications` qf ON c.' . stats_q($cQualificationIdCol) . ' = qf.' . stats_q($qualIdCol) . ' '
-            . 'WHERE e.`user_id` = ? '
-            . 'GROUP BY c.' . stats_q($cIdCol) . ', c.' . stats_q($cNameCol) . ', qf.' . stats_q($qualIdCol) . ', qf.' . stats_q($qualNameCol) . ' '
+            . 'LEFT JOIN `questions` q ON e.' . stats_q($evQuestionIdCol) . ' = q.' . stats_q($qIdCol) . ' '
+            . 'LEFT JOIN `courses` c ON ' . $resolvedCourseExpr . ' = c.' . stats_q($cIdCol) . ' '
+            . 'LEFT JOIN `qualifications` qf ON ' . $resolvedQualificationExpr . ' = qf.' . stats_q($qualIdCol) . ' '
+            . 'WHERE ' . implode(' AND ', $standardScopeWhere) . ' '
+            . 'GROUP BY ' . $resolvedCourseExpr . ', c.' . stats_q($cNameCol) . ', ' . $resolvedQualificationExpr . ', qf.' . stats_q($qualNameCol) . ' '
             . 'ORDER BY total_solved DESC, course_name ASC';
 
         $stmtCourseStats = $pdo->prepare($sqlCourseStats);
@@ -464,17 +478,17 @@ try {
 
         // Flutter için sade tek liste (qualification + course)
         $sqlStatsRows = 'SELECT '
-            . 'qf.' . stats_q($qualNameCol) . ' AS qualification_name, '
-            . 'c.' . stats_q($cNameCol) . ' AS course_name, '
+            . 'COALESCE(qf.' . stats_q($qualNameCol) . ', "") AS qualification_name, '
+            . 'COALESCE(c.' . stats_q($cNameCol) . ', "") AS course_name, '
             . 'SUM(CASE WHEN e.`is_correct` IN (0,1) THEN 1 ELSE 0 END) AS total_solved, '
             . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
             . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
             . 'FROM `question_attempt_events` e '
-            . 'INNER JOIN `questions` q ON e.`question_id` = q.' . stats_q($qIdCol) . ' '
-            . 'INNER JOIN `courses` c ON q.' . stats_q($qCourseIdCol) . ' = c.' . stats_q($cIdCol) . ' '
-            . 'INNER JOIN `qualifications` qf ON c.' . stats_q($cQualificationIdCol) . ' = qf.' . stats_q($qualIdCol) . ' '
-            . 'WHERE e.`user_id` = ? '
-            . 'GROUP BY qf.' . stats_q($qualNameCol) . ', c.' . stats_q($cNameCol) . ' '
+            . 'LEFT JOIN `questions` q ON e.' . stats_q($evQuestionIdCol) . ' = q.' . stats_q($qIdCol) . ' '
+            . 'LEFT JOIN `courses` c ON ' . $resolvedCourseExpr . ' = c.' . stats_q($cIdCol) . ' '
+            . 'LEFT JOIN `qualifications` qf ON ' . $resolvedQualificationExpr . ' = qf.' . stats_q($qualIdCol) . ' '
+            . 'WHERE ' . implode(' AND ', $standardScopeWhere) . ' '
+            . 'GROUP BY ' . $resolvedQualificationExpr . ', qf.' . stats_q($qualNameCol) . ', ' . $resolvedCourseExpr . ', c.' . stats_q($cNameCol) . ' '
             . 'ORDER BY qualification_name ASC, course_name ASC';
 
         $stmtStatsRows = $pdo->prepare($sqlStatsRows);
@@ -566,20 +580,37 @@ try {
     }
 
     // Topic bazlı istatistikler (details.php ile hizalı)
+    $qTopicIdCol = stats_first_col($qCols, ['topic_id']);
     if (
         $evUserIdCol
-        && $evTopicIdCol
+        && $evQuestionIdCol
+        && $qIdCol
+        && $qTopicIdCol
         && $evCorrectCol
         && $topicIdCol
         && $topicNameCol
         && $topicCourseIdCol
+        && $qCourseIdCol
         && $cIdCol
         && $cNameCol
+        && $cQualificationIdCol
+        && $qualIdCol
+        && $qualNameCol
     ) {
+        $resolvedTopicExpr = $evTopicIdCol
+            ? ('COALESCE(e.' . stats_q($evTopicIdCol) . ', q.' . stats_q($qTopicIdCol) . ')')
+            : ('q.' . stats_q($qTopicIdCol));
+        $resolvedTopicCourseExpr = $evCourseIdCol
+            ? ('COALESCE(e.' . stats_q($evCourseIdCol) . ', t.' . stats_q($topicCourseIdCol) . ', q.' . stats_q($qCourseIdCol) . ')')
+            : ('COALESCE(t.' . stats_q($topicCourseIdCol) . ', q.' . stats_q($qCourseIdCol) . ')');
+        $resolvedTopicQualificationExpr = $evQualificationIdCol
+            ? ('COALESCE(e.' . stats_q($evQualificationIdCol) . ', c.' . stats_q($cQualificationIdCol) . ')')
+            : ('c.' . stats_q($cQualificationIdCol));
+
         $topicWhere = [
             'e.' . stats_q($evUserIdCol) . ' = ?',
-            'e.' . stats_q($evTopicIdCol) . ' IS NOT NULL',
-            'TRIM(COALESCE(e.' . stats_q($evTopicIdCol) . ', "")) <> ""',
+            $resolvedTopicExpr . ' IS NOT NULL',
+            'TRIM(COALESCE(' . $resolvedTopicExpr . ', "")) <> ""',
         ];
         if ($evSourceCol) {
             $topicWhere[] = 'LOWER(TRIM(COALESCE(e.' . stats_q($evSourceCol) . ', ""))) NOT IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")';
@@ -588,24 +619,23 @@ try {
         $topicSql = 'SELECT '
             . 't.' . stats_q($topicIdCol) . ' AS topic_id, '
             . 't.' . stats_q($topicNameCol) . ' AS topic_name, '
-            . 'c.' . stats_q($cIdCol) . ' AS course_id, '
-            . 'c.' . stats_q($cNameCol) . ' AS course_name, '
-            . ($cQualificationIdCol ? 'c.' . stats_q($cQualificationIdCol) . ' AS qualification_id, ' : 'NULL AS qualification_id, ')
-            . (($cQualificationIdCol && $qualIdCol && $qualNameCol) ? 'qf.' . stats_q($qualNameCol) . ' AS qualification_name, ' : "'' AS qualification_name, ")
+            . $resolvedTopicCourseExpr . ' AS course_id, '
+            . 'COALESCE(c.' . stats_q($cNameCol) . ', "") AS course_name, '
+            . $resolvedTopicQualificationExpr . ' AS qualification_id, '
+            . 'COALESCE(qf.' . stats_q($qualNameCol) . ', "") AS qualification_name, '
             . 'COUNT(*) AS total_answer_attempts, '
             . 'SUM(CASE WHEN e.' . stats_q($evCorrectCol) . ' = 1 THEN 1 ELSE 0 END) AS total_correct, '
             . 'SUM(CASE WHEN e.' . stats_q($evCorrectCol) . ' = 0 THEN 1 ELSE 0 END) AS total_wrong, '
             . ($evAttemptedAtCol ? 'MAX(e.' . stats_q($evAttemptedAtCol) . ')' : 'NULL') . ' AS last_activity_at '
             . 'FROM `question_attempt_events` e '
-            . 'INNER JOIN `topics` t ON e.' . stats_q($evTopicIdCol) . ' = t.' . stats_q($topicIdCol) . ' '
-            . 'INNER JOIN `courses` c ON t.' . stats_q($topicCourseIdCol) . ' = c.' . stats_q($cIdCol) . ' '
-            . (($cQualificationIdCol && $qualIdCol && $qualNameCol) ? 'LEFT JOIN `qualifications` qf ON c.' . stats_q($cQualificationIdCol) . ' = qf.' . stats_q($qualIdCol) . ' ' : '')
+            . 'LEFT JOIN `questions` q ON e.' . stats_q($evQuestionIdCol) . ' = q.' . stats_q($qIdCol) . ' '
+            . 'LEFT JOIN `topics` t ON ' . $resolvedTopicExpr . ' = t.' . stats_q($topicIdCol) . ' '
+            . 'LEFT JOIN `courses` c ON ' . $resolvedTopicCourseExpr . ' = c.' . stats_q($cIdCol) . ' '
+            . 'LEFT JOIN `qualifications` qf ON ' . $resolvedTopicQualificationExpr . ' = qf.' . stats_q($qualIdCol) . ' '
             . 'WHERE ' . implode(' AND ', $topicWhere) . ' '
-            . 'GROUP BY '
-            . 't.' . stats_q($topicIdCol) . ', t.' . stats_q($topicNameCol) . ', '
-            . 'c.' . stats_q($cIdCol) . ', c.' . stats_q($cNameCol)
-            . ($cQualificationIdCol ? ', c.' . stats_q($cQualificationIdCol) : '')
-            . (($cQualificationIdCol && $qualIdCol && $qualNameCol) ? ', qf.' . stats_q($qualNameCol) : '')
+            . 'GROUP BY t.' . stats_q($topicIdCol) . ', t.' . stats_q($topicNameCol) . ', '
+            . $resolvedTopicCourseExpr . ', c.' . stats_q($cNameCol) . ', '
+            . $resolvedTopicQualificationExpr . ', qf.' . stats_q($qualNameCol)
             . ' ORDER BY total_answer_attempts DESC, topic_name ASC';
 
         $stmtTopicStats = $pdo->prepare($topicSql);
