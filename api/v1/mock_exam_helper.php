@@ -814,7 +814,7 @@ function mock_exam_calculate_pool_counts(PDO $pdo, string $userId, string $quali
     $candidates = mock_exam_fetch_candidate_questions($pdo, $qualificationId, $courseId);
     $ids = array_values(array_map(static fn(array $r): string => (string)$r['id'], $candidates));
     $seen = mock_exam_fetch_seen_question_ids($pdo, $userId, $ids);
-    $wrongIds = mock_exam_fetch_wrong_question_ids($pdo, $userId, $qualificationId);
+    $wrongIds = mock_exam_fetch_wrong_question_ids($pdo, $userId, $qualificationId, $courseId);
     $wrongMap = array_fill_keys($wrongIds, true);
     $seenCount = 0;
     $wrongCount = 0;
@@ -835,9 +835,9 @@ function mock_exam_calculate_pool_counts(PDO $pdo, string $userId, string $quali
     ];
 }
 
-function mock_exam_fetch_wrong_question_ids(PDO $pdo, string $userId, string $qualificationId): array
+function mock_exam_fetch_wrong_question_ids(PDO $pdo, string $userId, string $qualificationId, ?string $courseId = null): array
 {
-    $candidates = mock_exam_fetch_candidate_questions($pdo, $qualificationId);
+    $candidates = mock_exam_fetch_candidate_questions($pdo, $qualificationId, $courseId);
     if (!$candidates) {
         return [];
     }
@@ -1124,7 +1124,7 @@ function mock_exam_build_question_set(PDO $pdo, string $userId, string $qualific
     $seenMap = mock_exam_fetch_seen_question_ids($pdo, $userId, $ids);
     $seenPool = [];
     $unseenPool = [];
-    $wrongMap = array_fill_keys(mock_exam_fetch_wrong_question_ids($pdo, $userId, $qualificationId), true);
+    $wrongMap = array_fill_keys(mock_exam_fetch_wrong_question_ids($pdo, $userId, $qualificationId, $courseId !== '' ? $courseId : null), true);
     $wrongPool = [];
     foreach ($candidates as $q) {
         $qid = (string)$q['id'];

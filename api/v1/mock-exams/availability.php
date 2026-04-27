@@ -11,10 +11,18 @@ try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
     $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'mock-exams.availability');
+    $courseId = trim((string)($_GET['course_id'] ?? ''));
 
     $qualificationId = $currentQualificationId;
+    if ($courseId !== '') {
+        $courseValidation = mock_exam_validate_course_for_qualification($pdo, $qualificationId, $courseId);
+        if (empty($courseValidation['is_valid'])) {
+            throw new RuntimeException((string)($courseValidation['message'] ?? 'Seçilen ders bu yeterliliğe ait değil.'));
+        }
+    }
+
     $examSettings = mock_exam_get_qualification_exam_settings($pdo, $qualificationId);
-    $counts = mock_exam_calculate_pool_counts($pdo, $userId, $qualificationId);
+    $counts = mock_exam_calculate_pool_counts($pdo, $userId, $qualificationId, $courseId !== '' ? $courseId : null);
     $coursesRaw = mock_exam_get_qualification_courses_for_exam($pdo, $qualificationId);
     $courses = array_map(static function (array $course): array {
         return [
