@@ -40,6 +40,7 @@ try {
         $limit = api_get_int_query('limit', 200, 1, 10000);
     }
 
+    $isRandomOrder = in_array($orderParam, ['random', 'rand'], true);
     $order = in_array($orderParam, ['asc', 'desc'], true) ? strtoupper($orderParam) : 'DESC';
 
     $q = 'q';
@@ -201,8 +202,12 @@ try {
             $sql .= ' WHERE ' . implode(' AND ', $where);
         }
 
-        $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
-        $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+        if ($isRandomOrder) {
+            $sql .= ' ORDER BY RAND() LIMIT ' . (int)$limit;
+        } else {
+            $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+            $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+        }
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
@@ -216,8 +221,12 @@ try {
                     $sql .= ' WHERE ' . implode(' AND ', $where);
                 }
 
-                $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
-                $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+                if ($isRandomOrder) {
+                    $sql .= ' ORDER BY RAND() LIMIT ' . (int)$limit;
+                } else {
+                    $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+                    $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+                }
 
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute($params);
@@ -255,8 +264,12 @@ try {
                     $sql .= ' WHERE ' . implode(' AND ', $whereUnanswered);
                 }
 
-                $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
-                $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+                if ($isRandomOrder) {
+                    $sql .= ' ORDER BY RAND() LIMIT ' . (int)$limit;
+                } else {
+                    $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+                    $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+                }
 
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute(array_merge([$userId], $params));
@@ -278,8 +291,12 @@ try {
                         $sql .= ' WHERE ' . implode(' AND ', $whereAnswered);
                     }
 
-                    $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
-                    $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+                    if ($isRandomOrder) {
+                        $sql .= ' ORDER BY RAND() LIMIT ' . (int)$limit;
+                    } else {
+                        $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+                        $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+                    }
 
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute(array_merge([$userId], $params));
@@ -302,8 +319,12 @@ try {
                         $sql .= ' WHERE ' . implode(' AND ', $whereBookmarked);
                     }
 
-                    $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
-                    $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+                    if ($isRandomOrder) {
+                        $sql .= ' ORDER BY RAND() LIMIT ' . (int)$limit;
+                    } else {
+                        $orderBy = $hasCol('created_at') ? $qc('created_at') : ($hasCol('id') ? $qc('id') : '1');
+                        $sql .= ' ORDER BY ' . $orderBy . ' ' . $order . ' LIMIT ' . (int)$limit;
+                    }
 
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute(array_merge([$userId], $params));
