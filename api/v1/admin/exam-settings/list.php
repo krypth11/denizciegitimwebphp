@@ -39,7 +39,7 @@ try {
             continue;
         }
 
-        $settings = mock_exam_get_qualification_exam_settings($pdo, $qualificationId);
+        $settings = mock_exam_ensure_qualification_exam_settings($pdo, $qualificationId);
         $items[] = [
             'qualification_id' => $qualificationId,
             'qualification_name' => (string)($q['name'] ?? ''),

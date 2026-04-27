@@ -5,6 +5,7 @@ require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/community_helper.php';
+require_once '../api/v1/mock_exam_helper.php';
 
 try {
     $user = require_admin();
@@ -38,6 +39,12 @@ try {
             $result = $stmt->execute([$id, $name, $description, $order_index]);
 
             if ($result) {
+                try {
+                    mock_exam_ensure_qualification_exam_settings($pdo, $id);
+                } catch (Throwable $ensureError) {
+                    error_log('Qualification exam settings ensure add failed: ' . $ensureError->getMessage());
+                }
+
                 try {
                     community_sync_qualification_room($pdo, $id, $name, true);
                 } catch (Throwable $syncError) {
@@ -104,6 +111,12 @@ try {
 
             if ($result) {
                 try {
+                    mock_exam_ensure_qualification_exam_settings($pdo, $id);
+                } catch (Throwable $ensureError) {
+                    error_log('Qualification exam settings ensure update failed: ' . $ensureError->getMessage());
+                }
+
+                try {
                     community_sync_qualification_room($pdo, $id, $name, true);
                 } catch (Throwable $syncError) {
                     error_log('Qualification room sync update failed: ' . $syncError->getMessage());
@@ -146,6 +159,13 @@ try {
                     'message' => 'Bu yeterliğe ait ' . $count . ' ders var! Önce dersleri silin.',
                 ], JSON_UNESCAPED_UNICODE);
                 break;
+            }
+
+            try {
+                $cleanupStmt = $pdo->prepare('DELETE FROM qualification_exam_settings WHERE qualification_id = ?');
+                $cleanupStmt->execute([$id]);
+            } catch (Throwable $cleanupError) {
+                error_log('Qualification exam settings cleanup delete failed: ' . $cleanupError->getMessage());
             }
 
             $stmt = $pdo->prepare('DELETE FROM qualifications WHERE id = ?');

@@ -22,6 +22,17 @@ try {
         api_error('qualification_id zorunludur.', 422);
     }
 
+    $qualificationCols = get_table_columns($pdo, 'qualifications');
+    if (!$qualificationCols) {
+        api_error('qualifications tablosu bulunamadı.', 422);
+    }
+    $qualificationIdCol = mock_exam_pick($qualificationCols, ['id'], true);
+    $qualificationCheckStmt = $pdo->prepare('SELECT 1 FROM `qualifications` WHERE ' . mock_exam_q($qualificationIdCol) . ' = ? LIMIT 1');
+    $qualificationCheckStmt->execute([$qualificationId]);
+    if (!$qualificationCheckStmt->fetchColumn()) {
+        api_error('Yeterlilik bulunamadı.', 404);
+    }
+
     $questionCountRaw = $payload['question_count'] ?? null;
     $passingScoreRaw = $payload['passing_score'] ?? null;
     $durationMinutesRaw = $payload['duration_minutes'] ?? null;

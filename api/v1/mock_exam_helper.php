@@ -127,6 +127,46 @@ function mock_exam_get_qualification_exam_settings(PDO $pdo, string $qualificati
     ];
 }
 
+function mock_exam_ensure_qualification_exam_settings(PDO $pdo, string $qualificationId): array
+{
+    $qualificationId = trim($qualificationId);
+
+    $defaults = [
+        'qualification_id' => $qualificationId,
+        'question_count' => 20,
+        'passing_score' => 60.0,
+        'duration_minutes' => 40,
+        'is_active' => 1,
+    ];
+
+    if ($qualificationId === '') {
+        return $defaults;
+    }
+
+    $cols = get_table_columns($pdo, 'qualification_exam_settings');
+    if (!$cols) {
+        throw new RuntimeException('qualification_exam_settings tablosu bulunamadı.');
+    }
+
+    $qualificationCol = mock_exam_pick($cols, ['qualification_id'], true);
+
+    $checkSql = 'SELECT 1 FROM `qualification_exam_settings` WHERE ' . mock_exam_q($qualificationCol) . ' = ? LIMIT 1';
+    $checkStmt = $pdo->prepare($checkSql);
+    $checkStmt->execute([$qualificationId]);
+    $exists = (bool)$checkStmt->fetchColumn();
+
+    if (!$exists) {
+        mock_exam_upsert_qualification_exam_settings($pdo, $qualificationId, [
+            'question_count' => 20,
+            'passing_score' => 60.0,
+            'duration_minutes' => 40,
+            'is_active' => 1,
+        ]);
+    }
+
+    return mock_exam_get_qualification_exam_settings($pdo, $qualificationId);
+}
+
 function mock_exam_get_qualification_courses_for_exam(PDO $pdo, string $qualificationId): array
 {
     $qualificationId = trim($qualificationId);
