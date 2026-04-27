@@ -443,6 +443,7 @@ function mock_exam_get_attempt_question_schema(PDO $pdo): array
         'attempt_id' => mock_exam_pick($cols, ['attempt_id'], true),
         'question_id' => mock_exam_pick($cols, ['question_id'], true),
         'course_id' => mock_exam_pick($cols, ['course_id'], false),
+        'topic_id' => mock_exam_pick($cols, ['topic_id'], false),
         'course_name' => mock_exam_pick($cols, ['course_name'], false),
         'order_index' => mock_exam_pick($cols, ['order_index'], false),
         'question_type' => mock_exam_pick($cols, ['question_type'], false),
@@ -723,17 +724,76 @@ function mock_exam_fetch_qualification_courses(PDO $pdo, string $qualificationId
     return mock_exam_get_qualification_courses_for_exam($pdo, $qualificationId);
 }
 
+function mock_exam_has_scope_links_table(PDO $pdo): bool
+{
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+
+    $cols = get_table_columns($pdo, 'question_scope_links');
+    $required = ['question_id', 'qualification_id', 'course_id', 'topic_id'];
+    if (!$cols) {
+        $cache = false;
+        return false;
+    }
+
+    foreach ($required as $col) {
+        if (!in_array($col, $cols, true)) {
+            $cache = false;
+            return false;
+        }
+    }
+
+    $cache = true;
+    return true;
+}
+
 function mock_exam_fetch_candidate_questions(PDO $pdo, string $qualificationId, ?string $courseId = null): array
 {
+    $qualificationId = trim((string)$qualificationId);
     $courseId = trim((string)$courseId);
-    $sql = 'SELECT q.id, q.course_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, c.name AS course_name '
-        . 'FROM questions q INNER JOIN courses c ON q.course_id = c.id '
-        . 'WHERE c.qualification_id = ?';
-    $params = [$qualificationId];
-    if ($courseId !== '') {
-        $sql .= ' AND c.id = ?';
-        $params[] = $courseId;
+
+    if ($qualificationId === '') {
+        return [];
     }
+
+    $scopeAvailable = mock_exam_has_scope_links_table($pdo);
+    $scopeCourseExpr = 'q.course_id';
+    $scopeTopicExpr = 'q.topic_id';
+    $where = [];
+    $params = [];
+    $qQualification = $pdo->quote($qualificationId);
+    $qCourse = $courseId !== '' ? $pdo->quote($courseId) : "''";
+
+    if ($scopeAvailable) {
+        if ($courseId !== '') {
+            $scopeCourseExpr = $qCourse;
+            $scopeTopicExpr = 'COALESCE((SELECT qsl.topic_id FROM question_scope_links qsl WHERE qsl.question_id = q.id AND qsl.qualification_id = ' . $qQualification . ' AND qsl.course_id = ' . $qCourse . ' ORDER BY qsl.is_primary DESC, qsl.id ASC LIMIT 1), q.topic_id)';
+
+            $where[] = '((EXISTS (SELECT 1 FROM question_scope_links qsl WHERE qsl.question_id = q.id AND qsl.qualification_id = ' . $qQualification . ' AND qsl.course_id = ' . $qCourse . ')) OR (NOT EXISTS (SELECT 1 FROM question_scope_links qsl0 WHERE qsl0.question_id = q.id) AND q.course_id = ' . $qCourse . '))';
+            $where[] = 'q.course_id IN (SELECT id FROM courses WHERE qualification_id = ' . $qQualification . ')';
+        } else {
+            $scopeCourseExpr = 'COALESCE((SELECT qsl.course_id FROM question_scope_links qsl WHERE qsl.question_id = q.id AND qsl.qualification_id = ' . $qQualification . ' ORDER BY qsl.is_primary DESC, qsl.id ASC LIMIT 1), q.course_id)';
+            $scopeTopicExpr = 'COALESCE((SELECT qsl.topic_id FROM question_scope_links qsl WHERE qsl.question_id = q.id AND qsl.qualification_id = ' . $qQualification . ' ORDER BY qsl.is_primary DESC, qsl.id ASC LIMIT 1), q.topic_id)';
+
+            $where[] = '((EXISTS (SELECT 1 FROM question_scope_links qsl WHERE qsl.question_id = q.id AND qsl.qualification_id = ' . $qQualification . ')) OR (NOT EXISTS (SELECT 1 FROM question_scope_links qsl0 WHERE qsl0.question_id = q.id) AND q.course_id IN (SELECT id FROM courses WHERE qualification_id = ' . $qQualification . ')))';
+        }
+    } else {
+        $where[] = 'q.course_id IN (SELECT id FROM courses WHERE qualification_id = ?)';
+        $params[] = $qualificationId;
+        if ($courseId !== '') {
+            $where[] = 'q.course_id = ?';
+            $params[] = $courseId;
+            $scopeCourseExpr = '?';
+            $params[] = $courseId;
+        }
+    }
+
+    $sql = 'SELECT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, c.name AS course_name '
+        . 'FROM questions q INNER JOIN courses c ON c.id = ' . $scopeCourseExpr
+        . ' WHERE ' . implode(' AND ', $where);
+
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -1210,6 +1270,7 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
             'id' => (string)$r[$aq['id']],
             'question_id' => (string)$r[$aq['question_id']],
             'course_id' => $aq['course_id'] ? ($r[$aq['course_id']] ?? null) : null,
+            'topic_id' => $aq['topic_id'] ? (($r[$aq['topic_id']] ?? '') === '' ? null : ($r[$aq['topic_id']] ?? null)) : null,
             'course_name' => $aq['course_name'] ? ($r[$aq['course_name']] ?? null) : null,
             'order_index' => $aq['order_index'] ? (int)($r[$aq['order_index']] ?? 0) : 0,
             'question_type' => $aq['question_type'] ? ($r[$aq['question_type']] ?? null) : null,
@@ -1629,6 +1690,7 @@ function mock_exam_create_attempt(PDO $pdo, string $userId, array $payload): arr
             $ip = [generate_uuid(), $attemptId, $q['id']];
             $map = [
                 'course_id' => $q['course_id'] ?? null,
+                'topic_id' => $q['topic_id'] ?? null,
                 'course_name' => $q['course_name'] ?? null,
                 'order_index' => (int)($q['order_index'] ?? 0),
                 'question_type' => $q['question_type'] ?? null,

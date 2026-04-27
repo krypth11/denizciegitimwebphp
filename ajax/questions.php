@@ -4,6 +4,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
+require_once '../includes/question_scope_helper.php';
 
 $user = require_admin();
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
@@ -209,61 +210,79 @@ try {
 
             $id = generate_uuid();
 
-            if ($hasTopicId && $hasOptionE) {
-                $stmt = $pdo->prepare(
-                    'INSERT INTO questions (
-                        id, course_id, topic_id, question_type, question_text,
-                        option_a, option_b, option_c, option_d, option_e,
-                        correct_answer, explanation, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                );
-                $ok = $stmt->execute([
-                    $id, $course_id, $topic_id, $question_type, $question_text,
-                    $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
-                    $correct_answer, $explanation,
-                ]);
-            } elseif ($hasTopicId) {
-                $stmt = $pdo->prepare(
-                    'INSERT INTO questions (
-                        id, course_id, topic_id, question_type, question_text,
-                        option_a, option_b, option_c, option_d,
-                        correct_answer, explanation, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                );
-                $ok = $stmt->execute([
-                    $id, $course_id, $topic_id, $question_type, $question_text,
-                    $option_a, $option_b, $option_c, $option_d,
-                    $correct_answer, $explanation,
-                ]);
-            } elseif ($hasOptionE) {
-                $stmt = $pdo->prepare(
-                    'INSERT INTO questions (
-                        id, course_id, question_type, question_text,
-                        option_a, option_b, option_c, option_d, option_e,
-                        correct_answer, explanation, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                );
-                $ok = $stmt->execute([
-                    $id, $course_id, $question_type, $question_text,
-                    $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
-                    $correct_answer, $explanation,
-                ]);
-            } else {
-                $stmt = $pdo->prepare(
-                    'INSERT INTO questions (
-                        id, course_id, question_type, question_text,
-                        option_a, option_b, option_c, option_d,
-                        correct_answer, explanation, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                );
-                $ok = $stmt->execute([
-                    $id, $course_id, $question_type, $question_text,
-                    $option_a, $option_b, $option_c, $option_d,
-                    $correct_answer, $explanation,
-                ]);
+            $pdo->beginTransaction();
+            try {
+                if ($hasTopicId && $hasOptionE) {
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO questions (
+                            id, course_id, topic_id, question_type, question_text,
+                            option_a, option_b, option_c, option_d, option_e,
+                            correct_answer, explanation, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                    );
+                    $ok = $stmt->execute([
+                        $id, $course_id, $topic_id, $question_type, $question_text,
+                        $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
+                        $correct_answer, $explanation,
+                    ]);
+                } elseif ($hasTopicId) {
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO questions (
+                            id, course_id, topic_id, question_type, question_text,
+                            option_a, option_b, option_c, option_d,
+                            correct_answer, explanation, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                    );
+                    $ok = $stmt->execute([
+                        $id, $course_id, $topic_id, $question_type, $question_text,
+                        $option_a, $option_b, $option_c, $option_d,
+                        $correct_answer, $explanation,
+                    ]);
+                } elseif ($hasOptionE) {
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO questions (
+                            id, course_id, question_type, question_text,
+                            option_a, option_b, option_c, option_d, option_e,
+                            correct_answer, explanation, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                    );
+                    $ok = $stmt->execute([
+                        $id, $course_id, $question_type, $question_text,
+                        $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
+                        $correct_answer, $explanation,
+                    ]);
+                } else {
+                    $stmt = $pdo->prepare(
+                        'INSERT INTO questions (
+                            id, course_id, question_type, question_text,
+                            option_a, option_b, option_c, option_d,
+                            correct_answer, explanation, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                    );
+                    $ok = $stmt->execute([
+                        $id, $course_id, $question_type, $question_text,
+                        $option_a, $option_b, $option_c, $option_d,
+                        $correct_answer, $explanation,
+                    ]);
+                }
+
+                if (!$ok) {
+                    throw new RuntimeException('Veritabanı hatası!');
+                }
+
+                if (question_scope_has_links_table($pdo)) {
+                    question_scope_replace_primary_from_question($pdo, $id);
+                }
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
             }
 
-            if ($ok) {
+            if (!empty($ok)) {
                 questions_json(true, 'Soru başarıyla eklendi!', ['id' => $id]);
             } else {
                 questions_json(false, 'Veritabanı hatası!', [], 500);
@@ -296,6 +315,52 @@ try {
                     'message' => 'Soru bulunamadı!',
                 ], JSON_UNESCAPED_UNICODE);
             }
+            break;
+
+        case 'scope_list':
+            $questionId = trim((string)($_GET['id'] ?? $_GET['question_id'] ?? ''));
+            if ($questionId === '') {
+                questions_json(false, 'question_id gerekli!', [], 422);
+            }
+
+            if (!question_scope_has_links_table($pdo)) {
+                questions_json(true, '', ['scopes' => [], 'meta' => ['has_scope_links_table' => false]]);
+            }
+
+            $scopes = question_scope_list_for_question($pdo, $questionId);
+            questions_json(true, '', ['scopes' => $scopes, 'meta' => ['has_scope_links_table' => true]]);
+            break;
+
+        case 'scope_add':
+            $questionId = trim((string)($_POST['question_id'] ?? ''));
+            $qualificationId = trim((string)($_POST['qualification_id'] ?? ''));
+            $courseId = trim((string)($_POST['course_id'] ?? ''));
+            $topicId = question_scope_normalize_topic_id($_POST['topic_id'] ?? '');
+
+            if ($questionId === '' || $qualificationId === '' || $courseId === '') {
+                questions_json(false, 'question_id, qualification_id ve course_id zorunludur.', [], 422);
+            }
+
+            if (!question_scope_has_links_table($pdo)) {
+                questions_json(false, 'question_scope_links tablosu bulunamadı.', [], 422);
+            }
+
+            $scope = question_scope_add($pdo, $questionId, $qualificationId, $courseId, $topicId, 0);
+            questions_json(true, 'Kapsam eklendi.', ['scope' => $scope]);
+            break;
+
+        case 'scope_delete':
+            $scopeId = trim((string)($_POST['scope_id'] ?? ''));
+            if ($scopeId === '') {
+                questions_json(false, 'scope_id zorunludur.', [], 422);
+            }
+
+            if (!question_scope_has_links_table($pdo)) {
+                questions_json(false, 'question_scope_links tablosu bulunamadı.', [], 422);
+            }
+
+            question_scope_delete($pdo, $scopeId);
+            questions_json(true, 'Kapsam silindi.');
             break;
 
         case 'update':
@@ -371,86 +436,100 @@ try {
                 exit;
             }
 
-            if ($hasTopicId && $hasOptionE) {
-                $stmt = $pdo->prepare(
-                    'UPDATE questions SET
-                        course_id = ?,
-                        topic_id = ?,
-                        question_type = ?,
-                        question_text = ?,
-                        option_a = ?,
-                        option_b = ?,
-                        option_c = ?,
-                        option_d = ?,
-                        option_e = ?,
-                        correct_answer = ?,
-                        explanation = ?
-                    WHERE id = ?'
-                );
-                $ok = $stmt->execute([
-                    $course_id, $topic_id, $question_type, $question_text,
-                    $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
-                    $correct_answer, $explanation, $id,
-                ]);
-            } elseif ($hasTopicId) {
-                $stmt = $pdo->prepare(
-                    'UPDATE questions SET
-                        course_id = ?,
-                        topic_id = ?,
-                        question_type = ?,
-                        question_text = ?,
-                        option_a = ?,
-                        option_b = ?,
-                        option_c = ?,
-                        option_d = ?,
-                        correct_answer = ?,
-                        explanation = ?
-                    WHERE id = ?'
-                );
-                $ok = $stmt->execute([
-                    $course_id, $topic_id, $question_type, $question_text,
-                    $option_a, $option_b, $option_c, $option_d,
-                    $correct_answer, $explanation, $id,
-                ]);
-            } elseif ($hasOptionE) {
-                $stmt = $pdo->prepare(
-                    'UPDATE questions SET
-                        course_id = ?,
-                        question_type = ?,
-                        question_text = ?,
-                        option_a = ?,
-                        option_b = ?,
-                        option_c = ?,
-                        option_d = ?,
-                        option_e = ?,
-                        correct_answer = ?,
-                        explanation = ?
-                    WHERE id = ?'
-                );
-                $ok = $stmt->execute([
-                    $course_id, $question_type, $question_text,
-                    $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
-                    $correct_answer, $explanation, $id,
-                ]);
-            } else {
-                $stmt = $pdo->prepare(
-                    'UPDATE questions SET
-                        course_id = ?,
-                        question_type = ?,
-                        question_text = ?,
-                        option_a = ?,
-                        option_b = ?,
-                        option_c = ?,
-                        option_d = ?,
-                        correct_answer = ?,
-                        explanation = ?
-                    WHERE id = ?'
-                );
-                $ok = $stmt->execute([
-                    $course_id, $question_type, $question_text,
-                    $option_a, $option_b, $option_c, $option_d,
-                    $correct_answer, $explanation, $id,
-                ]);
+            $pdo->beginTransaction();
+            try {
+                if ($hasTopicId && $hasOptionE) {
+                    $stmt = $pdo->prepare(
+                        'UPDATE questions SET
+                            course_id = ?,
+                            topic_id = ?,
+                            question_type = ?,
+                            question_text = ?,
+                            option_a = ?,
+                            option_b = ?,
+                            option_c = ?,
+                            option_d = ?,
+                            option_e = ?,
+                            correct_answer = ?,
+                            explanation = ?
+                        WHERE id = ?'
+                    );
+                    $ok = $stmt->execute([
+                        $course_id, $topic_id, $question_type, $question_text,
+                        $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
+                        $correct_answer, $explanation, $id,
+                    ]);
+                } elseif ($hasTopicId) {
+                    $stmt = $pdo->prepare(
+                        'UPDATE questions SET
+                            course_id = ?,
+                            topic_id = ?,
+                            question_type = ?,
+                            question_text = ?,
+                            option_a = ?,
+                            option_b = ?,
+                            option_c = ?,
+                            option_d = ?,
+                            correct_answer = ?,
+                            explanation = ?
+                        WHERE id = ?'
+                    );
+                    $ok = $stmt->execute([
+                        $course_id, $topic_id, $question_type, $question_text,
+                        $option_a, $option_b, $option_c, $option_d,
+                        $correct_answer, $explanation, $id,
+                    ]);
+                } elseif ($hasOptionE) {
+                    $stmt = $pdo->prepare(
+                        'UPDATE questions SET
+                            course_id = ?,
+                            question_type = ?,
+                            question_text = ?,
+                            option_a = ?,
+                            option_b = ?,
+                            option_c = ?,
+                            option_d = ?,
+                            option_e = ?,
+                            correct_answer = ?,
+                            explanation = ?
+                        WHERE id = ?'
+                    );
+                    $ok = $stmt->execute([
+                        $course_id, $question_type, $question_text,
+                        $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
+                        $correct_answer, $explanation, $id,
+                    ]);
+                } else {
+                    $stmt = $pdo->prepare(
+                        'UPDATE questions SET
+                            course_id = ?,
+                            question_type = ?,
+                            question_text = ?,
+                            option_a = ?,
+                            option_b = ?,
+                            option_c = ?,
+                            option_d = ?,
+                            correct_answer = ?,
+                            explanation = ?
+                        WHERE id = ?'
+                    );
+                    $ok = $stmt->execute([
+                        $course_id, $question_type, $question_text,
+                        $option_a, $option_b, $option_c, $option_d,
+                        $correct_answer, $explanation, $id,
+                    ]);
+                }
+
+                if (!empty($ok) && question_scope_has_links_table($pdo)) {
+                    question_scope_replace_primary_from_question($pdo, $id);
+                }
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
             }
 
             if ($ok) {
@@ -477,9 +556,27 @@ try {
                 exit;
             }
 
-            $stmt = $pdo->prepare('DELETE FROM questions WHERE id = ?');
+            $pdo->beginTransaction();
+            try {
+                if (question_scope_has_links_table($pdo)) {
+                    $pdo->prepare('DELETE FROM question_scope_links WHERE question_id = ?')->execute([$id]);
+                }
 
-            if ($stmt->execute([$id])) {
+                $stmt = $pdo->prepare('DELETE FROM questions WHERE id = ?');
+                $ok = $stmt->execute([$id]);
+                if (!$ok) {
+                    throw new RuntimeException('Silme başarısız!');
+                }
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            if (!empty($ok)) {
                 echo json_encode([
                     'success' => true,
                     'message' => 'Soru silindi!',
@@ -516,10 +613,30 @@ try {
             }
 
             $placeholders = implode(',', array_fill(0, count($valid_ids), '?'));
-            $stmt = $pdo->prepare("DELETE FROM questions WHERE id IN ($placeholders)");
 
-            if ($stmt->execute($valid_ids)) {
+            $pdo->beginTransaction();
+            try {
+                if (question_scope_has_links_table($pdo)) {
+                    $stmtScope = $pdo->prepare("DELETE FROM question_scope_links WHERE question_id IN ($placeholders)");
+                    $stmtScope->execute($valid_ids);
+                }
+
+                $stmt = $pdo->prepare("DELETE FROM questions WHERE id IN ($placeholders)");
+                $ok = $stmt->execute($valid_ids);
+                if (!$ok) {
+                    throw new RuntimeException('Silme işlemi başarısız!');
+                }
+
                 $deleted = $stmt->rowCount();
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            if (!empty($ok)) {
                 echo json_encode([
                     'success' => true,
                     'message' => $deleted . ' soru başarıyla silindi!',

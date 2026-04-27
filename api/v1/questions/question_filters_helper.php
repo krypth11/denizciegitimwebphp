@@ -62,6 +62,31 @@ function questions_resolve_question_type_candidates(string $rawQuestionType): ar
     return [$trimmed, strtolower($trimmed)];
 }
 
+function questions_has_scope_links_table(PDO $pdo): bool
+{
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+
+    $cols = get_table_columns($pdo, 'question_scope_links');
+    $required = ['question_id', 'qualification_id', 'course_id', 'topic_id'];
+    if (!$cols) {
+        $cache = false;
+        return false;
+    }
+
+    foreach ($required as $col) {
+        if (!in_array($col, $cols, true)) {
+            $cache = false;
+            return false;
+        }
+    }
+
+    $cache = true;
+    return true;
+}
+
 /**
  * @return array{where: array<int,string>, params: array<int,mixed>, normalized_question_type: string, requested_qualification_id: string}
  */
@@ -140,25 +165,56 @@ function build_question_filters(PDO $pdo, array $params): array
     $where = [];
     $queryParams = [];
     $effectiveQualificationId = $qualificationId !== '' ? $qualificationId : $currentQualificationId;
+    $scopeLinksAvailable = questions_has_scope_links_table($pdo);
 
-    if ($hasQ('qualification_id')) {
-        $where[] = $qc('qualification_id') . ' = ?';
-        $queryParams[] = $effectiveQualificationId;
-    } elseif ($hasQ('course_id')) {
-        $where[] = $qc('course_id') . ' IN (SELECT id FROM courses WHERE qualification_id = ?)';
-        $queryParams[] = $effectiveQualificationId;
+    if ($scopeLinksAvailable && $hasQ('course_id')) {
+        $scopeClauses = ['qsl.question_id = ' . $qc('id'), 'qsl.qualification_id = ?'];
+        $scopeParams = [$effectiveQualificationId];
+        if ($courseId !== '') {
+            $scopeClauses[] = 'qsl.course_id = ?';
+            $scopeParams[] = $courseId;
+        }
+        if ($topicId !== '' && $hasQ('topic_id')) {
+            $scopeClauses[] = 'qsl.topic_id = ?';
+            $scopeParams[] = $topicId;
+        }
+
+        $fallbackClauses = [
+            'NOT EXISTS (SELECT 1 FROM question_scope_links qsl0 WHERE qsl0.question_id = ' . $qc('id') . ')',
+            $qc('course_id') . ' IN (SELECT id FROM courses WHERE qualification_id = ?)',
+        ];
+        $fallbackParams = [$effectiveQualificationId];
+        if ($courseId !== '') {
+            $fallbackClauses[] = $qc('course_id') . ' = ?';
+            $fallbackParams[] = $courseId;
+        }
+        if ($topicId !== '' && $hasQ('topic_id')) {
+            $fallbackClauses[] = $qc('topic_id') . ' = ?';
+            $fallbackParams[] = $topicId;
+        }
+
+        $where[] = '((EXISTS (SELECT 1 FROM question_scope_links qsl WHERE ' . implode(' AND ', $scopeClauses) . ')) OR (' . implode(' AND ', $fallbackClauses) . '))';
+        $queryParams = array_merge($queryParams, $scopeParams, $fallbackParams);
     } else {
-        api_error('Qualification guard için gerekli kolonlar bulunamadı.', 500);
-    }
+        if ($hasQ('qualification_id')) {
+            $where[] = $qc('qualification_id') . ' = ?';
+            $queryParams[] = $effectiveQualificationId;
+        } elseif ($hasQ('course_id')) {
+            $where[] = $qc('course_id') . ' IN (SELECT id FROM courses WHERE qualification_id = ?)';
+            $queryParams[] = $effectiveQualificationId;
+        } else {
+            api_error('Qualification guard için gerekli kolonlar bulunamadı.', 500);
+        }
 
-    if ($courseId !== '' && $hasQ('course_id')) {
-        $where[] = $qc('course_id') . ' = ?';
-        $queryParams[] = $courseId;
-    }
+        if ($courseId !== '' && $hasQ('course_id')) {
+            $where[] = $qc('course_id') . ' = ?';
+            $queryParams[] = $courseId;
+        }
 
-    if ($topicId !== '' && $hasQ('topic_id')) {
-        $where[] = $qc('topic_id') . ' = ?';
-        $queryParams[] = $topicId;
+        if ($topicId !== '' && $hasQ('topic_id')) {
+            $where[] = $qc('topic_id') . ' = ?';
+            $queryParams[] = $topicId;
+        }
     }
 
     if ($questionType !== '' && $hasQ('question_type')) {
@@ -193,5 +249,6 @@ function build_question_filters(PDO $pdo, array $params): array
         'params' => $queryParams,
         'normalized_question_type' => questions_normalize_question_type_token($questionType),
         'requested_qualification_id' => $effectiveQualificationId,
+        'scope_links_available' => $scopeLinksAvailable,
     ];
 }

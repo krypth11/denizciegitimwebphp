@@ -151,6 +151,41 @@ include '../includes/sidebar.php';
             <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" id="edit_option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" id="edit_option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" id="edit_option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" id="edit_option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e" id="edit_option_e"></div></div>
             <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" id="edit_correct_answer" required><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
             <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" id="edit_explanation" rows="2"></textarea></div>
+
+            <div class="card border-0 bg-light" id="editScopeCard">
+                <div class="card-body">
+                    <h6 class="mb-3">Bu soru nerelerde kullanılsın?</h6>
+                    <div id="editScopeInfo" class="alert alert-secondary py-2 small d-none"></div>
+                    <div id="editScopeList" class="mb-3 small text-muted">Kapsamlar yükleniyor...</div>
+
+                    <div class="row g-2 align-items-end" id="editScopeAddRow">
+                        <div class="col-md-4">
+                            <label class="form-label mb-1">Yeterlilik</label>
+                            <select class="form-select form-select-sm" id="scope_add_qualification_id">
+                                <option value="">Seçiniz...</option>
+                                <?php foreach ($qualifications as $q): ?>
+                                    <option value="<?= htmlspecialchars($q['id']) ?>"><?= htmlspecialchars($q['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label mb-1">Ders</label>
+                            <select class="form-select form-select-sm" id="scope_add_course_id" disabled>
+                                <option value="">Önce yeterlilik seçin...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label mb-1">Konu (opsiyonel)</label>
+                            <select class="form-select form-select-sm" id="scope_add_topic_id" disabled>
+                                <option value="">Konu seçmeden devam et</option>
+                            </select>
+                        </div>
+                        <div class="col-md-1 d-grid">
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="scopeAddBtn">Ekle</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Güncelle</button></div></form>
     </div></div>
 </div>
@@ -1382,6 +1417,100 @@ $(document).ready(function() {
         }
     };
 
+    const scopeState = {
+        hasScopeTable: true,
+        currentQuestionId: '',
+        scopes: []
+    };
+
+    function setScopeInfo(message, type = 'secondary') {
+        const $info = $('#editScopeInfo');
+        if (!message) {
+            $info.addClass('d-none').removeClass('alert-secondary alert-danger alert-warning alert-success').text('');
+            return;
+        }
+        $info.removeClass('d-none alert-secondary alert-danger alert-warning alert-success')
+            .addClass(`alert-${type}`)
+            .text(message);
+    }
+
+    function renderScopeList() {
+        const $list = $('#editScopeList');
+        if (!scopeState.hasScopeTable) {
+            $list.html('<div class="text-muted">question_scope_links tablosu yok. Eski kapsam yapısı kullanılıyor.</div>');
+            return;
+        }
+
+        if (!Array.isArray(scopeState.scopes) || scopeState.scopes.length === 0) {
+            $list.html('<div class="text-muted">Henüz ek kapsam yok.</div>');
+            return;
+        }
+
+        const html = scopeState.scopes.map((s) => {
+            const topic = s.topic_name ? ` / ${esc(s.topic_name)}` : '';
+            const primary = Number(s.is_primary) === 1
+                ? '<span class="badge bg-primary ms-2">Primary</span>'
+                : '';
+            const delBtn = Number(s.is_primary) === 1
+                ? '<button type="button" class="btn btn-sm btn-outline-secondary" disabled>Sil</button>'
+                : `<button type="button" class="btn btn-sm btn-outline-danger scope-delete-btn" data-scope-id="${esc(s.id)}">Sil</button>`;
+
+            return `
+                <div class="d-flex justify-content-between align-items-center border rounded px-2 py-2 mb-2">
+                    <div>
+                        <strong>${esc(s.qualification_name || '-')}</strong>
+                        <span class="text-muted">/ ${esc(s.course_name || '-')} ${topic}</span>
+                        ${primary}
+                    </div>
+                    <div>${delBtn}</div>
+                </div>
+            `;
+        }).join('');
+
+        $list.html(html);
+    }
+
+    function loadScopeCoursesByQualification(qualificationId) {
+        const $course = $('#scope_add_course_id');
+        $course.html('<option value="">Ders seçin...</option>');
+        if (!qualificationId) {
+            $course.prop('disabled', true);
+            $('#scope_add_topic_id').html('<option value="">Konu seçmeden devam et</option>').prop('disabled', true);
+            return;
+        }
+
+        coursesData
+            .filter((c) => String(c.qualification_id || '') === String(qualificationId))
+            .forEach((c) => $course.append(`<option value="${esc(c.id)}">${esc(c.name)}</option>`));
+
+        $course.prop('disabled', $course.find('option').length <= 1);
+        $('#scope_add_topic_id').html('<option value="">Konu seçmeden devam et</option>').prop('disabled', true);
+    }
+
+    async function loadQuestionScopes(questionId) {
+        scopeState.currentQuestionId = questionId || '';
+        scopeState.scopes = [];
+        renderScopeList();
+        setScopeInfo('');
+
+        if (!scopeState.currentQuestionId) {
+            return;
+        }
+
+        const res = await window.appAjax({
+            url: `../ajax/questions.php?action=scope_list&question_id=${encodeURIComponent(scopeState.currentQuestionId)}`
+        });
+
+        if (!res.success) {
+            setScopeInfo(res.message || 'Kapsamlar yüklenemedi.', 'danger');
+            return;
+        }
+
+        scopeState.hasScopeTable = !!(res.data?.meta?.has_scope_links_table ?? true);
+        scopeState.scopes = Array.isArray(res.data?.scopes) ? res.data.scopes : [];
+        renderScopeList();
+    }
+
     function updateFilteredCountDisplay(value) {
         const count = Number.isFinite(Number(value)) ? Number(value) : null;
         $('#questionsFilteredCount').text(count === null ? '-' : count.toLocaleString('tr-TR'));
@@ -1943,6 +2072,19 @@ $(document).ready(function() {
         });
     });
 
+    $('#scope_add_qualification_id').on('change', function() {
+        const qualificationId = $(this).val() || '';
+        loadScopeCoursesByQualification(qualificationId);
+    });
+
+    $('#scope_add_course_id').on('change', async function() {
+        const courseId = $(this).val() || '';
+        await loadTopicsByCourse(courseId, $('#scope_add_topic_id'), {
+            emptyLabel: 'Konu seçmeden devam et',
+            noTopicLabel: 'Bu derste kayıtlı konu yok'
+        });
+    });
+
     $('#bulk_qualification_id').on('change', function() {
         const qualId = $(this).val();
         $('#bulk_course_id').val('');
@@ -2162,9 +2304,69 @@ $(document).ready(function() {
                 noTopicLabel: 'Bu derste kayıtlı konu yok'
             }).then(() => {
                 $('#edit_topic_id').val(q.topic_id || '');
+                $('#scope_add_qualification_id').val('');
+                loadScopeCoursesByQualification('');
+                loadQuestionScopes(q.id || '');
                 bootstrap.Modal.getOrCreateInstance(document.getElementById('editModal')).show();
             });
         });
+    });
+
+    $('#scopeAddBtn').on('click', async function() {
+        if (!scopeState.currentQuestionId) {
+            return appAlert('Uyarı', 'Önce düzenlenecek soru seçilmelidir.', 'warning');
+        }
+
+        const qualificationId = $('#scope_add_qualification_id').val() || '';
+        const courseId = $('#scope_add_course_id').val() || '';
+        const topicId = $('#scope_add_topic_id').val() || '';
+        if (!qualificationId || !courseId) {
+            return appAlert('Uyarı', 'Yeterlilik ve ders seçilmelidir.', 'warning');
+        }
+
+        const res = await window.appAjax({
+            url: '../ajax/questions.php?action=scope_add',
+            method: 'POST',
+            data: {
+                question_id: scopeState.currentQuestionId,
+                qualification_id: qualificationId,
+                course_id: courseId,
+                topic_id: topicId
+            }
+        });
+
+        if (!res.success) {
+            return appAlert('Hata', res.message || 'Kapsam eklenemedi.', 'error');
+        }
+
+        appAlert('Başarılı', res.message || 'Kapsam eklendi.', 'success');
+        $('#scope_add_topic_id').val('');
+        await loadQuestionScopes(scopeState.currentQuestionId);
+    });
+
+    $(document).on('click', '.scope-delete-btn', async function() {
+        const scopeId = String($(this).data('scope-id') || '');
+        if (!scopeId) return;
+
+        const ok = await appConfirm('Kapsam Silme', 'Bu kapsam silinsin mi?', {
+            type: 'warning',
+            confirmText: 'Sil',
+            cancelText: 'İptal'
+        });
+        if (!ok) return;
+
+        const res = await window.appAjax({
+            url: '../ajax/questions.php?action=scope_delete',
+            method: 'POST',
+            data: { scope_id: scopeId }
+        });
+
+        if (!res.success) {
+            return appAlert('Hata', res.message || 'Kapsam silinemedi.', 'error');
+        }
+
+        appAlert('Başarılı', res.message || 'Kapsam silindi.', 'success');
+        await loadQuestionScopes(scopeState.currentQuestionId);
     });
     $('#editForm').on('submit', function(e){
         e.preventDefault();

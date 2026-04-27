@@ -44,23 +44,6 @@ try {
 
     $q = 'q';
     $qc = static fn(string $col): string => $q . '.`' . str_replace('`', '', $col) . '`';
-    $select = [
-        $hasCol('id') ? ($qc('id') . ' AS id') : "'' AS id",
-        $hasCol('topic_id') ? ($qc('topic_id') . ' AS topic_id') : 'NULL AS topic_id',
-        $hasCol('course_id') ? ($qc('course_id') . ' AS course_id') : 'NULL AS course_id',
-        $hasCol('question_type') ? ($qc('question_type') . ' AS question_type') : "'' AS question_type",
-        $hasCol('question_text') ? ($qc('question_text') . ' AS question_text') : "'' AS question_text",
-        $hasCol('option_a') ? ($qc('option_a') . ' AS option_a') : "'' AS option_a",
-        $hasCol('option_b') ? ($qc('option_b') . ' AS option_b') : "'' AS option_b",
-        $hasCol('option_c') ? ($qc('option_c') . ' AS option_c') : "'' AS option_c",
-        $hasCol('option_d') ? ($qc('option_d') . ' AS option_d') : "'' AS option_d",
-        $hasCol('option_e') ? ($qc('option_e') . ' AS option_e') : 'NULL AS option_e',
-        $hasCol('correct_answer') ? ($qc('correct_answer') . ' AS correct_answer') : "'' AS correct_answer",
-        $hasCol('explanation') ? ($qc('explanation') . ' AS explanation') : "'' AS explanation",
-        $hasCol('image_url') ? ($qc('image_url') . ' AS image_url') : 'NULL AS image_url',
-        $hasCol('difficulty') ? ($qc('difficulty') . ' AS difficulty') : 'NULL AS difficulty',
-        $hasCol('created_at') ? ($qc('created_at') . ' AS created_at') : 'NULL AS created_at',
-    ];
 
     $filterBuild = build_question_filters($pdo, [
         'auth' => $auth,
@@ -78,6 +61,45 @@ try {
 
     $where = $filterBuild['where'];
     $params = $filterBuild['params'];
+    $scopeLinksAvailable = !empty($filterBuild['scope_links_available']);
+
+    $scopedCourseExpr = $hasCol('course_id') ? $qc('course_id') : 'NULL';
+    $scopedTopicExpr = $hasCol('topic_id') ? $qc('topic_id') : 'NULL';
+    if ($scopeLinksAvailable && $hasCol('course_id')) {
+        $scopeQualificationSql = $pdo->quote((string)$filterBuild['requested_qualification_id']);
+        $scopeCourseFilterSql = ($courseId !== '') ? (' AND qsl.course_id = ' . $pdo->quote($courseId)) : '';
+        $scopeTopicFilterSql = ($topicId !== '') ? (' AND qsl.topic_id = ' . $pdo->quote($topicId)) : '';
+
+        $scopeBase = 'qsl.question_id = ' . $qc('id')
+            . ' AND qsl.qualification_id = ' . $scopeQualificationSql
+            . $scopeCourseFilterSql
+            . $scopeTopicFilterSql;
+
+        $scopedCourseExpr = 'COALESCE((SELECT qsl.course_id FROM question_scope_links qsl WHERE ' . $scopeBase . ' ORDER BY qsl.is_primary DESC, qsl.id ASC LIMIT 1), ' . $qc('course_id') . ')';
+        if ($hasCol('topic_id')) {
+            $scopedTopicExpr = 'COALESCE((SELECT qsl.topic_id FROM question_scope_links qsl WHERE ' . $scopeBase . ' ORDER BY qsl.is_primary DESC, qsl.id ASC LIMIT 1), ' . $qc('topic_id') . ')';
+        }
+    }
+
+    $select = [
+        $hasCol('id') ? ($qc('id') . ' AS id') : "'' AS id",
+        $scopedTopicExpr . ' AS topic_id',
+        $scopedCourseExpr . ' AS course_id',
+        $hasCol('topic_id') ? ($qc('topic_id') . ' AS original_topic_id') : 'NULL AS original_topic_id',
+        $hasCol('course_id') ? ($qc('course_id') . ' AS original_course_id') : 'NULL AS original_course_id',
+        $hasCol('question_type') ? ($qc('question_type') . ' AS question_type') : "'' AS question_type",
+        $hasCol('question_text') ? ($qc('question_text') . ' AS question_text') : "'' AS question_text",
+        $hasCol('option_a') ? ($qc('option_a') . ' AS option_a') : "'' AS option_a",
+        $hasCol('option_b') ? ($qc('option_b') . ' AS option_b') : "'' AS option_b",
+        $hasCol('option_c') ? ($qc('option_c') . ' AS option_c') : "'' AS option_c",
+        $hasCol('option_d') ? ($qc('option_d') . ' AS option_d') : "'' AS option_d",
+        $hasCol('option_e') ? ($qc('option_e') . ' AS option_e') : 'NULL AS option_e',
+        $hasCol('correct_answer') ? ($qc('correct_answer') . ' AS correct_answer') : "'' AS correct_answer",
+        $hasCol('explanation') ? ($qc('explanation') . ' AS explanation') : "'' AS explanation",
+        $hasCol('image_url') ? ($qc('image_url') . ' AS image_url') : 'NULL AS image_url',
+        $hasCol('difficulty') ? ($qc('difficulty') . ' AS difficulty') : 'NULL AS difficulty',
+        $hasCol('created_at') ? ($qc('created_at') . ' AS created_at') : 'NULL AS created_at',
+    ];
 
     $rows = [];
     if ($poolType === 'most_wrong') {
@@ -295,8 +317,10 @@ try {
         $explanation = (string)($row['explanation'] ?? '');
         return [
             'id' => (string)($row['id'] ?? ''),
-            'topic_id' => $row['topic_id'] ?? null,
+            'topic_id' => (($row['topic_id'] ?? null) === '' ? null : ($row['topic_id'] ?? null)),
             'course_id' => $row['course_id'] ?? null,
+            'original_topic_id' => (($row['original_topic_id'] ?? null) === '' ? null : ($row['original_topic_id'] ?? null)),
+            'original_course_id' => $row['original_course_id'] ?? null,
             'question_type' => (string)($row['question_type'] ?? ''),
             'question_text' => (string)($row['question_text'] ?? ''),
             'option_a' => (string)($row['option_a'] ?? ''),
