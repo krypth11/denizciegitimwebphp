@@ -3,7 +3,7 @@ require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 
-$user = require_auth();
+$user = require_admin();
 $current_page = 'question-scope-bulk';
 $page_title = 'Toplu Soru Kapsamı';
 
@@ -151,6 +151,51 @@ include '../includes/sidebar.php';
             </div>
         </div>
     </div>
+
+    <div class="card border-0 shadow-sm mt-3">
+        <div class="card-body">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                <h5 class="mb-0">Kayıtlı Kapsam Eşleştirmeleri</h5>
+                <div class="d-flex flex-wrap gap-2">
+                    <button class="btn btn-outline-primary" id="refreshMappingsBtn">
+                        <i class="bi bi-arrow-clockwise"></i> Listeyi Yenile
+                    </button>
+                    <button class="btn btn-primary" id="bulkSyncMappingsBtn">
+                        <i class="bi bi-arrow-repeat"></i> Seçilenleri Eşzamanla
+                    </button>
+                    <button class="btn btn-outline-danger" id="bulkCancelMappingsBtn">
+                        <i class="bi bi-x-circle"></i> Seçilenleri İptal Et
+                    </button>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle" id="mappingsTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 42px;">
+                                <input class="form-check-input" type="checkbox" id="selectAllMappings">
+                            </th>
+                            <th>Kaynak</th>
+                            <th>Hedef</th>
+                            <th>Filtre</th>
+                            <th class="text-end">Kaynaktaki soru</th>
+                            <th class="text-end">Hedefte bağlı</th>
+                            <th class="text-end">Eksik</th>
+                            <th>Durum</th>
+                            <th>Son eşzamanlama</th>
+                            <th style="min-width: 180px;">İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td colspan="10" class="text-muted">Yükleniyor...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
 
 <?php
@@ -162,6 +207,7 @@ $(function () {
 
     const endpoint = '../ajax/question-scope-bulk.php';
     const lookupEndpoint = '../ajax/questions.php';
+    let mappingsCache = [];
 
     function appAlert(title, message, type = 'info') {
         if (typeof window.showAppAlert === 'function') {
@@ -192,6 +238,252 @@ $(function () {
             target_course_id: $('#targetCourse').val() || '',
             target_topic_id: $('#targetTopic').val() || ''
         };
+    }
+
+    function formatScope(qualificationName, courseName, topicName, emptyTopicLabel = 'Tüm konular') {
+        const q = qualificationName || '-';
+        const c = courseName || '-';
+        const t = topicName || emptyTopicLabel;
+        return '<div><strong>' + esc(q) + '</strong> / ' + esc(c) + '<br><span class="text-muted small">' + esc(t) + '</span></div>';
+    }
+
+    function formatDateTime(value) {
+        if (!value) {
+            return '<span class="text-muted">-</span>';
+        }
+        const dt = new Date(value.replace(' ', 'T'));
+        if (Number.isNaN(dt.getTime())) {
+            return esc(value);
+        }
+        return dt.toLocaleString('tr-TR');
+    }
+
+    function statusBadge(label) {
+        const map = {
+            'Güncel': 'bg-success-subtle text-success',
+            'Güncelleme var': 'bg-warning-subtle text-warning-emphasis',
+            'Kaynak boş': 'bg-secondary-subtle text-secondary'
+        };
+        const cls = map[label] || 'bg-light text-dark';
+        return '<span class="badge rounded-pill ' + cls + '">' + esc(label || '-') + '</span>';
+    }
+
+    function renderFilter(mapping) {
+        const parts = [];
+        if (mapping.question_type) {
+            parts.push('Tip: ' + mapping.question_type);
+        }
+        if (mapping.search_text) {
+            parts.push('Arama: "' + mapping.search_text + '"');
+        }
+        if (!parts.length) {
+            return '<span class="text-muted">Ek filtre yok</span>';
+        }
+        return '<span class="small">' + esc(parts.join(' • ')) + '</span>';
+    }
+
+    function getSelectedMappingIds() {
+        return $('#mappingsTable tbody .mapping-check:checked').map(function () {
+            return $(this).val();
+        }).get();
+    }
+
+    function renderMappingsTable(rows) {
+        const $tbody = $('#mappingsTable tbody');
+
+        if (!rows.length) {
+            $tbody.html('<tr><td colspan="10" class="text-muted">Kayıtlı eşleştirme bulunamadı.</td></tr>');
+            $('#selectAllMappings').prop('checked', false);
+            return;
+        }
+
+        const html = rows.map((m) => {
+            return '<tr data-id="' + esc(m.id) + '">' +
+                '<td><input class="form-check-input mapping-check" type="checkbox" value="' + esc(m.id) + '"></td>' +
+                '<td>' + formatScope(m.source_qualification_name, m.source_course_name, m.source_topic_name, 'Tüm konular') + '</td>' +
+                '<td>' + formatScope(m.target_qualification_name, m.target_course_name, m.target_topic_name, 'Konu seçilmeden') + '</td>' +
+                '<td>' + renderFilter(m) + '</td>' +
+                '<td class="text-end">' + numberTr(m.source_count) + '</td>' +
+                '<td class="text-end">' + numberTr(m.target_linked_count) + '</td>' +
+                '<td class="text-end">' + numberTr(m.missing_count) + '</td>' +
+                '<td>' + statusBadge(m.status_label) + '</td>' +
+                '<td class="small">' + formatDateTime(m.last_synced_at) + '</td>' +
+                '<td>' +
+                    '<div class="btn-group btn-group-sm" role="group">' +
+                        '<button class="btn btn-outline-primary sync-mapping-btn" data-id="' + esc(m.id) + '">Eşzamanla</button>' +
+                        '<button class="btn btn-outline-danger cancel-mapping-btn" data-id="' + esc(m.id) + '">İptal Et</button>' +
+                    '</div>' +
+                '</td>' +
+            '</tr>';
+        });
+
+        $tbody.html(html.join(''));
+        $('#selectAllMappings').prop('checked', false);
+    }
+
+    async function loadMappings() {
+        window.appSetButtonLoading('#refreshMappingsBtn', true, 'Yükleniyor...');
+        const res = await window.appAjax({
+            url: endpoint + '?action=mappings',
+            method: 'GET',
+            dataType: 'json'
+        });
+        window.appSetButtonLoading('#refreshMappingsBtn', false);
+
+        if (!res.success) {
+            await appAlert('Hata', parseRespError(res, 'Eşleştirme listesi alınamadı.'), 'error');
+            return;
+        }
+
+        mappingsCache = res.data?.mappings || [];
+        renderMappingsTable(mappingsCache);
+    }
+
+    async function syncSingleMapping(mappingId) {
+        const confirmed = await appConfirm({
+            title: 'Eşzamanla',
+            message: 'Seçili kaynak-hedef eşleştirmesi için eksik bağlantılar eklenecek. Onaylıyor musunuz?',
+            confirmText: 'Eşzamanla',
+            cancelText: 'İptal',
+            type: 'confirm'
+        });
+
+        if (!confirmed) {
+            return;
+        }
+
+        const res = await window.appAjax({
+            url: endpoint + '?action=sync_mapping',
+            method: 'POST',
+            data: { mapping_id: mappingId },
+            dataType: 'json'
+        });
+
+        if (!res.success) {
+            await appAlert('Hata', parseRespError(res, 'Eşzamanlama başarısız oldu.'), 'error');
+            return;
+        }
+
+        const d = res.data || {};
+        await appAlert('Başarılı',
+            (res.message || 'Eşzamanlama tamamlandı.') +
+            '\n\nKaynak: ' + numberTr(d.source_count) +
+            '\nZaten bağlı: ' + numberTr(d.already_linked_count) +
+            '\nYeni eklenen: ' + numberTr(d.inserted_count) +
+            '\nKalan eksik: ' + numberTr(d.missing_count_after),
+            'success'
+        );
+        await loadMappings();
+    }
+
+    async function cancelSingleMapping(mappingId) {
+        const confirmed = await appConfirm({
+            title: 'Eşleştirmeyi İptal Et',
+            message: 'Bu eşleştirme için hedefteki bağlantılar kaldırılacak (primary linkler korunur). Onaylıyor musunuz?',
+            confirmText: 'İptal Et',
+            cancelText: 'Vazgeç',
+            type: 'warning'
+        });
+
+        if (!confirmed) {
+            return;
+        }
+
+        const res = await window.appAjax({
+            url: endpoint + '?action=cancel_mapping',
+            method: 'POST',
+            data: { mapping_id: mappingId },
+            dataType: 'json'
+        });
+
+        if (!res.success) {
+            await appAlert('Hata', parseRespError(res, 'İptal işlemi başarısız oldu.'), 'error');
+            return;
+        }
+
+        const d = res.data || {};
+        await appAlert('Başarılı',
+            (res.message || 'İptal işlemi tamamlandı.') +
+            '\n\nEşleşen link: ' + numberTr(d.matched_links) +
+            '\nSilinen: ' + numberTr(d.deleted_count) +
+            '\nAtlanan primary: ' + numberTr(d.skipped_primary_count),
+            'success'
+        );
+        await loadMappings();
+    }
+
+    async function bulkSyncMappings(ids) {
+        const confirmed = await appConfirm({
+            title: 'Toplu Eşzamanla',
+            message: 'Seçilen eşleştirmelerde eksik bağlantılar eklenecek. Onaylıyor musunuz?',
+            confirmText: 'Toplu Eşzamanla',
+            cancelText: 'İptal',
+            type: 'confirm'
+        });
+        if (!confirmed) {
+            return;
+        }
+
+        window.appSetButtonLoading('#bulkSyncMappingsBtn', true, 'İşleniyor...');
+        const res = await window.appAjax({
+            url: endpoint + '?action=bulk_sync_mappings',
+            method: 'POST',
+            data: { ids },
+            dataType: 'json'
+        });
+        window.appSetButtonLoading('#bulkSyncMappingsBtn', false);
+
+        if (!res.success) {
+            await appAlert('Hata', parseRespError(res, 'Toplu eşzamanlama başarısız oldu.'), 'error');
+            return;
+        }
+
+        const d = res.data || {};
+        await appAlert('Başarılı',
+            (res.message || 'Toplu eşzamanlama tamamlandı.') +
+            '\n\nİşlenen: ' + numberTr(d.processed) +
+            '\nToplam eklenen: ' + numberTr(d.total_inserted) +
+            '\nHatalı: ' + numberTr(d.failed),
+            'success'
+        );
+        await loadMappings();
+    }
+
+    async function bulkCancelMappings(ids) {
+        const confirmed = await appConfirm({
+            title: 'Toplu İptal',
+            message: 'Seçilen eşleştirmelerin hedef bağlantıları kaldırılacak (primary korunur). Onaylıyor musunuz?',
+            confirmText: 'Toplu İptal Et',
+            cancelText: 'Vazgeç',
+            type: 'warning'
+        });
+        if (!confirmed) {
+            return;
+        }
+
+        window.appSetButtonLoading('#bulkCancelMappingsBtn', true, 'İşleniyor...');
+        const res = await window.appAjax({
+            url: endpoint + '?action=bulk_cancel_mappings',
+            method: 'POST',
+            data: { ids },
+            dataType: 'json'
+        });
+        window.appSetButtonLoading('#bulkCancelMappingsBtn', false);
+
+        if (!res.success) {
+            await appAlert('Hata', parseRespError(res, 'Toplu iptal başarısız oldu.'), 'error');
+            return;
+        }
+
+        const d = res.data || {};
+        await appAlert('Başarılı',
+            (res.message || 'Toplu iptal tamamlandı.') +
+            '\n\nİşlenen: ' + numberTr(d.processed) +
+            '\nToplam silinen: ' + numberTr(d.total_removed) +
+            '\nHatalı: ' + numberTr(d.failed),
+            'success'
+        );
+        await loadMappings();
     }
 
     function validatePayload(payload) {
@@ -398,6 +690,9 @@ $(function () {
 
         await appAlert('Başarılı', (res.message || 'İşlem tamamlandı.') + '\n\n' + detailMessage, 'success');
         await doPreview();
+        if (isAdd) {
+            await loadMappings();
+        }
     }
 
     $('#sourceQualification').on('change', function () {
@@ -428,7 +723,55 @@ $(function () {
         await doBulkAction('bulk_remove');
     });
 
+    $('#refreshMappingsBtn').on('click', async function () {
+        await loadMappings();
+    });
+
+    $('#selectAllMappings').on('change', function () {
+        const checked = $(this).is(':checked');
+        $('#mappingsTable tbody .mapping-check').prop('checked', checked);
+    });
+
+    $(document).on('change', '#mappingsTable tbody .mapping-check', function () {
+        const total = $('#mappingsTable tbody .mapping-check').length;
+        const checked = $('#mappingsTable tbody .mapping-check:checked').length;
+        $('#selectAllMappings').prop('checked', total > 0 && total === checked);
+    });
+
+    $(document).on('click', '.sync-mapping-btn', async function () {
+        const id = $(this).data('id') || '';
+        if (id) {
+            await syncSingleMapping(id);
+        }
+    });
+
+    $(document).on('click', '.cancel-mapping-btn', async function () {
+        const id = $(this).data('id') || '';
+        if (id) {
+            await cancelSingleMapping(id);
+        }
+    });
+
+    $('#bulkSyncMappingsBtn').on('click', async function () {
+        const ids = getSelectedMappingIds();
+        if (!ids.length) {
+            await appAlert('Uyarı', 'Lütfen eşzamanlamak için en az bir kayıt seçin.', 'warning');
+            return;
+        }
+        await bulkSyncMappings(ids);
+    });
+
+    $('#bulkCancelMappingsBtn').on('click', async function () {
+        const ids = getSelectedMappingIds();
+        if (!ids.length) {
+            await appAlert('Uyarı', 'Lütfen iptal etmek için en az bir kayıt seçin.', 'warning');
+            return;
+        }
+        await bulkCancelMappings(ids);
+    });
+
     loadQualifications();
+    loadMappings();
 });
 </script>
 JS;
