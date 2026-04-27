@@ -772,7 +772,6 @@ function mock_exam_fetch_candidate_questions(PDO $pdo, string $qualificationId, 
             $scopeTopicExpr = 'COALESCE((SELECT qsl.topic_id FROM question_scope_links qsl WHERE qsl.question_id = q.id AND qsl.qualification_id = ' . $qQualification . ' AND qsl.course_id = ' . $qCourse . ' ORDER BY qsl.is_primary DESC, qsl.id ASC LIMIT 1), q.topic_id)';
 
             $where[] = '((EXISTS (SELECT 1 FROM question_scope_links qsl WHERE qsl.question_id = q.id AND qsl.qualification_id = ' . $qQualification . ' AND qsl.course_id = ' . $qCourse . ')) OR (NOT EXISTS (SELECT 1 FROM question_scope_links qsl0 WHERE qsl0.question_id = q.id) AND q.course_id = ' . $qCourse . '))';
-            $where[] = 'q.course_id IN (SELECT id FROM courses WHERE qualification_id = ' . $qQualification . ')';
         } else {
             $scopeCourseExpr = 'COALESCE((SELECT qsl.course_id FROM question_scope_links qsl WHERE qsl.question_id = q.id AND qsl.qualification_id = ' . $qQualification . ' ORDER BY qsl.is_primary DESC, qsl.id ASC LIMIT 1), q.course_id)';
             $scopeTopicExpr = 'COALESCE((SELECT qsl.topic_id FROM question_scope_links qsl WHERE qsl.question_id = q.id AND qsl.qualification_id = ' . $qQualification . ' ORDER BY qsl.is_primary DESC, qsl.id ASC LIMIT 1), q.topic_id)';
@@ -790,7 +789,7 @@ function mock_exam_fetch_candidate_questions(PDO $pdo, string $qualificationId, 
         }
     }
 
-    $sql = 'SELECT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, c.name AS course_name '
+    $sql = 'SELECT DISTINCT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, c.name AS course_name '
         . 'FROM questions q INNER JOIN courses c ON c.id = ' . $scopeCourseExpr
         . ' WHERE ' . implode(' AND ', $where);
 
