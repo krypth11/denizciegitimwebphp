@@ -15,12 +15,15 @@ try {
     $payload = api_get_request_data();
 
     $qualificationId = trim((string)($payload['qualification_id'] ?? ''));
-    $requestedQuestionCount = (int)($payload['requested_question_count'] ?? 0);
+    $courseId = trim((string)($payload['course_id'] ?? ''));
     $poolType = strtolower(trim((string)($payload['pool_type'] ?? 'random')));
     $mode = strtolower(trim((string)($payload['mode'] ?? 'standard')));
 
     if ($qualificationId === '') {
         api_error('qualification_id zorunludur.', 422);
+    }
+    if ($courseId === '') {
+        api_error('course_id zorunludur.', 422);
     }
 
     api_qualification_access_log('requested qualification', [
@@ -85,7 +88,7 @@ try {
 
     $created = mock_exam_create_attempt($pdo, $userId, [
         'qualification_id' => $qualificationId,
-        'requested_question_count' => $requestedQuestionCount,
+        'course_id' => $courseId,
         'pool_type' => $poolType,
         'mode' => $mode,
         'source_attempt_id' => (string)($payload['source_attempt_id'] ?? ''),

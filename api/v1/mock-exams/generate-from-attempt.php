@@ -38,6 +38,10 @@ try {
     $mode = (string)($payload['mode'] ?? 'similar');
     $requestedQuestionCount = (int)($payload['requested_question_count'] ?? ($sourceAttempt['requested_question_count'] ?? 20));
     $poolType = (string)($payload['pool_type'] ?? ($sourceAttempt['pool_type'] ?? 'random'));
+    $courseId = trim((string)($payload['course_id'] ?? ($sourceAttempt['course_id'] ?? '')));
+    if ($courseId === '') {
+        api_error('course_id zorunludur.', 422);
+    }
 
     $activeDetail = mock_exam_fetch_active_attempt_detail($pdo, $userId);
     if ($activeDetail) {
@@ -69,6 +73,7 @@ try {
 
     $created = mock_exam_create_attempt($pdo, $userId, [
         'qualification_id' => $qualificationId,
+        'course_id' => $courseId,
         'requested_question_count' => $requestedQuestionCount,
         'pool_type' => $poolType,
         'mode' => $mode,
