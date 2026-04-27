@@ -9,6 +9,7 @@ $menuGroups = [
         ['slug' => 'courses', 'url' => '/pages/courses.php', 'icon' => 'bi-book', 'label' => 'Dersler'],
         ['slug' => 'topics', 'url' => '/pages/topics.php', 'icon' => 'bi-diagram-3', 'label' => 'Konular'],
         ['slug' => 'questions', 'url' => '/pages/questions.php', 'icon' => 'bi-question-circle', 'label' => 'Sorular'],
+        ['slug' => 'question-scope-bulk', 'url' => '/pages/question-scope-bulk.php', 'icon' => 'bi-diagram-3', 'label' => 'Toplu Soru Kapsamı'],
         ['slug' => 'questions-export', 'url' => '/pages/questions-export.php', 'icon' => 'bi-file-earmark-arrow-down', 'label' => 'Soru Dışa Aktar'],
         ['slug' => 'word-game-questions', 'url' => '/pages/word-game-questions.php', 'icon' => 'bi-controller', 'label' => 'Kelime Oyunu'],
         [
@@ -186,6 +187,7 @@ function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
 
 
 
