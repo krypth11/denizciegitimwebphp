@@ -45,6 +45,7 @@ $menuGroups = [
         ],
         ['slug' => 'stories', 'url' => '/pages/stories.php', 'icon' => 'bi-images', 'label' => 'Dashboard Hikayeleri'],
         ['slug' => 'news', 'url' => '/pages/news.php', 'icon' => 'bi-newspaper', 'label' => 'Denizcilik Haberleri'],
+        ['slug' => 'study-resources', 'url' => '/pages/study-resources.php', 'icon' => 'bi-file-earmark-pdf', 'label' => 'Çalışma Kaynakları'],
         ['slug' => 'notifications-create', 'url' => '/pages/notifications-create.php', 'icon' => 'bi-bell', 'label' => 'Yeni Bildirim'],
         ['slug' => 'notifications-history', 'url' => '/pages/notifications-history.php', 'icon' => 'bi-clock-history', 'label' => 'Gönderim Geçmişi'],
         ['slug' => 'notifications-tokens', 'url' => '/pages/notifications-tokens.php', 'icon' => 'bi-phone', 'label' => 'Tokenlar'],
@@ -187,6 +188,7 @@ function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
 
 
 
