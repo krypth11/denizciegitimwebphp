@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/functions.php';
 
-if (!defined('STUDY_RESOURCES_MAX_FILE_BYTES')) define('STUDY_RESOURCES_MAX_FILE_BYTES', 50 * 1024 * 1024);
+if (!defined('STUDY_RESOURCES_MAX_FILE_BYTES')) define('STUDY_RESOURCES_MAX_FILE_BYTES', 250 * 1024 * 1024);
 if (!defined('STUDY_RESOURCES_UPLOAD_RELATIVE_DIR')) define('STUDY_RESOURCES_UPLOAD_RELATIVE_DIR', 'study_resources');
 if (!defined('STUDY_RESOURCES_SHARED_ROOT')) define('STUDY_RESOURCES_SHARED_ROOT', getenv('SHARED_UPLOADS_ROOT') ?: '/home/u2621168/shared_uploads');
 
@@ -19,22 +19,33 @@ function sr_ensure_upload_dir(): void {
     if (!is_writable($dir)) throw new RuntimeException('PDF upload dizini yazılabilir değil.');
 }
 function sr_pdf_page_count(string $absPath): ?int { $raw = @file_get_contents($absPath); if (!is_string($raw) || $raw === '') return null; preg_match_all('/\/Type\s*\/Page\b/', $raw, $m); $n = count($m[0] ?? []); return $n > 0 ? $n : null; }
+function sr_pdf_has_magic_header(string $tmpPath): bool {
+    $h = @fopen($tmpPath, 'rb');
+    if (!$h) return false;
+    $bytes = @fread($h, 5);
+    @fclose($h);
+    return is_string($bytes) && $bytes === '%PDF-';
+}
 
 function sr_store_pdf_upload(array $file): array
 {
     if ((int)($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) throw new InvalidArgumentException('PDF yüklenemedi.');
-    if ((int)($file['size'] ?? 0) > STUDY_RESOURCES_MAX_FILE_BYTES) throw new InvalidArgumentException('PDF boyutu 50MB limitini aşıyor.');
+    if ((int)($file['size'] ?? 0) > STUDY_RESOURCES_MAX_FILE_BYTES) throw new InvalidArgumentException('PDF boyutu 250 MB limitini aşıyor.');
     $tmp = (string)($file['tmp_name'] ?? '');
     if (!is_uploaded_file($tmp)) throw new InvalidArgumentException('Geçersiz dosya yüklemesi.');
+    $originalName = (string)($file['name'] ?? 'document.pdf');
+    $ext = strtolower((string)pathinfo($originalName, PATHINFO_EXTENSION));
+    if ($ext !== 'pdf') throw new InvalidArgumentException('Sadece .pdf uzantılı dosyalar kabul edilir.');
     $mime = strtolower((string)(new finfo(FILEINFO_MIME_TYPE))->file($tmp));
     if ($mime !== 'application/pdf') throw new InvalidArgumentException('Sadece application/pdf kabul edilir.');
+    if (!sr_pdf_has_magic_header($tmp)) throw new InvalidArgumentException('Dosya PDF formatında görünmüyor (magic header doğrulaması başarısız).');
     sr_ensure_upload_dir();
     $stored = sr_uuid() . '.pdf';
     $abs = sr_upload_dir_abs() . '/' . $stored;
     if (!@move_uploaded_file($tmp, $abs)) throw new RuntimeException('Dosya kaydedilemedi.');
     $rel = sr_upload_relative_dir() . '/' . $stored;
     return [
-        'original_file_name' => (string)($file['name'] ?? 'document.pdf'),
+        'original_file_name' => $originalName,
         'stored_file_name' => $stored,
         'file_path' => $rel,
         'file_url' => '',

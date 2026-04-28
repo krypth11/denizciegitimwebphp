@@ -15,6 +15,48 @@ function sr_admin_json(bool $success, string $message = '', array $data = [], in
     exit;
 }
 
+function sr_upload_error_message(int $errorCode): string
+{
+    return match ($errorCode) {
+        UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => 'Dosya sunucu upload limitini aşıyor. Sunucu upload limiti bu dosya için düşük olabilir.',
+        UPLOAD_ERR_PARTIAL => 'Dosya kısmen yüklendi.',
+        UPLOAD_ERR_NO_FILE => 'Dosya bulunamadı.',
+        UPLOAD_ERR_NO_TMP_DIR => 'Geçici dizin bulunamadı.',
+        UPLOAD_ERR_CANT_WRITE => 'Dosya diske yazılamadı.',
+        UPLOAD_ERR_EXTENSION => 'Yükleme bir PHP eklentisi tarafından durduruldu.',
+        default => 'PDF yüklenemedi.',
+    };
+}
+
+function sr_normalize_pdf_uploads(array $files): array
+{
+    $names = $files['name'] ?? [];
+    $tmpNames = $files['tmp_name'] ?? [];
+    $errors = $files['error'] ?? [];
+    $sizes = $files['size'] ?? [];
+
+    if (!is_array($names)) {
+        return [[
+            'name' => (string)$names,
+            'tmp_name' => (string)($tmpNames ?? ''),
+            'error' => (int)($errors ?? UPLOAD_ERR_NO_FILE),
+            'size' => (int)($sizes ?? 0),
+        ]];
+    }
+
+    $normalized = [];
+    $count = count($names);
+    for ($i = 0; $i < $count; $i++) {
+        $normalized[] = [
+            'name' => (string)($names[$i] ?? ''),
+            'tmp_name' => (string)($tmpNames[$i] ?? ''),
+            'error' => (int)($errors[$i] ?? UPLOAD_ERR_NO_FILE),
+            'size' => (int)($sizes[$i] ?? 0),
+        ];
+    }
+    return $normalized;
+}
+
 try {
     if ($action === 'list') {
         $filters = [
@@ -61,37 +103,104 @@ try {
         if ($qualificationId === '' || $courseId === '') sr_admin_json(false, 'Yeterlilik ve ders zorunludur.', [], 422);
         if (empty($_FILES['pdfs'])) sr_admin_json(false, 'PDF dosyaları zorunludur.', [], 422);
 
+        $courseCheck = $pdo->prepare('SELECT COUNT(*) FROM study_resource_courses WHERE id=? AND resource_qualification_id=?');
+        $courseCheck->execute([$courseId, $qualificationId]);
+        if ((int)$courseCheck->fetchColumn() <= 0) {
+            sr_admin_json(false, 'Seçilen ders, seçilen yeterliliğe ait değil.', [], 422);
+        }
+
+        if ($topicId !== '') {
+            $topicCheck = $pdo->prepare('SELECT COUNT(*) FROM study_resource_topics WHERE id=? AND resource_course_id=?');
+            $topicCheck->execute([$topicId, $courseId]);
+            if ((int)$topicCheck->fetchColumn() <= 0) {
+                sr_admin_json(false, 'Seçilen konu, seçilen derse ait değil.', [], 422);
+            }
+        }
+
         $isPremium = sr_bool($_POST['is_premium'] ?? 0);
         $isActive = sr_bool($_POST['is_active'] ?? 0);
         $uploadedBy = (string)($user['user_id'] ?? '');
 
-        $names = $_FILES['pdfs']['name'] ?? [];
-        $tmp = $_FILES['pdfs']['tmp_name'] ?? [];
-        $errors = $_FILES['pdfs']['error'] ?? [];
-        $sizes = $_FILES['pdfs']['size'] ?? [];
-        $count = is_array($names) ? count($names) : 0;
-        $saved = 0;
-
-        for ($i = 0; $i < $count; $i++) {
-            $meta = sr_store_pdf_upload([
-                'name' => $names[$i] ?? '',
-                'tmp_name' => $tmp[$i] ?? '',
-                'error' => $errors[$i] ?? UPLOAD_ERR_NO_FILE,
-                'size' => $sizes[$i] ?? 0,
-            ]);
-            $pdfId = sr_uuid();
-            $title = sr_clean(pathinfo((string)$meta['original_file_name'], PATHINFO_FILENAME), 191);
-            if ($title === '') $title = 'PDF Kaynak';
-            $pdo->prepare('INSERT INTO study_resource_pdfs (id,resource_qualification_id,resource_course_id,resource_topic_id,title,original_file_name,stored_file_name,file_path,file_url,mime_type,file_size_bytes,page_count,is_premium,is_active,uploaded_by,open_count,download_count,created_at,updated_at)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,NOW(),NOW())')
-                ->execute([
-                    $pdfId, $qualificationId, $courseId, ($topicId !== '' ? $topicId : null), $title,
-                    $meta['original_file_name'], $meta['stored_file_name'], $meta['file_path'], '/api/v1/study-resources/download.php?pdf_id=' . rawurlencode($pdfId),
-                    $meta['mime_type'], $meta['file_size_bytes'], $meta['page_count'], $isPremium, $isActive, $uploadedBy,
-                ]);
-            $saved++;
+        $entries = sr_normalize_pdf_uploads($_FILES['pdfs']);
+        $totalCount = count($entries);
+        if ($totalCount <= 0) {
+            sr_admin_json(false, 'PDF dosyaları zorunludur.', [], 422);
         }
-        sr_admin_json(true, $saved . ' PDF yüklendi.');
+        if ($totalCount > 20) {
+            sr_admin_json(false, 'Tek seferde en fazla 20 PDF yükleyebilirsin.', [
+                'uploaded_count' => 0,
+                'failed_count' => $totalCount,
+                'uploaded' => [],
+                'failed' => [],
+            ], 422);
+        }
+
+        $uploaded = [];
+        $failed = [];
+
+        foreach ($entries as $entry) {
+            $originalName = (string)($entry['name'] ?? 'document.pdf');
+            try {
+                if ((int)($entry['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+                    throw new InvalidArgumentException(sr_upload_error_message((int)$entry['error']));
+                }
+                $meta = sr_store_pdf_upload($entry);
+                $pdfId = sr_uuid();
+                $title = sr_clean(pathinfo((string)$meta['original_file_name'], PATHINFO_FILENAME), 191);
+                if ($title === '') $title = 'PDF Kaynak';
+                $pdo->prepare('INSERT INTO study_resource_pdfs (id,resource_qualification_id,resource_course_id,resource_topic_id,title,original_file_name,stored_file_name,file_path,file_url,mime_type,file_size_bytes,page_count,is_premium,is_active,uploaded_by,open_count,download_count,created_at,updated_at)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,NOW(),NOW())')
+                    ->execute([
+                        $pdfId, $qualificationId, $courseId, ($topicId !== '' ? $topicId : null), $title,
+                        $meta['original_file_name'], $meta['stored_file_name'], $meta['file_path'], '/api/v1/study-resources/download.php?pdf_id=' . rawurlencode($pdfId),
+                        $meta['mime_type'], $meta['file_size_bytes'], $meta['page_count'], $isPremium, $isActive, $uploadedBy,
+                    ]);
+
+                $uploaded[] = [
+                    'original_file_name' => (string)$meta['original_file_name'],
+                    'pdf_id' => $pdfId,
+                    'title' => $title,
+                ];
+            } catch (InvalidArgumentException $e) {
+                $failed[] = [
+                    'original_file_name' => $originalName,
+                    'error' => $e->getMessage(),
+                ];
+            } catch (Throwable $e) {
+                error_log('[study-resources.ajax] action=' . $action
+                    . ' file_name=' . $originalName
+                    . ' message=' . $e->getMessage()
+                    . ' file=' . $e->getFile()
+                    . ' line=' . $e->getLine());
+                $failed[] = [
+                    'original_file_name' => $originalName,
+                    'error' => 'Sunucu hatası oluştu. Sunucu upload limiti bu dosya için düşük olabilir.',
+                ];
+            }
+        }
+
+        $uploadedCount = count($uploaded);
+        $failedCount = count($failed);
+
+        if ($uploadedCount <= 0) {
+            sr_admin_json(false, 'Hiçbir PDF yüklenemedi.', [
+                'uploaded_count' => 0,
+                'failed_count' => $failedCount,
+                'uploaded' => [],
+                'failed' => $failed,
+            ], 422);
+        }
+
+        $message = $failedCount > 0
+            ? ($uploadedCount . ' PDF yüklendi, ' . $failedCount . ' PDF yüklenemedi.')
+            : ($uploadedCount . ' PDF yüklendi.');
+
+        sr_admin_json(true, $message, [
+            'uploaded_count' => $uploadedCount,
+            'failed_count' => $failedCount,
+            'uploaded' => $uploaded,
+            'failed' => $failed,
+        ]);
     }
 
     if ($action === 'pdf_update') {
@@ -125,6 +234,9 @@ try {
 } catch (InvalidArgumentException $e) {
     sr_admin_json(false, $e->getMessage(), [], 422);
 } catch (Throwable $e) {
-    error_log('[study-resources.ajax] ' . $e->getMessage());
+    error_log('[study-resources.ajax] action=' . $action
+        . ' message=' . $e->getMessage()
+        . ' file=' . $e->getFile()
+        . ' line=' . $e->getLine());
     sr_admin_json(false, 'Sunucu hatası oluştu.', [], 500);
 }
