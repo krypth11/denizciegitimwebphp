@@ -29,7 +29,7 @@ api_success('OK', [
     'pdf' => [
         'id' => $pdfId,
         'title' => (string)$pdf['title'],
-        'viewer_url' => '/api/v1/study-resources/download.php?pdf_id=' . rawurlencode($pdfId),
+        'viewer_url' => '/api/v1/study-resources/view.php?token=' . rawurlencode(sr_generate_view_token($pdfId, $userId, 600)),
         'download_url' => '/api/v1/study-resources/download.php?pdf_id=' . rawurlencode($pdfId),
     ],
 ]);

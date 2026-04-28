@@ -110,3 +110,96 @@ function sr_file_size_label($bytes): string
 
     return number_format($size, 2, '.', '') . ' ' . $units[$idx];
 }
+
+function sr_token_secret(): string
+{
+    if (defined('STUDY_RESOURCES_VIEW_TOKEN_SECRET') && (string)STUDY_RESOURCES_VIEW_TOKEN_SECRET !== '') {
+        return (string)STUDY_RESOURCES_VIEW_TOKEN_SECRET;
+    }
+    if (defined('JWT_SECRET') && (string)JWT_SECRET !== '') {
+        return (string)JWT_SECRET;
+    }
+    return 'study_resources_view_secret_change_me';
+}
+
+function sr_b64url_encode(string $data): string
+{
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
+
+function sr_b64url_decode(string $data): ?string
+{
+    $raw = strtr($data, '-_', '+/');
+    $pad = strlen($raw) % 4;
+    if ($pad > 0) {
+        $raw .= str_repeat('=', 4 - $pad);
+    }
+    $decoded = base64_decode($raw, true);
+    return is_string($decoded) ? $decoded : null;
+}
+
+function sr_generate_view_token(string $pdfId, string $userId, int $ttlSeconds = 600): string
+{
+    $now = time();
+    $payload = [
+        'pdf_id' => $pdfId,
+        'user_id' => $userId,
+        'expires_at' => $now + max(1, $ttlSeconds),
+        'iat' => $now,
+    ];
+
+    $payloadJson = json_encode($payload, JSON_UNESCAPED_SLASHES);
+    if (!is_string($payloadJson) || $payloadJson === '') {
+        throw new RuntimeException('Token üretilemedi.');
+    }
+
+    $payloadEnc = sr_b64url_encode($payloadJson);
+    $sig = hash_hmac('sha256', $payloadEnc, sr_token_secret(), true);
+    return $payloadEnc . '.' . sr_b64url_encode($sig);
+}
+
+function sr_verify_view_token(string $token): ?array
+{
+    $parts = explode('.', trim($token), 2);
+    if (count($parts) !== 2) {
+        return null;
+    }
+
+    [$payloadEnc, $sigEnc] = $parts;
+    if ($payloadEnc === '' || $sigEnc === '') {
+        return null;
+    }
+
+    $sigBin = sr_b64url_decode($sigEnc);
+    if (!is_string($sigBin)) {
+        return null;
+    }
+
+    $expectedSig = hash_hmac('sha256', $payloadEnc, sr_token_secret(), true);
+    if (!hash_equals($expectedSig, $sigBin)) {
+        return null;
+    }
+
+    $payloadJson = sr_b64url_decode($payloadEnc);
+    if (!is_string($payloadJson) || $payloadJson === '') {
+        return null;
+    }
+
+    $payload = json_decode($payloadJson, true);
+    if (!is_array($payload)) {
+        return null;
+    }
+
+    $pdfId = trim((string)($payload['pdf_id'] ?? ''));
+    $userId = trim((string)($payload['user_id'] ?? ''));
+    $expiresAt = (int)($payload['expires_at'] ?? 0);
+    if ($pdfId === '' || $userId === '' || $expiresAt <= 0) {
+        return null;
+    }
+
+    if ($expiresAt < time()) {
+        return ['expired' => true, 'pdf_id' => $pdfId, 'user_id' => $userId, 'expires_at' => $expiresAt];
+    }
+
+    return ['expired' => false, 'pdf_id' => $pdfId, 'user_id' => $userId, 'expires_at' => $expiresAt];
+}
