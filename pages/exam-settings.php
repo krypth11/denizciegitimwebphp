@@ -15,7 +15,7 @@ include '../includes/sidebar.php';
     <div class="page-header">
         <div>
             <h2>Sınav Ayarları</h2>
-            <p class="text-muted mb-0">Yeterlilik ve ders bazlı deneme sınavı soru sayısı, geçme puanı ve süre ayarlarını yönetin.</p>
+            <p class="text-muted mb-0">Ders bazlı deneme sınavı soru sayısı, geçme puanı ve süre ayarlarını yönetin.</p>
         </div>
     </div>
 
@@ -25,7 +25,10 @@ include '../includes/sidebar.php';
                 <table class="table align-middle" id="examSettingsTable">
                     <thead>
                         <tr>
-                            <th>Yeterlilik</th>
+                            <th>Yeterlilik / Ders</th>
+                            <th>Benzersiz Soru</th>
+                            <th>Kaynak Soru</th>
+                            <th>Toplam Soru</th>
                             <th>Soru Sayısı</th>
                             <th>Geçme Puanı</th>
                             <th>Süre (dk)</th>
@@ -35,7 +38,7 @@ include '../includes/sidebar.php';
                     </thead>
                     <tbody>
                         <tr>
-                            <td colspan="6" class="text-center text-muted py-4">Yükleniyor...</td>
+                            <td colspan="9" class="text-center text-muted py-4">Yükleniyor...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -68,6 +71,28 @@ $(function () {
         return Math.max(min, Math.min(max, n));
     }
 
+    function badgeStat(label, value, cls = 'text-body-secondary') {
+        return `<span class="badge rounded-pill bg-dark-subtle ${cls} me-1 mb-1">${esc(label)}: <strong>${Number(value || 0)}</strong></span>`;
+    }
+
+    function getCounts(item) {
+        const c = item?.question_counts || {};
+        return {
+            unique_count: Math.max(0, Number(c.unique_count || 0)),
+            source_count: Math.max(0, Number(c.source_count || 0)),
+            total_count: Math.max(0, Number(c.total_count || 0))
+        };
+    }
+
+    function countsCols(item) {
+        const c = getCounts(item);
+        return `
+            <td><span class="badge bg-info-subtle text-info-emphasis rounded-pill px-3">${c.unique_count}</span></td>
+            <td><span class="badge bg-warning-subtle text-warning-emphasis rounded-pill px-3">${c.source_count}</span></td>
+            <td><span class="badge bg-success-subtle text-success-emphasis rounded-pill px-3">${c.total_count}</span></td>
+        `;
+    }
+
     function buildInputs(item, disabled) {
         const q = clampInt(item.question_count, 1, 200, 20);
         const p = clampFloat(item.passing_score, 0, 100, 60);
@@ -90,15 +115,24 @@ $(function () {
     }
 
     function qualificationRowHtml(item) {
-        const disabled = Number(item.qualification_is_active) === 1 ? '' : 'disabled';
+        const passiveText = Number(item.qualification_is_active) === 1 ? 'Ders bazlı yönetilir' : 'Yeterlilik pasif';
 
         return `
-            <tr data-row-type="qualification" data-qualification-id="${esc(item.qualification_id)}">
+            <tr data-row-type="qualification" data-qualification-id="${esc(item.qualification_id)}" class="table-active">
                 <td>
                     <div class="fw-semibold">${esc(item.qualification_name)}</div>
-                    ${Number(item.qualification_is_active) === 1 ? '' : '<small class="text-muted">Yeterlilik pasif</small>'}
+                    <div class="mt-1">
+                        ${badgeStat('Benzersiz', getCounts(item).unique_count)}
+                        ${badgeStat('Kaynak', getCounts(item).source_count)}
+                        ${badgeStat('Toplam', getCounts(item).total_count, 'text-success-emphasis')}
+                    </div>
                 </td>
-                ${buildInputs(item, disabled)}
+                ${countsCols(item)}
+                <td><span class="text-muted small">${passiveText}</span></td>
+                <td><span class="text-muted small">${passiveText}</span></td>
+                <td><span class="text-muted small">${passiveText}</span></td>
+                <td><span class="text-muted small">${passiveText}</span></td>
+                <td class="text-end"><span class="text-muted small">-</span></td>
             </tr>
         `;
     }
@@ -113,9 +147,15 @@ $(function () {
                 <td>
                     <div class="ps-4">
                         <span class="text-info-emphasis">↳ ${esc(course.course_name || '-')}</span>
-                        <small class="text-muted d-block">Uygun soru: ${availableCount}</small>
+                        <div class="mt-1">
+                            ${badgeStat('Benzersiz', getCounts(course).unique_count)}
+                            ${badgeStat('Kaynak', getCounts(course).source_count)}
+                            ${badgeStat('Toplam', getCounts(course).total_count, 'text-success-emphasis')}
+                        </div>
+                        <small class="text-muted d-block">Kayıtlı uygun soru: ${availableCount}</small>
                     </div>
                 </td>
+                ${countsCols(course)}
                 ${buildInputs(course, disabled)}
             </tr>
         `;
@@ -133,20 +173,20 @@ $(function () {
 
     async function loadRows() {
         const $tbody = $('#examSettingsTable tbody');
-        $tbody.html('<tr><td colspan="6" class="text-center text-muted py-4">Yükleniyor...</td></tr>');
+        $tbody.html('<tr><td colspan="9" class="text-center text-muted py-4">Yükleniyor...</td></tr>');
 
         try {
             const res = await window.appAjax({ url: listUrl, method: 'GET', dataType: 'json' });
             const items = Array.isArray(res?.data?.items) ? res.data.items : [];
 
             if (!items.length) {
-                $tbody.html('<tr><td colspan="6" class="text-center text-muted py-4">Kayıt bulunamadı.</td></tr>');
+                $tbody.html('<tr><td colspan="9" class="text-center text-muted py-4">Kayıt bulunamadı.</td></tr>');
                 return;
             }
 
             $tbody.html(rowsHtml(items));
         } catch (err) {
-            $tbody.html('<tr><td colspan="6" class="text-center text-danger py-4">Ayarlar yüklenemedi.</td></tr>');
+            $tbody.html('<tr><td colspan="9" class="text-center text-danger py-4">Ayarlar yüklenemedi.</td></tr>');
             await window.showAppAlert({ title: 'Hata', message: err?.message || 'Sınav ayarları alınamadı.', type: 'error' });
         }
     }
@@ -154,6 +194,12 @@ $(function () {
     async function saveRow($tr) {
         const qualificationId = String($tr.data('qualification-id') || '').trim();
         const courseId = String($tr.data('course-id') || '').trim();
+
+        if (!courseId) {
+            await window.showAppAlert({ title: 'Bilgi', message: 'Yeterlilik satırları ders bazlı yönetilir.', type: 'info' });
+            return;
+        }
+
         const questionCount = clampInt($tr.find('.js-question-count').val(), 1, 200, NaN);
         const passingScore = clampFloat($tr.find('.js-passing-score').val(), 0, 100, NaN);
         const durationMinutes = clampInt($tr.find('.js-duration-minutes').val(), 1, 300, NaN);

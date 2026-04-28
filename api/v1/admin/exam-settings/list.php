@@ -40,6 +40,7 @@ try {
         }
 
         $settings = mock_exam_ensure_qualification_exam_settings($pdo, $qualificationId);
+        $qualificationQuestionCounts = mock_exam_get_scope_question_counts($pdo, $qualificationId, null);
         $courses = mock_exam_get_qualification_courses_for_exam($pdo, $qualificationId);
         $courseItems = [];
         foreach ($courses as $course) {
@@ -48,6 +49,7 @@ try {
                 continue;
             }
             $courseSettings = mock_exam_get_effective_exam_settings($pdo, $qualificationId, $courseId);
+            $courseQuestionCounts = mock_exam_get_scope_question_counts($pdo, $qualificationId, $courseId);
             $courseItems[] = [
                 'qualification_id' => $qualificationId,
                 'course_id' => $courseId,
@@ -57,6 +59,11 @@ try {
                 'duration_minutes' => (int)($courseSettings['duration_minutes'] ?? 40),
                 'is_active' => (int)($courseSettings['is_active'] ?? 1),
                 'available_count' => (int)($course['available_count'] ?? 0),
+                'question_counts' => [
+                    'unique_count' => (int)($courseQuestionCounts['unique_count'] ?? 0),
+                    'source_count' => (int)($courseQuestionCounts['source_count'] ?? 0),
+                    'total_count' => (int)($courseQuestionCounts['total_count'] ?? 0),
+                ],
             ];
         }
 
@@ -68,6 +75,11 @@ try {
             'duration_minutes' => (int)($settings['duration_minutes'] ?? 40),
             'is_active' => (int)($settings['is_active'] ?? 1),
             'qualification_is_active' => ((int)($q['qualification_is_active'] ?? 1) === 1) ? 1 : 0,
+            'question_counts' => [
+                'unique_count' => (int)($qualificationQuestionCounts['unique_count'] ?? 0),
+                'source_count' => (int)($qualificationQuestionCounts['source_count'] ?? 0),
+                'total_count' => (int)($qualificationQuestionCounts['total_count'] ?? 0),
+            ],
             'courses' => $courseItems,
         ];
     }

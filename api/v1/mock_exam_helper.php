@@ -971,6 +971,96 @@ function mock_exam_fetch_qualification_courses(PDO $pdo, string $qualificationId
     return mock_exam_get_qualification_courses_for_exam($pdo, $qualificationId);
 }
 
+function mock_exam_get_scope_question_counts(PDO $pdo, ?string $qualificationId = null, ?string $courseId = null): array
+{
+    $qualificationId = trim((string)($qualificationId ?? ''));
+    $courseId = trim((string)($courseId ?? ''));
+
+    $result = [
+        'unique_count' => 0,
+        'source_count' => 0,
+        'total_count' => 0,
+    ];
+
+    if ($qualificationId === '' && $courseId === '') {
+        return $result;
+    }
+
+    try {
+        $questionCols = get_table_columns($pdo, 'questions') ?: [];
+        $courseCols = get_table_columns($pdo, 'courses') ?: [];
+
+        $questionIdCol = mock_exam_pick($questionCols, ['id'], false);
+        $questionCourseCol = mock_exam_pick($questionCols, ['course_id'], false);
+        $courseIdCol = mock_exam_pick($courseCols, ['id'], false);
+        $courseQualificationCol = mock_exam_pick($courseCols, ['qualification_id'], false);
+
+        if ($questionIdCol && $questionCourseCol && $courseIdCol) {
+            if ($courseId !== '') {
+                $sql = 'SELECT COUNT(DISTINCT q.' . mock_exam_q($questionIdCol) . ') FROM `questions` q WHERE q.' . mock_exam_q($questionCourseCol) . ' = ?';
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([$courseId]);
+                $result['unique_count'] = max(0, (int)$stmt->fetchColumn());
+            } elseif ($qualificationId !== '' && $courseQualificationCol) {
+                $sql = 'SELECT COUNT(DISTINCT q.' . mock_exam_q($questionIdCol) . ') '
+                    . 'FROM `questions` q '
+                    . 'INNER JOIN `courses` c ON c.' . mock_exam_q($courseIdCol) . ' = q.' . mock_exam_q($questionCourseCol) . ' '
+                    . 'WHERE c.' . mock_exam_q($courseQualificationCol) . ' = ?';
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute([$qualificationId]);
+                $result['unique_count'] = max(0, (int)$stmt->fetchColumn());
+            }
+        }
+    } catch (Throwable $e) {
+        $result['unique_count'] = 0;
+    }
+
+    try {
+        $scopeCols = get_table_columns($pdo, 'question_scope_links') ?: [];
+        if ($scopeCols) {
+            $scopeQuestionIdCol = mock_exam_pick($scopeCols, ['question_id'], false);
+            $scopeQualificationCol = mock_exam_pick($scopeCols, ['qualification_id'], false);
+            $scopeCourseCol = mock_exam_pick($scopeCols, ['course_id'], false);
+            $scopeIsPrimaryCol = mock_exam_pick($scopeCols, ['is_primary'], false);
+
+            if ($scopeQuestionIdCol) {
+                $where = [];
+                $params = [];
+
+                if ($courseId !== '' && $scopeCourseCol) {
+                    $where[] = 'qsl.' . mock_exam_q($scopeCourseCol) . ' = ?';
+                    $params[] = $courseId;
+                    if ($qualificationId !== '' && $scopeQualificationCol) {
+                        $where[] = 'qsl.' . mock_exam_q($scopeQualificationCol) . ' = ?';
+                        $params[] = $qualificationId;
+                    }
+                } elseif ($qualificationId !== '' && $scopeQualificationCol) {
+                    $where[] = 'qsl.' . mock_exam_q($scopeQualificationCol) . ' = ?';
+                    $params[] = $qualificationId;
+                }
+
+                if ($scopeIsPrimaryCol) {
+                    $where[] = 'COALESCE(qsl.' . mock_exam_q($scopeIsPrimaryCol) . ', 0) = 0';
+                }
+
+                if ($where) {
+                    $sql = 'SELECT COUNT(DISTINCT qsl.' . mock_exam_q($scopeQuestionIdCol) . ') '
+                        . 'FROM `question_scope_links` qsl '
+                        . 'WHERE ' . implode(' AND ', $where);
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute($params);
+                    $result['source_count'] = max(0, (int)$stmt->fetchColumn());
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        $result['source_count'] = 0;
+    }
+
+    $result['total_count'] = $result['unique_count'] + $result['source_count'];
+    return $result;
+}
+
 function mock_exam_has_scope_links_table(PDO $pdo): bool
 {
     static $cache = null;
