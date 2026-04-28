@@ -1,6 +1,5 @@
 <?php
 require_once dirname(__DIR__) . '/api_bootstrap.php';
-require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/response_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/study_resources_helper.php';
 
@@ -16,13 +15,10 @@ set_error_handler(static function (int $severity, string $message, string $file,
 
 try {
     api_require_method('GET');
-    $auth = api_require_auth($pdo);
-    $authUserId = (string)($auth['user']['id'] ?? '');
-    $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'study_resources.view');
 
     $token = trim((string)($_GET['token'] ?? ''));
     if ($token === '') {
-        http_response_code(422);
+        http_response_code(403);
         exit;
     }
 
@@ -36,9 +32,18 @@ try {
         exit;
     }
 
-    $pdfId = (string)$verified['pdf_id'];
-    $tokenUserId = (string)$verified['user_id'];
-    if ($tokenUserId !== $authUserId) {
+    $pdfId = trim((string)($verified['pdf_id'] ?? ''));
+    $tokenUserId = trim((string)($verified['user_id'] ?? ''));
+    if ($pdfId === '' || $tokenUserId === '') {
+        http_response_code(403);
+        exit;
+    }
+
+    $profileStmt = $pdo->prepare('SELECT current_qualification_id FROM user_profiles WHERE id=? AND COALESCE(is_deleted,0)=0 LIMIT 1');
+    $profileStmt->execute([$tokenUserId]);
+    $profile = $profileStmt->fetch(PDO::FETCH_ASSOC);
+    $currentQualificationId = trim((string)($profile['current_qualification_id'] ?? ''));
+    if ($currentQualificationId === '') {
         http_response_code(403);
         exit;
     }
@@ -56,7 +61,7 @@ try {
         exit;
     }
 
-    $isPremium = function_exists('usage_limits_is_user_pro') ? usage_limits_is_user_pro($pdo, $authUserId) : false;
+    $isPremium = function_exists('usage_limits_is_user_pro') ? usage_limits_is_user_pro($pdo, $tokenUserId) : false;
     if ((int)$pdf['is_premium'] === 1 && !$isPremium) {
         http_response_code(403);
         exit;
