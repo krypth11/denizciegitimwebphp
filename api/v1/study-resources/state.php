@@ -14,6 +14,9 @@ if ($pdfId === '') api_error('pdf_id zorunludur.', 422);
 $fields = [];
 if (array_key_exists('is_favorite', $data)) $fields['is_favorite'] = ((int)$data['is_favorite'] === 1 ? 1 : 0);
 if (array_key_exists('is_read', $data)) $fields['is_read'] = ((int)$data['is_read'] === 1 ? 1 : 0);
+if (array_key_exists('clear_offline_downloaded', $data) && (int)$data['clear_offline_downloaded'] === 1) {
+    $fields['offline_downloaded_at'] = null;
+}
 if (array_key_exists('offline_downloaded_at', $data)) {
     $fields['offline_downloaded_at'] = trim((string)$data['offline_downloaded_at']) ?: null;
 }
@@ -28,14 +31,16 @@ $pdo->prepare('INSERT INTO study_resource_user_states (user_id,pdf_id,is_favorit
                ON DUPLICATE KEY UPDATE
                    is_favorite=IFNULL(VALUES(is_favorite), is_favorite),
                    is_read=IFNULL(VALUES(is_read), is_read),
-                   offline_downloaded_at=IFNULL(VALUES(offline_downloaded_at), offline_downloaded_at),
+                   offline_downloaded_at=VALUES(offline_downloaded_at),
                    updated_at=NOW()')
     ->execute([$userId, $pdfId, $isFavorite, $isRead, $offlineDownloadedAt]);
 
 $event = 'state_update';
 if (array_key_exists('is_favorite', $fields)) $event = 'favorite';
 if (array_key_exists('is_read', $fields)) $event = 'read';
-if (array_key_exists('offline_downloaded_at', $fields)) $event = 'offline_downloaded';
+if (array_key_exists('offline_downloaded_at', $fields)) {
+    $event = ($fields['offline_downloaded_at'] === null) ? 'offline_deleted' : 'offline_downloaded';
+}
 sr_log_event($pdo, $userId, $event, $pdfId, null);
 
 api_success('Durum güncellendi.');

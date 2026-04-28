@@ -2,6 +2,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/response_helper.php';
+require_once dirname(__DIR__) . '/usage_limits_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/study_resources_helper.php';
 
 api_require_method('GET');
@@ -25,11 +26,34 @@ sr_log_event($pdo, $userId, 'open', $pdfId, null);
 $pdo->prepare('INSERT INTO study_resource_user_states (user_id,pdf_id,last_opened_at,created_at,updated_at) VALUES (?,?,?,NOW(),NOW()) ON DUPLICATE KEY UPDATE last_opened_at=VALUES(last_opened_at), updated_at=NOW()')
     ->execute([$userId, $pdfId, date('Y-m-d H:i:s')]);
 
+$stateStmt = $pdo->prepare('SELECT is_favorite,is_read,offline_downloaded_at,last_opened_at FROM study_resource_user_states WHERE user_id=? AND pdf_id=? LIMIT 1');
+$stateStmt->execute([$userId, $pdfId]);
+$state = $stateStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+$settings = sr_get_settings($pdo);
+
 api_success('OK', [
     'pdf' => [
         'id' => $pdfId,
         'title' => (string)$pdf['title'],
+        'is_premium' => ((int)$pdf['is_premium'] === 1),
+        'file_size_bytes' => (int)($pdf['file_size_bytes'] ?? 0),
+        'file_size_label' => sr_file_size_label($pdf['file_size_bytes'] ?? 0),
+        'page_count' => $pdf['page_count'] !== null ? (int)$pdf['page_count'] : null,
+        'updated_at' => $pdf['updated_at'] ?? null,
         'viewer_url' => '/api/v1/study-resources/view.php?token=' . rawurlencode(sr_generate_view_token($pdfId, $userId, 600)),
         'download_url' => '/api/v1/study-resources/download.php?pdf_id=' . rawurlencode($pdfId),
+        'state' => [
+            'is_favorite' => ((int)($state['is_favorite'] ?? 0) === 1),
+            'is_read' => ((int)($state['is_read'] ?? 0) === 1),
+            'offline_downloaded_at' => $state['offline_downloaded_at'] ?? null,
+            'last_opened_at' => $state['last_opened_at'] ?? null,
+        ],
+        'settings' => [
+            'premium_auto_cache_enabled' => ((int)($settings['premium_auto_cache_enabled'] ?? 1) === 1),
+            'free_auto_cache_enabled' => ((int)($settings['free_auto_cache_enabled'] ?? 1) === 1),
+            'premium_offline_access_enabled' => ((int)($settings['premium_offline_access_enabled'] ?? 1) === 1),
+            'free_offline_access_enabled' => ((int)($settings['free_offline_access_enabled'] ?? 1) === 1),
+        ],
     ],
 ]);

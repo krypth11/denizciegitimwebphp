@@ -203,3 +203,94 @@ function sr_verify_view_token(string $token): ?array
 
     return ['expired' => false, 'pdf_id' => $pdfId, 'user_id' => $userId, 'expires_at' => $expiresAt];
 }
+
+function sr_settings_defaults(): array
+{
+    return [
+        'premium_auto_cache_enabled' => 1,
+        'free_auto_cache_enabled' => 1,
+        'premium_offline_access_enabled' => 1,
+        'free_offline_access_enabled' => 1,
+    ];
+}
+
+function sr_normalize_settings(array $row): array
+{
+    $defaults = sr_settings_defaults();
+    $out = [];
+    foreach (array_keys($defaults) as $key) {
+        $out[$key] = ((int)($row[$key] ?? $defaults[$key]) === 1) ? 1 : 0;
+    }
+    return $out;
+}
+
+function sr_get_settings(PDO $pdo): array
+{
+    $defaults = sr_settings_defaults();
+    try {
+        $stmt = $pdo->query("SHOW TABLES LIKE 'study_resource_settings'");
+        $exists = $stmt ? $stmt->fetchColumn() : false;
+        if (!$exists) {
+            error_log('[study_resources.settings] table not found, using defaults.');
+            return $defaults;
+        }
+
+        $rowStmt = $pdo->query('SELECT premium_auto_cache_enabled, free_auto_cache_enabled, premium_offline_access_enabled, free_offline_access_enabled FROM study_resource_settings ORDER BY id ASC LIMIT 1');
+        $row = $rowStmt ? $rowStmt->fetch(PDO::FETCH_ASSOC) : false;
+        if (!is_array($row)) {
+            return $defaults;
+        }
+
+        return sr_normalize_settings($row);
+    } catch (Throwable $e) {
+        error_log('[study_resources.settings] get error=' . $e->getMessage() . ' file=' . $e->getFile() . ' line=' . $e->getLine());
+        return $defaults;
+    }
+}
+
+function sr_update_settings(PDO $pdo, array $input): array
+{
+    $defaults = sr_settings_defaults();
+    $incoming = sr_normalize_settings($input + $defaults);
+
+    try {
+        $stmt = $pdo->query("SHOW TABLES LIKE 'study_resource_settings'");
+        $exists = $stmt ? $stmt->fetchColumn() : false;
+        if (!$exists) {
+            error_log('[study_resources.settings] update skipped, table not found.');
+            return $defaults;
+        }
+
+        $current = sr_get_settings($pdo);
+        $next = [];
+        foreach (array_keys($defaults) as $key) {
+            $next[$key] = array_key_exists($key, $input) ? $incoming[$key] : (int)$current[$key];
+        }
+
+        $idStmt = $pdo->query('SELECT id FROM study_resource_settings ORDER BY id ASC LIMIT 1');
+        $id = $idStmt ? (int)$idStmt->fetchColumn() : 0;
+        if ($id > 0) {
+            $upd = $pdo->prepare('UPDATE study_resource_settings SET premium_auto_cache_enabled=?, free_auto_cache_enabled=?, premium_offline_access_enabled=?, free_offline_access_enabled=?, updated_at=NOW() WHERE id=?');
+            $upd->execute([
+                $next['premium_auto_cache_enabled'],
+                $next['free_auto_cache_enabled'],
+                $next['premium_offline_access_enabled'],
+                $next['free_offline_access_enabled'],
+                $id,
+            ]);
+        } else {
+            $ins = $pdo->prepare('INSERT INTO study_resource_settings (premium_auto_cache_enabled, free_auto_cache_enabled, premium_offline_access_enabled, free_offline_access_enabled, created_at, updated_at) VALUES (?,?,?,?,NOW(),NOW())');
+            $ins->execute([
+                $next['premium_auto_cache_enabled'],
+                $next['free_auto_cache_enabled'],
+                $next['premium_offline_access_enabled'],
+                $next['free_offline_access_enabled'],
+            ]);
+        }
+
+        return sr_get_settings($pdo);
+    } catch (Throwable $e) {
+        error_log('[study_resources.settings] update error=' . $e->getMessage() . ' file=' . $e->getFile() . ' line=' . $e->getLine());
+        return sr_get_settings($pdo);
+    }
+}

@@ -1,6 +1,7 @@
 <?php
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/response_helper.php';
+require_once dirname(__DIR__) . '/usage_limits_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/study_resources_helper.php';
 
 if (ob_get_level() > 0) {

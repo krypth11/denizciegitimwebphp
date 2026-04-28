@@ -2,6 +2,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/response_helper.php';
+require_once dirname(__DIR__) . '/usage_limits_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/study_resources_helper.php';
 
 api_require_method('GET');
@@ -29,7 +30,7 @@ if ($hasTopics && $topicId === '') api_success('OK', ['requires_topic' => true, 
 $isPremium = false;
 if (function_exists('usage_limits_is_user_pro')) $isPremium = usage_limits_is_user_pro($pdo, $userId);
 
-$sql = 'SELECT p.id,p.title,p.file_size_bytes,p.page_count,p.is_premium,us.is_favorite,us.is_read,us.last_opened_at
+$sql = 'SELECT p.id,p.title,p.file_size_bytes,p.page_count,p.is_premium,p.updated_at,us.is_favorite,us.is_read,us.last_opened_at,us.offline_downloaded_at
         FROM study_resource_pdfs p
         LEFT JOIN study_resource_user_states us ON us.pdf_id=p.id AND us.user_id=?
         WHERE p.is_active=1 AND p.resource_course_id=? AND p.resource_qualification_id=?';
@@ -48,11 +49,14 @@ foreach ($rows as $r) {
         'id' => (string)$r['id'],
         'title' => (string)$r['title'],
         'file_size_bytes' => (int)($r['file_size_bytes'] ?? 0),
+        'file_size_label' => sr_file_size_label($r['file_size_bytes'] ?? 0),
         'page_count' => $r['page_count'] !== null ? (int)$r['page_count'] : null,
         'is_premium' => ((int)$r['is_premium'] === 1),
         'is_locked' => $locked,
+        'updated_at' => $r['updated_at'] ?? null,
         'is_favorite' => ((int)($r['is_favorite'] ?? 0) === 1),
         'is_read' => ((int)($r['is_read'] ?? 0) === 1),
+        'offline_downloaded_at' => $r['offline_downloaded_at'] ?? null,
         'last_opened_at' => $r['last_opened_at'] ?? null,
     ];
 }

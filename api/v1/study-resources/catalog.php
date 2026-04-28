@@ -2,6 +2,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__) . '/response_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/study_resources_helper.php';
 
 api_require_method('GET');
 $auth = api_require_auth($pdo);
@@ -11,7 +12,17 @@ $qStmt = $pdo->prepare('SELECT * FROM study_resource_qualifications WHERE is_act
 $qStmt->execute([$currentQualificationId]);
 $qualification = $qStmt->fetch(PDO::FETCH_ASSOC);
 if (!$qualification) {
-    api_success('OK', ['qualification' => null, 'courses' => []]);
+    $settings = sr_get_settings($pdo);
+    api_success('OK', [
+        'qualification' => null,
+        'courses' => [],
+        'settings' => [
+            'premium_auto_cache_enabled' => ((int)($settings['premium_auto_cache_enabled'] ?? 1) === 1),
+            'free_auto_cache_enabled' => ((int)($settings['free_auto_cache_enabled'] ?? 1) === 1),
+            'premium_offline_access_enabled' => ((int)($settings['premium_offline_access_enabled'] ?? 1) === 1),
+            'free_offline_access_enabled' => ((int)($settings['free_offline_access_enabled'] ?? 1) === 1),
+        ],
+    ]);
 }
 
 $cStmt = $pdo->prepare('SELECT * FROM study_resource_courses WHERE resource_qualification_id=? AND is_active=1 ORDER BY name ASC');
@@ -27,7 +38,14 @@ foreach ($courses as &$course) {
 }
 unset($course);
 
+$settings = sr_get_settings($pdo);
 api_success('OK', [
     'qualification' => $qualification,
     'courses' => $courses,
+    'settings' => [
+        'premium_auto_cache_enabled' => ((int)($settings['premium_auto_cache_enabled'] ?? 1) === 1),
+        'free_auto_cache_enabled' => ((int)($settings['free_auto_cache_enabled'] ?? 1) === 1),
+        'premium_offline_access_enabled' => ((int)($settings['premium_offline_access_enabled'] ?? 1) === 1),
+        'free_offline_access_enabled' => ((int)($settings['free_offline_access_enabled'] ?? 1) === 1),
+    ],
 ]);

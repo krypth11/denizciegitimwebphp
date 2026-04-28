@@ -58,6 +58,23 @@ function sr_normalize_pdf_uploads(array $files): array
 }
 
 try {
+    if ($action === 'get_settings') {
+        $settings = sr_get_settings($pdo);
+        sr_admin_json(true, '', ['settings' => $settings]);
+    }
+
+    if ($action === 'update_settings') {
+        $input = [
+            'premium_auto_cache_enabled' => $_POST['premium_auto_cache_enabled'] ?? 0,
+            'free_auto_cache_enabled' => $_POST['free_auto_cache_enabled'] ?? 0,
+            'premium_offline_access_enabled' => $_POST['premium_offline_access_enabled'] ?? 0,
+            'free_offline_access_enabled' => $_POST['free_offline_access_enabled'] ?? 0,
+        ];
+        $settings = sr_update_settings($pdo, $input);
+        error_log('[study-resources.ajax] action=update_settings success=1 settings=' . json_encode($settings, JSON_UNESCAPED_UNICODE));
+        sr_admin_json(true, 'Kaynak erişim ayarları güncellendi.', ['settings' => $settings]);
+    }
+
     if ($action === 'list') {
         $filters = [
             'qualification_id' => trim((string)($_GET['qualification_id'] ?? '')),

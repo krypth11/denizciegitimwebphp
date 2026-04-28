@@ -12,6 +12,48 @@ include '../includes/sidebar.php';
     <div class="page-header">
         <div><h2>Çalışma Kaynakları Yönetimi</h2><p class="text-muted mb-0">Kapsamları ve PDF kaynaklarını yönetin.</p></div>
     </div>
+    <div class="card mb-3 border-secondary">
+        <div class="card-header bg-transparent border-secondary">
+            <h5 class="mb-0">Kaynak Erişim Ayarları</h5>
+        </div>
+        <div class="card-body">
+            <form id="resourceSettingsForm" class="row g-3">
+                <div class="col-lg-6">
+                    <div class="p-3 rounded border border-secondary h-100">
+                        <h6 class="mb-3">Premium kullanıcılar</h6>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="premium_auto_cache_enabled" name="premium_auto_cache_enabled" value="1">
+                            <label class="form-check-label" for="premium_auto_cache_enabled">PDF’ler indirilsin ve offline kullanılsın</label>
+                        </div>
+                        <div class="small text-muted mb-3">Aktifse premium kullanıcı PDF açtığında uygulama cihaz hafızasına otomatik cache kaydedebilir. Kapalıysa her açılışta internetten görüntüler.</div>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="premium_offline_access_enabled" name="premium_offline_access_enabled" value="1">
+                            <label class="form-check-label" for="premium_offline_access_enabled">İnternet yokken erişebilir</label>
+                        </div>
+                        <div class="small text-muted">Aktifse premium kullanıcı çalışma kaynaklarına offline girebilir ve cihazda kayıtlı PDF’leri açabilir. Kapalıysa internet yokken erişim kapatılır.</div>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="p-3 rounded border border-secondary h-100">
+                        <h6 class="mb-3">Premium olmayan kullanıcılar</h6>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="free_auto_cache_enabled" name="free_auto_cache_enabled" value="1">
+                            <label class="form-check-label" for="free_auto_cache_enabled">PDF’ler indirilsin ve offline kullanılsın</label>
+                        </div>
+                        <div class="small text-muted mb-3">Aktifse free kullanıcı PDF açtığında uygulama cihaz hafızasına otomatik cache kaydedebilir. Kapalıysa her açılışta internetten görüntüler.</div>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="free_offline_access_enabled" name="free_offline_access_enabled" value="1">
+                            <label class="form-check-label" for="free_offline_access_enabled">İnternet yokken erişebilir</label>
+                        </div>
+                        <div class="small text-muted">Aktifse free kullanıcı çalışma kaynaklarına offline girebilir ve cihazda kayıtlı PDF’leri açabilir. Kapalıysa internet yokken erişim kapatılır.</div>
+                    </div>
+                </div>
+                <div class="col-12 d-flex justify-content-end">
+                    <button type="submit" id="resourceSettingsSaveBtn" class="btn btn-primary">Kaydet</button>
+                </div>
+            </form>
+        </div>
+    </div>
     <div class="card mb-3"><div class="card-body">
         <form id="uploadForm" enctype="multipart/form-data" class="row g-2 align-items-end">
             <div class="col-md-3"><label class="form-label">Yeterlilik</label><select class="form-select" id="uploadQualification" name="qualification_id" required></select></div>
@@ -94,6 +136,22 @@ $(function(){
     let scope={qualifications:[],courses:[],topics:[]};
     let currentRows = [];
     const editModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('editPdfModal'));
+
+    function applySettingsToForm(settings){
+        const s = settings || {};
+        $('#premium_auto_cache_enabled').prop('checked', Number(s.premium_auto_cache_enabled ?? 1) === 1);
+        $('#free_auto_cache_enabled').prop('checked', Number(s.free_auto_cache_enabled ?? 1) === 1);
+        $('#premium_offline_access_enabled').prop('checked', Number(s.premium_offline_access_enabled ?? 1) === 1);
+        $('#free_offline_access_enabled').prop('checked', Number(s.free_offline_access_enabled ?? 1) === 1);
+    }
+
+    async function loadSettings(){
+        const r = await window.appAjax({url:api,method:'GET',data:{action:'get_settings'},dataType:'json'});
+        if(!r.success){
+            return window.showAppAlert({title:'Hata',message:r.message||'Ayarlar yüklenemedi',type:'error'});
+        }
+        applySettingsToForm(r.data?.settings || {});
+    }
 
     function renderSelect($el, items, placeholder, valueKey='id', labelKey='name', allowEmpty=true){
         const prev = $el.val();
@@ -472,6 +530,30 @@ $(function(){
             await window.showAppAlert({title:'Hata',message:firstErr,type:'error'});
         }
     });
+
+    $('#resourceSettingsForm').on('submit', async function(e){
+        e.preventDefault();
+        const $btn = $('#resourceSettingsSaveBtn').prop('disabled', true);
+        try {
+            const payload = {
+                action: 'update_settings',
+                premium_auto_cache_enabled: $('#premium_auto_cache_enabled').is(':checked') ? 1 : 0,
+                free_auto_cache_enabled: $('#free_auto_cache_enabled').is(':checked') ? 1 : 0,
+                premium_offline_access_enabled: $('#premium_offline_access_enabled').is(':checked') ? 1 : 0,
+                free_offline_access_enabled: $('#free_offline_access_enabled').is(':checked') ? 1 : 0,
+            };
+            const r = await window.appAjax({url:api,method:'POST',data:payload,dataType:'json'});
+            if(!r.success){
+                return window.showAppAlert({title:'Hata',message:r.message||'Ayarlar kaydedilemedi',type:'error'});
+            }
+            applySettingsToForm(r.data?.settings || payload);
+            await window.showAppAlert({title:'Başarılı',message:r.message||'Ayarlar kaydedildi.',type:'success'});
+        } finally {
+            $btn.prop('disabled', false);
+        }
+    });
+
+    loadSettings();
     load();
 });
 </script>
