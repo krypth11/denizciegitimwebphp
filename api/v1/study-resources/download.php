@@ -9,7 +9,7 @@ $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth,
 $pdfId = trim((string)($_GET['pdf_id'] ?? ''));
 if ($pdfId === '') { http_response_code(422); echo 'pdf_id zorunludur.'; exit; }
 
-$stmt = $pdo->prepare('SELECT p.*, q.linked_qualification_id FROM study_resource_pdfs p INNER JOIN study_resource_qualifications q ON q.id=p.qualification_id WHERE p.id=? AND p.is_active=1 LIMIT 1');
+$stmt = $pdo->prepare('SELECT p.*, q.linked_qualification_id FROM study_resource_pdfs p INNER JOIN study_resource_qualifications q ON q.id=p.resource_qualification_id WHERE p.id=? AND p.is_active=1 LIMIT 1');
 $stmt->execute([$pdfId]);
 $pdf = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$pdf) { http_response_code(404); echo 'PDF bulunamadı.'; exit; }

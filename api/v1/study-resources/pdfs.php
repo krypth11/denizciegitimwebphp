@@ -17,11 +17,11 @@ $q->execute([$currentQualificationId]);
 $rqId = (string)($q->fetchColumn() ?: '');
 if ($rqId === '') api_success('OK', ['requires_topic' => false, 'pdfs' => []]);
 
-$c = $pdo->prepare('SELECT id FROM study_resource_courses WHERE id=? AND qualification_id=? AND is_active=1 LIMIT 1');
+$c = $pdo->prepare('SELECT id FROM study_resource_courses WHERE id=? AND resource_qualification_id=? AND is_active=1 LIMIT 1');
 $c->execute([$courseId, $rqId]);
 if (!$c->fetchColumn()) api_error('Ders bulunamadı.', 404);
 
-$hasTopicsStmt = $pdo->prepare('SELECT COUNT(*) FROM study_resource_topics WHERE course_id=? AND is_active=1');
+$hasTopicsStmt = $pdo->prepare('SELECT COUNT(*) FROM study_resource_topics WHERE resource_course_id=? AND is_active=1');
 $hasTopicsStmt->execute([$courseId]);
 $hasTopics = ((int)$hasTopicsStmt->fetchColumn()) > 0;
 if ($hasTopics && $topicId === '') api_success('OK', ['requires_topic' => true, 'pdfs' => []]);
@@ -32,10 +32,10 @@ if (function_exists('usage_limits_is_user_pro')) $isPremium = usage_limits_is_us
 $sql = 'SELECT p.id,p.title,p.file_size_bytes,p.page_count,p.is_premium,us.is_favorite,us.is_read,us.last_opened_at
         FROM study_resource_pdfs p
         LEFT JOIN study_resource_user_states us ON us.pdf_id=p.id AND us.user_id=?
-        WHERE p.is_active=1 AND p.course_id=?';
-$params = [$userId, $courseId];
-if ($topicId !== '') { $sql .= ' AND p.topic_id=?'; $params[] = $topicId; }
-else { $sql .= ' AND (p.topic_id IS NULL OR p.topic_id="")'; }
+        WHERE p.is_active=1 AND p.resource_course_id=? AND p.resource_qualification_id=?';
+$params = [$userId, $courseId, $rqId];
+if ($topicId !== '') { $sql .= ' AND p.resource_topic_id=?'; $params[] = $topicId; }
+else { $sql .= ' AND (p.resource_topic_id IS NULL OR p.resource_topic_id="")'; }
 $sql .= ' ORDER BY p.created_at DESC';
 
 $stmt = $pdo->prepare($sql);

@@ -72,6 +72,6 @@ function sr_safe_abs_from_rel(string $rel): ?string
 
 function sr_log_event(PDO $pdo, string $userId, string $eventType, ?string $pdfId = null, ?string $queryText = null): void
 {
-    $pdo->prepare('INSERT INTO study_resource_user_events (id,user_id,pdf_id,event_type,query_text,created_at) VALUES (?,?,?,?,?,NOW())')
-        ->execute([sr_uuid(), $userId, $pdfId, $eventType, $queryText]);
+    $pdo->prepare('INSERT INTO study_resource_user_events (user_id,pdf_id,event_type,query_text,created_at) VALUES (?,?,?,?,NOW())')
+        ->execute([$userId, $pdfId, $eventType, $queryText]);
 }

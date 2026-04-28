@@ -19,25 +19,18 @@ if (array_key_exists('offline_downloaded_at', $data)) {
 }
 if (!$fields) api_error('Güncellenecek alan yok.', 422);
 
-$sel = $pdo->prepare('SELECT id FROM study_resource_user_states WHERE pdf_id=? AND user_id=? LIMIT 1');
-$sel->execute([$pdfId, $userId]);
-$existingId = (string)($sel->fetchColumn() ?: '');
+$isFavorite = array_key_exists('is_favorite', $fields) ? $fields['is_favorite'] : 0;
+$isRead = array_key_exists('is_read', $fields) ? $fields['is_read'] : 0;
+$offlineDownloadedAt = array_key_exists('offline_downloaded_at', $fields) ? $fields['offline_downloaded_at'] : null;
 
-if ($existingId !== '') {
-    $parts = [];
-    $vals = [];
-    foreach ($fields as $k => $v) { $parts[] = $k . '=?'; $vals[] = $v; }
-    $vals[] = $existingId;
-    $pdo->prepare('UPDATE study_resource_user_states SET ' . implode(',', $parts) . ', updated_at=NOW() WHERE id=?')->execute($vals);
-} else {
-    $cols = ['id', 'pdf_id', 'user_id'];
-    $qs = ['?', '?', '?'];
-    $vals = [sr_uuid(), $pdfId, $userId];
-    foreach ($fields as $k => $v) { $cols[] = $k; $qs[] = '?'; $vals[] = $v; }
-    $cols[] = 'created_at'; $qs[] = 'NOW()';
-    $cols[] = 'updated_at'; $qs[] = 'NOW()';
-    $pdo->prepare('INSERT INTO study_resource_user_states (' . implode(',', $cols) . ') VALUES (' . implode(',', $qs) . ')')->execute($vals);
-}
+$pdo->prepare('INSERT INTO study_resource_user_states (user_id,pdf_id,is_favorite,is_read,offline_downloaded_at,created_at,updated_at)
+               VALUES (?,?,?,?,?,NOW(),NOW())
+               ON DUPLICATE KEY UPDATE
+                   is_favorite=IFNULL(VALUES(is_favorite), is_favorite),
+                   is_read=IFNULL(VALUES(is_read), is_read),
+                   offline_downloaded_at=IFNULL(VALUES(offline_downloaded_at), offline_downloaded_at),
+                   updated_at=NOW()')
+    ->execute([$userId, $pdfId, $isFavorite, $isRead, $offlineDownloadedAt]);
 
 $event = 'state_update';
 if (array_key_exists('is_favorite', $fields)) $event = 'favorite';

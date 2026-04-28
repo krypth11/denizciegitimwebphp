@@ -27,18 +27,18 @@ try {
         ];
         $where = ['1=1'];
         $params = [];
-        if ($filters['qualification_id'] !== '') { $where[] = 'p.qualification_id=?'; $params[] = $filters['qualification_id']; }
-        if ($filters['course_id'] !== '') { $where[] = 'p.course_id=?'; $params[] = $filters['course_id']; }
-        if ($filters['topic_id'] !== '') { $where[] = 'p.topic_id=?'; $params[] = $filters['topic_id']; }
+        if ($filters['qualification_id'] !== '') { $where[] = 'p.resource_qualification_id=?'; $params[] = $filters['qualification_id']; }
+        if ($filters['course_id'] !== '') { $where[] = 'p.resource_course_id=?'; $params[] = $filters['course_id']; }
+        if ($filters['topic_id'] !== '') { $where[] = 'p.resource_topic_id=?'; $params[] = $filters['topic_id']; }
         if ($filters['premium'] !== '') { $where[] = 'p.is_premium=?'; $params[] = ((int)$filters['premium'] === 1 ? 1 : 0); }
         if ($filters['active'] !== '') { $where[] = 'p.is_active=?'; $params[] = ((int)$filters['active'] === 1 ? 1 : 0); }
         if ($filters['search'] !== '') { $where[] = '(p.title LIKE ? OR p.original_file_name LIKE ?)'; $like = '%' . $filters['search'] . '%'; $params[] = $like; $params[] = $like; }
 
         $sql = 'SELECT p.*, q.name AS qualification_name, c.name AS course_name, t.name AS topic_name
                 FROM study_resource_pdfs p
-                INNER JOIN study_resource_qualifications q ON q.id = p.qualification_id
-                INNER JOIN study_resource_courses c ON c.id = p.course_id
-                LEFT JOIN study_resource_topics t ON t.id = p.topic_id
+                INNER JOIN study_resource_qualifications q ON q.id = p.resource_qualification_id
+                INNER JOIN study_resource_courses c ON c.id = p.resource_course_id
+                LEFT JOIN study_resource_topics t ON t.id = p.resource_topic_id
                 WHERE ' . implode(' AND ', $where) . ' ORDER BY p.created_at DESC';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
@@ -82,7 +82,7 @@ try {
             $pdfId = sr_uuid();
             $title = sr_clean(pathinfo((string)$meta['original_file_name'], PATHINFO_FILENAME), 191);
             if ($title === '') $title = 'PDF Kaynak';
-            $pdo->prepare('INSERT INTO study_resource_pdfs (id,qualification_id,course_id,topic_id,title,original_file_name,stored_file_name,file_path,file_url,mime_type,file_size_bytes,page_count,is_premium,is_active,uploaded_by,open_count,download_count,created_at,updated_at)
+            $pdo->prepare('INSERT INTO study_resource_pdfs (id,resource_qualification_id,resource_course_id,resource_topic_id,title,original_file_name,stored_file_name,file_path,file_url,mime_type,file_size_bytes,page_count,is_premium,is_active,uploaded_by,open_count,download_count,created_at,updated_at)
                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,NOW(),NOW())')
                 ->execute([
                     $pdfId, $qualificationId, $courseId, ($topicId !== '' ? $topicId : null), $title,

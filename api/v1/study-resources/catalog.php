@@ -14,12 +14,12 @@ if (!$qualification) {
     api_success('OK', ['qualification' => null, 'courses' => []]);
 }
 
-$cStmt = $pdo->prepare('SELECT * FROM study_resource_courses WHERE qualification_id=? AND is_active=1 ORDER BY name ASC');
+$cStmt = $pdo->prepare('SELECT * FROM study_resource_courses WHERE resource_qualification_id=? AND is_active=1 ORDER BY name ASC');
 $cStmt->execute([(string)$qualification['id']]);
 $courses = $cStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
 foreach ($courses as &$course) {
-    $tStmt = $pdo->prepare('SELECT * FROM study_resource_topics WHERE course_id=? AND is_active=1 ORDER BY name ASC');
+    $tStmt = $pdo->prepare('SELECT * FROM study_resource_topics WHERE resource_course_id=? AND is_active=1 ORDER BY name ASC');
     $tStmt->execute([(string)$course['id']]);
     $topics = $tStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     $course['topics'] = $topics;

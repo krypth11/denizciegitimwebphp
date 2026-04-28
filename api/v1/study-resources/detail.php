@@ -11,7 +11,7 @@ $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth,
 $pdfId = trim((string)($_GET['pdf_id'] ?? ''));
 if ($pdfId === '') api_error('pdf_id zorunludur.', 422);
 
-$stmt = $pdo->prepare('SELECT p.*, q.linked_qualification_id FROM study_resource_pdfs p INNER JOIN study_resource_qualifications q ON q.id=p.qualification_id WHERE p.id=? AND p.is_active=1 LIMIT 1');
+$stmt = $pdo->prepare('SELECT p.*, q.linked_qualification_id FROM study_resource_pdfs p INNER JOIN study_resource_qualifications q ON q.id=p.resource_qualification_id WHERE p.id=? AND p.is_active=1 LIMIT 1');
 $stmt->execute([$pdfId]);
 $pdf = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$pdf) api_error('PDF bulunamadÄ±.', 404);
@@ -22,8 +22,8 @@ if ((int)$pdf['is_premium'] === 1 && !$isPremium) api_error('Bu kaynak premium Ã
 
 $pdo->prepare('UPDATE study_resource_pdfs SET open_count=COALESCE(open_count,0)+1, updated_at=NOW() WHERE id=?')->execute([$pdfId]);
 sr_log_event($pdo, $userId, 'open', $pdfId, null);
-$pdo->prepare('INSERT INTO study_resource_user_states (id,pdf_id,user_id,last_opened_at,created_at,updated_at) VALUES (?,?,?,?,NOW(),NOW()) ON DUPLICATE KEY UPDATE last_opened_at=VALUES(last_opened_at), updated_at=NOW()')
-    ->execute([sr_uuid(), $pdfId, $userId, date('Y-m-d H:i:s')]);
+$pdo->prepare('INSERT INTO study_resource_user_states (user_id,pdf_id,last_opened_at,created_at,updated_at) VALUES (?,?,?,NOW(),NOW()) ON DUPLICATE KEY UPDATE last_opened_at=VALUES(last_opened_at), updated_at=NOW()')
+    ->execute([$userId, $pdfId, date('Y-m-d H:i:s')]);
 
 api_success('OK', [
     'pdf' => [
