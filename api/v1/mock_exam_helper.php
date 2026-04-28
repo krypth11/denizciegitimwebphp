@@ -388,6 +388,253 @@ function mock_exam_upsert_qualification_exam_settings(PDO $pdo, string $qualific
     return mock_exam_get_qualification_exam_settings($pdo, $qualificationId);
 }
 
+function mock_exam_get_course_exam_settings(PDO $pdo, string $qualificationId, string $courseId): array
+{
+    $qualificationId = trim($qualificationId);
+    $courseId = trim($courseId);
+
+    if ($qualificationId === '' || $courseId === '') {
+        throw new RuntimeException('qualification_id ve course_id zorunludur.');
+    }
+
+    $qualificationSettings = mock_exam_get_qualification_exam_settings($pdo, $qualificationId);
+    $defaults = [
+        'qualification_id' => $qualificationId,
+        'course_id' => $courseId,
+        'question_count' => (int)($qualificationSettings['question_count'] ?? 20),
+        'passing_score' => (float)($qualificationSettings['passing_score'] ?? 60),
+        'duration_minutes' => (int)($qualificationSettings['duration_minutes'] ?? 40),
+        'is_active' => (int)($qualificationSettings['is_active'] ?? 1) === 1 ? 1 : 0,
+    ];
+
+    $cols = get_table_columns($pdo, 'course_exam_settings');
+    if (!$cols) {
+        return $defaults;
+    }
+
+    $qualificationCol = mock_exam_pick($cols, ['qualification_id'], true);
+    $courseCol = mock_exam_pick($cols, ['course_id'], true);
+    $questionCountCol = mock_exam_pick($cols, ['question_count'], false);
+    $passingScoreCol = mock_exam_pick($cols, ['passing_score'], false);
+    $durationMinutesCol = mock_exam_pick($cols, ['duration_minutes'], false);
+    $isActiveCol = mock_exam_pick($cols, ['is_active'], false);
+
+    $select = [
+        ($questionCountCol ? ('s.' . mock_exam_q($questionCountCol)) : (string)$defaults['question_count']) . ' AS question_count',
+        ($passingScoreCol ? ('s.' . mock_exam_q($passingScoreCol)) : (string)$defaults['passing_score']) . ' AS passing_score',
+        ($durationMinutesCol ? ('s.' . mock_exam_q($durationMinutesCol)) : (string)$defaults['duration_minutes']) . ' AS duration_minutes',
+        ($isActiveCol ? ('s.' . mock_exam_q($isActiveCol)) : (string)$defaults['is_active']) . ' AS is_active',
+    ];
+
+    $sql = 'SELECT ' . implode(', ', $select)
+        . ' FROM `course_exam_settings` s'
+        . ' WHERE s.' . mock_exam_q($qualificationCol) . ' = ?'
+        . ' AND s.' . mock_exam_q($courseCol) . ' = ?'
+        . ' LIMIT 1';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$qualificationId, $courseId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    if (!$row) {
+        return $defaults;
+    }
+
+    return [
+        'qualification_id' => $qualificationId,
+        'course_id' => $courseId,
+        'question_count' => max(1, min(200, (int)($row['question_count'] ?? $defaults['question_count']))),
+        'passing_score' => max(0, min(100, (float)($row['passing_score'] ?? $defaults['passing_score']))),
+        'duration_minutes' => max(1, min(300, (int)($row['duration_minutes'] ?? $defaults['duration_minutes']))),
+        'is_active' => ((int)($row['is_active'] ?? $defaults['is_active']) === 1) ? 1 : 0,
+    ];
+}
+
+function mock_exam_ensure_course_exam_settings(PDO $pdo, string $qualificationId, string $courseId): array
+{
+    $qualificationId = trim($qualificationId);
+    $courseId = trim($courseId);
+
+    $qualificationSettings = mock_exam_get_qualification_exam_settings($pdo, $qualificationId);
+
+    if ($qualificationId === '' || $courseId === '') {
+        return [
+            'qualification_id' => $qualificationId,
+            'course_id' => $courseId,
+            'question_count' => (int)($qualificationSettings['question_count'] ?? 20),
+            'passing_score' => (float)($qualificationSettings['passing_score'] ?? 60),
+            'duration_minutes' => (int)($qualificationSettings['duration_minutes'] ?? 40),
+            'is_active' => ((int)($qualificationSettings['is_active'] ?? 1) === 1) ? 1 : 0,
+        ];
+    }
+
+    $cols = get_table_columns($pdo, 'course_exam_settings');
+    if (!$cols) {
+        return [
+            'qualification_id' => $qualificationId,
+            'course_id' => $courseId,
+            'question_count' => (int)($qualificationSettings['question_count'] ?? 20),
+            'passing_score' => (float)($qualificationSettings['passing_score'] ?? 60),
+            'duration_minutes' => (int)($qualificationSettings['duration_minutes'] ?? 40),
+            'is_active' => ((int)($qualificationSettings['is_active'] ?? 1) === 1) ? 1 : 0,
+        ];
+    }
+
+    $qualificationCol = mock_exam_pick($cols, ['qualification_id'], true);
+    $courseCol = mock_exam_pick($cols, ['course_id'], true);
+
+    $checkSql = 'SELECT 1 FROM `course_exam_settings` WHERE ' . mock_exam_q($qualificationCol) . ' = ? AND ' . mock_exam_q($courseCol) . ' = ? LIMIT 1';
+    $checkStmt = $pdo->prepare($checkSql);
+    $checkStmt->execute([$qualificationId, $courseId]);
+    $exists = (bool)$checkStmt->fetchColumn();
+
+    if (!$exists) {
+        $base = mock_exam_get_qualification_exam_settings($pdo, $qualificationId);
+        mock_exam_upsert_course_exam_settings($pdo, $qualificationId, $courseId, [
+            'question_count' => (int)($base['question_count'] ?? 20),
+            'passing_score' => (float)($base['passing_score'] ?? 60),
+            'duration_minutes' => (int)($base['duration_minutes'] ?? 40),
+            'is_active' => (int)($base['is_active'] ?? 1),
+        ]);
+    }
+
+    return mock_exam_get_course_exam_settings($pdo, $qualificationId, $courseId);
+}
+
+function mock_exam_upsert_course_exam_settings(PDO $pdo, string $qualificationId, string $courseId, array $input): array
+{
+    $qualificationId = trim($qualificationId);
+    $courseId = trim($courseId);
+
+    if ($qualificationId === '' || $courseId === '') {
+        throw new RuntimeException('qualification_id ve course_id zorunludur.');
+    }
+
+    $questionCount = max(1, min(200, (int)($input['question_count'] ?? 20)));
+    $passingScore = max(0.0, min(100.0, (float)($input['passing_score'] ?? 60)));
+    $durationMinutes = max(1, min(300, (int)($input['duration_minutes'] ?? 40)));
+    $isActive = ((int)($input['is_active'] ?? 1) === 1) ? 1 : 0;
+
+    $cols = get_table_columns($pdo, 'course_exam_settings');
+    if (!$cols) {
+        throw new RuntimeException('course_exam_settings tablosu bulunamadı.');
+    }
+
+    $idCol = mock_exam_pick($cols, ['id'], false);
+    $qualificationCol = mock_exam_pick($cols, ['qualification_id'], true);
+    $courseCol = mock_exam_pick($cols, ['course_id'], true);
+    $questionCountCol = mock_exam_pick($cols, ['question_count'], false);
+    $passingScoreCol = mock_exam_pick($cols, ['passing_score'], false);
+    $durationMinutesCol = mock_exam_pick($cols, ['duration_minutes'], false);
+    $isActiveCol = mock_exam_pick($cols, ['is_active'], false);
+    $createdAtCol = mock_exam_pick($cols, ['created_at'], false);
+    $updatedAtCol = mock_exam_pick($cols, ['updated_at'], false);
+
+    $checkStmt = $pdo->prepare('SELECT COUNT(*) FROM `course_exam_settings` WHERE ' . mock_exam_q($qualificationCol) . ' = ? AND ' . mock_exam_q($courseCol) . ' = ?');
+    $checkStmt->execute([$qualificationId, $courseId]);
+    $exists = ((int)$checkStmt->fetchColumn()) > 0;
+
+    if ($exists) {
+        $set = [];
+        $params = [];
+        if ($questionCountCol) {
+            $set[] = mock_exam_q($questionCountCol) . ' = ?';
+            $params[] = $questionCount;
+        }
+        if ($passingScoreCol) {
+            $set[] = mock_exam_q($passingScoreCol) . ' = ?';
+            $params[] = $passingScore;
+        }
+        if ($durationMinutesCol) {
+            $set[] = mock_exam_q($durationMinutesCol) . ' = ?';
+            $params[] = $durationMinutes;
+        }
+        if ($isActiveCol) {
+            $set[] = mock_exam_q($isActiveCol) . ' = ?';
+            $params[] = $isActive;
+        }
+        if ($updatedAtCol) {
+            $set[] = mock_exam_q($updatedAtCol) . ' = NOW()';
+        }
+
+        if ($set) {
+            $params[] = $qualificationId;
+            $params[] = $courseId;
+            $sql = 'UPDATE `course_exam_settings` SET ' . implode(', ', $set)
+                . ' WHERE ' . mock_exam_q($qualificationCol) . ' = ? AND ' . mock_exam_q($courseCol) . ' = ?';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+        }
+    } else {
+        $insCols = [mock_exam_q($qualificationCol), mock_exam_q($courseCol)];
+        $holders = ['?', '?'];
+        $params = [$qualificationId, $courseId];
+
+        if ($idCol) {
+            $insCols[] = mock_exam_q($idCol);
+            $holders[] = '?';
+            $params[] = generate_uuid();
+        }
+        if ($questionCountCol) {
+            $insCols[] = mock_exam_q($questionCountCol);
+            $holders[] = '?';
+            $params[] = $questionCount;
+        }
+        if ($passingScoreCol) {
+            $insCols[] = mock_exam_q($passingScoreCol);
+            $holders[] = '?';
+            $params[] = $passingScore;
+        }
+        if ($durationMinutesCol) {
+            $insCols[] = mock_exam_q($durationMinutesCol);
+            $holders[] = '?';
+            $params[] = $durationMinutes;
+        }
+        if ($isActiveCol) {
+            $insCols[] = mock_exam_q($isActiveCol);
+            $holders[] = '?';
+            $params[] = $isActive;
+        }
+        if ($createdAtCol) {
+            $insCols[] = mock_exam_q($createdAtCol);
+            $holders[] = 'NOW()';
+        }
+        if ($updatedAtCol) {
+            $insCols[] = mock_exam_q($updatedAtCol);
+            $holders[] = 'NOW()';
+        }
+
+        $sql = 'INSERT INTO `course_exam_settings` (' . implode(', ', $insCols) . ') VALUES (' . implode(', ', $holders) . ')';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+    }
+
+    return mock_exam_get_course_exam_settings($pdo, $qualificationId, $courseId);
+}
+
+function mock_exam_get_effective_exam_settings(PDO $pdo, string $qualificationId, ?string $courseId = null): array
+{
+    $qualificationId = trim($qualificationId);
+    $courseId = trim((string)$courseId);
+
+    $qualificationSettings = mock_exam_get_qualification_exam_settings($pdo, $qualificationId);
+    if ($courseId === '') {
+        return $qualificationSettings;
+    }
+
+    try {
+        return mock_exam_ensure_course_exam_settings($pdo, $qualificationId, $courseId);
+    } catch (Throwable $e) {
+        return [
+            'qualification_id' => $qualificationId,
+            'course_id' => $courseId,
+            'question_count' => (int)($qualificationSettings['question_count'] ?? 20),
+            'passing_score' => (float)($qualificationSettings['passing_score'] ?? 60),
+            'duration_minutes' => (int)($qualificationSettings['duration_minutes'] ?? 40),
+            'is_active' => ((int)($qualificationSettings['is_active'] ?? 1) === 1) ? 1 : 0,
+        ];
+    }
+}
+
 function mock_exam_get_attempt_schema(PDO $pdo): array
 {
     $cols = get_table_columns($pdo, 'mock_exam_attempts');
@@ -1619,9 +1866,9 @@ function mock_exam_create_attempt(PDO $pdo, string $userId, array $payload): arr
     }
     $course = is_array($courseValidation['course'] ?? null) ? $courseValidation['course'] : [];
 
-    $examSettings = mock_exam_get_qualification_exam_settings($pdo, $qualificationId);
+    $examSettings = mock_exam_get_effective_exam_settings($pdo, $qualificationId, $courseId);
     if ((int)($examSettings['is_active'] ?? 1) !== 1) {
-        throw new RuntimeException('Bu yeterlilik için deneme sınavı şu anda pasif.');
+        throw new RuntimeException('Bu ders için deneme sınavı şu anda pasif.');
     }
 
     $requested = max(1, (int)($examSettings['question_count'] ?? 20));

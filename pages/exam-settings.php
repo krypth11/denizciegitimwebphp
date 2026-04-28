@@ -15,7 +15,7 @@ include '../includes/sidebar.php';
     <div class="page-header">
         <div>
             <h2>Sınav Ayarları</h2>
-            <p class="text-muted mb-0">Yeterlilik bazlı deneme sınavı soru sayısı, geçme puanı ve süre ayarlarını yönetin.</p>
+            <p class="text-muted mb-0">Yeterlilik ve ders bazlı deneme sınavı soru sayısı, geçme puanı ve süre ayarlarını yönetin.</p>
         </div>
     </div>
 
@@ -68,32 +68,67 @@ $(function () {
         return Math.max(min, Math.min(max, n));
     }
 
-    function rowHtml(item) {
+    function buildInputs(item, disabled) {
         const q = clampInt(item.question_count, 1, 200, 20);
         const p = clampFloat(item.passing_score, 0, 100, 60);
         const d = clampInt(item.duration_minutes, 1, 300, 40);
         const isActive = Number(item.is_active) === 1;
+
+        return `
+            <td><input type="number" class="form-control form-control-sm js-question-count" min="1" max="200" value="${q}" ${disabled}></td>
+            <td><input type="number" class="form-control form-control-sm js-passing-score" min="0" max="100" step="0.01" value="${p}" ${disabled}></td>
+            <td><input type="number" class="form-control form-control-sm js-duration-minutes" min="1" max="300" value="${d}" ${disabled}></td>
+            <td>
+                <div class="form-check form-switch">
+                    <input class="form-check-input js-is-active" type="checkbox" ${isActive ? 'checked' : ''} ${disabled}>
+                </div>
+            </td>
+            <td class="text-end">
+                <button class="btn btn-primary btn-sm js-save-row" ${disabled}><i class="bi bi-save"></i> Kaydet</button>
+            </td>
+        `;
+    }
+
+    function qualificationRowHtml(item) {
         const disabled = Number(item.qualification_is_active) === 1 ? '' : 'disabled';
 
         return `
-            <tr data-qualification-id="${esc(item.qualification_id)}">
+            <tr data-row-type="qualification" data-qualification-id="${esc(item.qualification_id)}">
                 <td>
                     <div class="fw-semibold">${esc(item.qualification_name)}</div>
                     ${Number(item.qualification_is_active) === 1 ? '' : '<small class="text-muted">Yeterlilik pasif</small>'}
                 </td>
-                <td><input type="number" class="form-control form-control-sm js-question-count" min="1" max="200" value="${q}" ${disabled}></td>
-                <td><input type="number" class="form-control form-control-sm js-passing-score" min="0" max="100" step="0.01" value="${p}" ${disabled}></td>
-                <td><input type="number" class="form-control form-control-sm js-duration-minutes" min="1" max="300" value="${d}" ${disabled}></td>
-                <td>
-                    <div class="form-check form-switch">
-                        <input class="form-check-input js-is-active" type="checkbox" ${isActive ? 'checked' : ''} ${disabled}>
-                    </div>
-                </td>
-                <td class="text-end">
-                    <button class="btn btn-primary btn-sm js-save-row" ${disabled}><i class="bi bi-save"></i> Kaydet</button>
-                </td>
+                ${buildInputs(item, disabled)}
             </tr>
         `;
+    }
+
+    function courseRowHtml(qualification, course) {
+        const qualificationDisabled = Number(qualification.qualification_is_active) !== 1;
+        const disabled = qualificationDisabled ? 'disabled' : '';
+        const availableCount = Math.max(0, Number(course.available_count || 0));
+
+        return `
+            <tr data-row-type="course" data-qualification-id="${esc(qualification.qualification_id)}" data-course-id="${esc(course.course_id)}" class="exam-course-row">
+                <td>
+                    <div class="ps-4">
+                        <span class="text-info-emphasis">↳ ${esc(course.course_name || '-')}</span>
+                        <small class="text-muted d-block">Uygun soru: ${availableCount}</small>
+                    </div>
+                </td>
+                ${buildInputs(course, disabled)}
+            </tr>
+        `;
+    }
+
+    function rowsHtml(items) {
+        const out = [];
+        items.forEach((item) => {
+            out.push(qualificationRowHtml(item));
+            const courses = Array.isArray(item.courses) ? item.courses : [];
+            courses.forEach((course) => out.push(courseRowHtml(item, course)));
+        });
+        return out.join('');
     }
 
     async function loadRows() {
@@ -109,7 +144,7 @@ $(function () {
                 return;
             }
 
-            $tbody.html(items.map(rowHtml).join(''));
+            $tbody.html(rowsHtml(items));
         } catch (err) {
             $tbody.html('<tr><td colspan="6" class="text-center text-danger py-4">Ayarlar yüklenemedi.</td></tr>');
             await window.showAppAlert({ title: 'Hata', message: err?.message || 'Sınav ayarları alınamadı.', type: 'error' });
@@ -118,6 +153,7 @@ $(function () {
 
     async function saveRow($tr) {
         const qualificationId = String($tr.data('qualification-id') || '').trim();
+        const courseId = String($tr.data('course-id') || '').trim();
         const questionCount = clampInt($tr.find('.js-question-count').val(), 1, 200, NaN);
         const passingScore = clampFloat($tr.find('.js-passing-score').val(), 0, 100, NaN);
         const durationMinutes = clampInt($tr.find('.js-duration-minutes').val(), 1, 300, NaN);
@@ -139,6 +175,7 @@ $(function () {
                 dataType: 'json',
                 data: {
                     qualification_id: qualificationId,
+                    course_id: courseId || undefined,
                     question_count: questionCount,
                     passing_score: passingScore,
                     duration_minutes: durationMinutes,

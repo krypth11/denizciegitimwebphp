@@ -40,6 +40,26 @@ try {
         }
 
         $settings = mock_exam_ensure_qualification_exam_settings($pdo, $qualificationId);
+        $courses = mock_exam_get_qualification_courses_for_exam($pdo, $qualificationId);
+        $courseItems = [];
+        foreach ($courses as $course) {
+            $courseId = (string)($course['id'] ?? '');
+            if ($courseId === '') {
+                continue;
+            }
+            $courseSettings = mock_exam_get_effective_exam_settings($pdo, $qualificationId, $courseId);
+            $courseItems[] = [
+                'qualification_id' => $qualificationId,
+                'course_id' => $courseId,
+                'course_name' => (string)($course['name'] ?? ''),
+                'question_count' => (int)($courseSettings['question_count'] ?? 20),
+                'passing_score' => (float)($courseSettings['passing_score'] ?? 60),
+                'duration_minutes' => (int)($courseSettings['duration_minutes'] ?? 40),
+                'is_active' => (int)($courseSettings['is_active'] ?? 1),
+                'available_count' => (int)($course['available_count'] ?? 0),
+            ];
+        }
+
         $items[] = [
             'qualification_id' => $qualificationId,
             'qualification_name' => (string)($q['name'] ?? ''),
@@ -48,6 +68,7 @@ try {
             'duration_minutes' => (int)($settings['duration_minutes'] ?? 40),
             'is_active' => (int)($settings['is_active'] ?? 1),
             'qualification_is_active' => ((int)($q['qualification_is_active'] ?? 1) === 1) ? 1 : 0,
+            'courses' => $courseItems,
         ];
     }
 

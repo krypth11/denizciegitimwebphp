@@ -21,7 +21,7 @@ try {
         }
     }
 
-    $examSettings = mock_exam_get_qualification_exam_settings($pdo, $qualificationId);
+    $examSettings = mock_exam_get_effective_exam_settings($pdo, $qualificationId, $courseId !== '' ? $courseId : null);
     $counts = mock_exam_calculate_pool_counts($pdo, $userId, $qualificationId, $courseId !== '' ? $courseId : null);
     $coursesRaw = mock_exam_get_qualification_courses_for_exam($pdo, $qualificationId);
     $courses = array_map(static function (array $course): array {

@@ -18,6 +18,7 @@ try {
     }
 
     $qualificationId = trim((string)($payload['qualification_id'] ?? ''));
+    $courseId = trim((string)($payload['course_id'] ?? ''));
     if ($qualificationId === '') {
         api_error('qualification_id zorunludur.', 422);
     }
@@ -64,6 +65,32 @@ try {
     }
     if ($durationMinutes < 1 || $durationMinutes > 300) {
         api_error('duration_minutes 1 - 300 arasında olmalıdır.', 422);
+    }
+
+    if ($courseId !== '') {
+        $courseValidation = mock_exam_validate_course_for_qualification($pdo, $qualificationId, $courseId);
+        if (empty($courseValidation['is_valid'])) {
+            api_error((string)($courseValidation['message'] ?? 'Seçilen ders bu yeterliliğe ait değil.'), 422);
+        }
+
+        $updated = mock_exam_upsert_course_exam_settings($pdo, $qualificationId, $courseId, [
+            'question_count' => $questionCount,
+            'passing_score' => $passingScore,
+            'duration_minutes' => $durationMinutes,
+            'is_active' => $isActive,
+        ]);
+
+        api_success('Ders sınav ayarı güncellendi.', [
+            'item' => [
+                'qualification_id' => $qualificationId,
+                'course_id' => $courseId,
+                'question_count' => (int)($updated['question_count'] ?? 20),
+                'passing_score' => (float)($updated['passing_score'] ?? 60),
+                'duration_minutes' => (int)($updated['duration_minutes'] ?? 40),
+                'is_active' => (int)($updated['is_active'] ?? 1),
+            ],
+        ]);
+        return;
     }
 
     $updated = mock_exam_upsert_qualification_exam_settings($pdo, $qualificationId, [
