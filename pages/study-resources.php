@@ -49,11 +49,51 @@ include '../includes/sidebar.php';
         <div class="table-responsive"><table class="table table-hover"><thead><tr><th>PDF</th><th>Kapsam</th><th>Boyut</th><th>Sayfa</th><th>Durum</th><th>Sayaç</th><th>İşlem</th></tr></thead><tbody id="pdfBody"></tbody></table></div>
     </div></div>
 </div>
+
+<div class="modal fade" id="editPdfModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title">PDF Düzenle</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <form id="editPdfForm" autocomplete="off">
+                <div class="modal-body">
+                    <input type="hidden" id="edit_pdf_id" name="id">
+                    <div class="mb-3">
+                        <label class="form-label">PDF Başlığı</label>
+                        <input type="text" class="form-control" id="edit_pdf_title" name="title" maxlength="191" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Erişim</label>
+                        <select class="form-select" id="edit_pdf_premium" name="is_premium" required>
+                            <option value="0">Free</option>
+                            <option value="1">Premium</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label">Durum</label>
+                        <select class="form-select" id="edit_pdf_active" name="is_active" required>
+                            <option value="1">Aktif</option>
+                            <option value="0">Pasif</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">Vazgeç</button>
+                    <button type="submit" class="btn btn-sm btn-primary" id="editPdfSaveBtn">Kaydet</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 <?php $extra_js = <<<'JS'
 <script>
 $(function(){
     const api='/ajax/study-resources.php';
     let scope={qualifications:[],courses:[],topics:[]};
+    let currentRows = [];
+    const editModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('editPdfModal'));
 
     function renderSelect($el, items, placeholder, valueKey='id', labelKey='name', allowEmpty=true){
         const prev = $el.val();
@@ -99,10 +139,105 @@ $(function(){
         scope = r.data?.scope || {qualifications:[],courses:[],topics:[]};
         hydrateUploadScope();
         hydrateFilterScope();
-        const rows=r.data?.pdfs||[]; const $b=$('#pdfBody').empty();
+        const rows=r.data?.pdfs||[]; currentRows = rows;
+        const $b=$('#pdfBody').empty();
         if(!rows.length){ $b.html('<tr><td colspan="7" class="text-muted text-center py-4">Kayıt yok</td></tr>'); return; }
-        rows.forEach(x=>{ $b.append(`<tr><td>${x.title||'-'}</td><td>${x.qualification_name||'-'} / ${x.course_name||'-'} / ${x.topic_name||'-'}</td><td>${x.file_size_bytes||0}</td><td>${x.page_count||'-'}</td><td>${Number(x.is_premium)===1?'Premium':'Free'} / ${Number(x.is_active)===1?'Aktif':'Pasif'}</td><td>${x.open_count||0}/${x.download_count||0}</td><td><a class="btn btn-sm btn-outline-info" href="/api/v1/study-resources/download.php?pdf_id=${encodeURIComponent(x.id)}" target="_blank">İndir</a></td></tr>`); });
+        rows.forEach(x=>{
+            const premium = Number(x.is_premium)===1;
+            const active = Number(x.is_active)===1;
+            const viewUrl = `/api/v1/study-resources/download.php?pdf_id=${encodeURIComponent(x.id)}&inline=1`;
+            const downloadUrl = `/api/v1/study-resources/download.php?pdf_id=${encodeURIComponent(x.id)}`;
+            $b.append(`
+                <tr>
+                    <td>${x.title||'-'}</td>
+                    <td>${x.qualification_name||'-'} / ${x.course_name||'-'} / ${x.topic_name||'-'}</td>
+                    <td>${x.file_size_label || '0 B'}</td>
+                    <td>${x.page_count||'-'}</td>
+                    <td>
+                        <div class="d-flex flex-column gap-1">
+                            <span class="badge rounded-pill ${premium ? 'text-bg-warning' : 'text-bg-secondary'}">${premium?'Premium':'Free'}</span>
+                            <span class="badge rounded-pill ${active ? 'text-bg-success' : 'text-bg-dark'}">${active?'Aktif':'Pasif'}</span>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="small">
+                            <div>Açılma: ${Number(x.open_count||0)}</div>
+                            <div>İndirme: ${Number(x.download_count||0)}</div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="d-flex flex-wrap gap-1">
+                            <a class="btn btn-sm btn-secondary border-0" href="${viewUrl}" target="_blank" rel="noopener">Görüntüle</a>
+                            <a class="btn btn-sm btn-primary border-0" href="${downloadUrl}" target="_blank" rel="noopener">İndir</a>
+                            <button type="button" class="btn btn-sm btn-info border-0 btn-edit-pdf" data-id="${x.id}">Düzenle</button>
+                            <button type="button" class="btn btn-sm btn-danger border-0 btn-delete-pdf" data-id="${x.id}" data-title="${$('<div>').text(x.title||'').html()}">Sil</button>
+                        </div>
+                    </td>
+                </tr>
+            `);
+        });
     }
+
+    function findRowById(id){
+        return (currentRows||[]).find(r=>String(r.id||'')===String(id||'')) || null;
+    }
+
+    $(document).on('click', '.btn-edit-pdf', function(){
+        const id = String($(this).data('id')||'');
+        const row = findRowById(id);
+        if(!row) return;
+        $('#edit_pdf_id').val(id);
+        $('#edit_pdf_title').val(row.title||'');
+        $('#edit_pdf_premium').val(Number(row.is_premium)===1 ? '1':'0');
+        $('#edit_pdf_active').val(Number(row.is_active)===1 ? '1':'0');
+        editModal.show();
+    });
+
+    $('#editPdfForm').on('submit', async function(e){
+        e.preventDefault();
+        const payload = {
+            action: 'update_pdf',
+            id: $('#edit_pdf_id').val() || '',
+            title: ($('#edit_pdf_title').val()||'').trim(),
+            is_premium: $('#edit_pdf_premium').val() || '0',
+            is_active: $('#edit_pdf_active').val() || '1'
+        };
+        if(!payload.id || !payload.title){
+            return window.showAppAlert({title:'Uyarı',message:'PDF başlığı zorunludur.',type:'warning'});
+        }
+        const $btn = $('#editPdfSaveBtn').prop('disabled', true);
+        try{
+            const r = await window.appAjax({url:api,method:'POST',data:payload,dataType:'json'});
+            if(!r.success){
+                return window.showAppAlert({title:'Hata',message:r.message||'Güncelleme başarısız',type:'error'});
+            }
+            editModal.hide();
+            await window.showAppAlert({title:'Başarılı',message:r.message||'PDF güncellendi.',type:'success'});
+            await load();
+        } finally {
+            $btn.prop('disabled', false);
+        }
+    });
+
+    $(document).on('click', '.btn-delete-pdf', async function(){
+        const id = String($(this).data('id')||'');
+        const title = String($(this).data('title')||'PDF');
+        if(!id) return;
+        const ok = await window.showAppConfirm({
+            title:'PDF Sil',
+            message:`<b>${title}</b> kaydını silmek istediğinize emin misiniz?`,
+            type:'warning',
+            confirmText:'Sil',
+            cancelText:'İptal'
+        });
+        if(!ok) return;
+        const r = await window.appAjax({url:api,method:'POST',data:{action:'delete_pdf',id},dataType:'json'});
+        if(!r.success){
+            return window.showAppAlert({title:'Hata',message:r.message||'Silme başarısız',type:'error'});
+        }
+        await window.showAppAlert({title:'Başarılı',message:r.message||'PDF silindi.',type:'success'});
+        await load();
+    });
 
     $('#uploadQualification').on('change', function(){
         renderSelect($('#uploadCourse'), linkedCourses(this.value), 'Ders seçin', 'id', 'name', true);

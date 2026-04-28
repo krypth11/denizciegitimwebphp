@@ -86,3 +86,27 @@ function sr_log_event(PDO $pdo, string $userId, string $eventType, ?string $pdfI
     $pdo->prepare('INSERT INTO study_resource_user_events (user_id,pdf_id,event_type,query_text,created_at) VALUES (?,?,?,?,NOW())')
         ->execute([$userId, $pdfId, $eventType, $queryText]);
 }
+
+function sr_file_size_label($bytes): string
+{
+    $size = (float)$bytes;
+    if (!is_finite($size) || $size <= 0) {
+        return '0 B';
+    }
+
+    $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    $idx = 0;
+    while ($size >= 1024 && $idx < count($units) - 1) {
+        $size /= 1024;
+        $idx++;
+    }
+
+    if ($idx === 0) {
+        return (string)round($size) . ' ' . $units[$idx];
+    }
+    if ($idx === 1) {
+        return (string)round($size) . ' ' . $units[$idx];
+    }
+
+    return number_format($size, 2, '.', '') . ' ' . $units[$idx];
+}

@@ -7,6 +7,7 @@ $auth = api_require_auth($pdo);
 $userId = (string)($auth['user']['id'] ?? '');
 $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'study_resources.download');
 $pdfId = trim((string)($_GET['pdf_id'] ?? ''));
+$inline = ((int)($_GET['inline'] ?? 0) === 1);
 if ($pdfId === '') { http_response_code(422); echo 'pdf_id zorunludur.'; exit; }
 
 $stmt = $pdo->prepare('SELECT p.*, q.linked_qualification_id FROM study_resource_pdfs p INNER JOIN study_resource_qualifications q ON q.id=p.resource_qualification_id WHERE p.id=? AND p.is_active=1 LIMIT 1');
@@ -22,13 +23,21 @@ if (!$abs || !is_file($abs)) { http_response_code(404); echo 'Dosya bulunamadı.
 
 if (strtolower((string)pathinfo($abs, PATHINFO_EXTENSION)) !== 'pdf') { http_response_code(404); echo 'Dosya bulunamadı.'; exit; }
 
-$pdo->prepare('UPDATE study_resource_pdfs SET download_count=COALESCE(download_count,0)+1, updated_at=NOW() WHERE id=?')->execute([$pdfId]);
-sr_log_event($pdo, $userId, 'download', $pdfId, null);
+if ($inline) {
+    $pdo->prepare('UPDATE study_resource_pdfs SET open_count=COALESCE(open_count,0)+1, updated_at=NOW() WHERE id=?')->execute([$pdfId]);
+    sr_log_event($pdo, $userId, 'open', $pdfId, null);
+} else {
+    $pdo->prepare('UPDATE study_resource_pdfs SET download_count=COALESCE(download_count,0)+1, updated_at=NOW() WHERE id=?')->execute([$pdfId]);
+    sr_log_event($pdo, $userId, 'download', $pdfId, null);
+}
 
 header_remove('Content-Type');
 header('Content-Type: application/pdf');
 header('Content-Length: ' . filesize($abs));
-header('Content-Disposition: inline; filename="' . rawurlencode((string)($pdf['original_file_name'] ?: 'document.pdf')) . '"');
+$filename = (string)($pdf['original_file_name'] ?: 'document.pdf');
+$safeFilename = str_replace(['"', "\r", "\n"], '', $filename);
+$dispositionType = $inline ? 'inline' : 'attachment';
+header('Content-Disposition: ' . $dispositionType . '; filename="' . rawurlencode($safeFilename) . '"');
 header('X-Content-Type-Options: nosniff');
 readfile($abs);
 exit;

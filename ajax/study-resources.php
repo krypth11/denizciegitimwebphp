@@ -86,6 +86,11 @@ try {
         $stmt->execute($params);
         $pdfs = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
+        foreach ($pdfs as &$pdf) {
+            $pdf['file_size_label'] = sr_file_size_label($pdf['file_size_bytes'] ?? 0);
+        }
+        unset($pdf);
+
         sr_admin_json(true, '', [
             'scope' => [
                 'qualifications' => $pdo->query('SELECT * FROM study_resource_qualifications ORDER BY name ASC')->fetchAll(PDO::FETCH_ASSOC) ?: [],
@@ -203,30 +208,59 @@ try {
         ]);
     }
 
-    if ($action === 'pdf_update') {
+    if ($action === 'update_pdf' || $action === 'pdf_update') {
         $id = trim((string)($_POST['id'] ?? ''));
         if ($id === '') sr_admin_json(false, 'id zorunludur.', [], 422);
         $parts = [];
         $vals = [];
-        if (isset($_POST['title'])) { $parts[] = 'title=?'; $vals[] = sr_clean($_POST['title'], 191); }
+        if (isset($_POST['title'])) {
+            $title = sr_clean($_POST['title'], 191);
+            if ($title === '') {
+                sr_admin_json(false, 'PDF başlığı zorunludur.', [], 422);
+            }
+            $parts[] = 'title=?';
+            $vals[] = $title;
+        }
         if (isset($_POST['is_premium'])) { $parts[] = 'is_premium=?'; $vals[] = sr_bool($_POST['is_premium']); }
         if (isset($_POST['is_active'])) { $parts[] = 'is_active=?'; $vals[] = sr_bool($_POST['is_active']); }
         if (!$parts) sr_admin_json(false, 'Güncellenecek alan yok.', [], 422);
         $vals[] = $id;
-        $pdo->prepare('UPDATE study_resource_pdfs SET ' . implode(',', $parts) . ', updated_at=NOW() WHERE id=?')->execute($vals);
+        $stmt = $pdo->prepare('UPDATE study_resource_pdfs SET ' . implode(',', $parts) . ', updated_at=NOW() WHERE id=?');
+        $stmt->execute($vals);
+        if ((int)$stmt->rowCount() <= 0) {
+            $exists = $pdo->prepare('SELECT COUNT(*) FROM study_resource_pdfs WHERE id=?');
+            $exists->execute([$id]);
+            if ((int)$exists->fetchColumn() <= 0) {
+                sr_admin_json(false, 'PDF bulunamadı.', [], 404);
+            }
+        }
         sr_admin_json(true, 'PDF güncellendi.');
     }
 
-    if ($action === 'pdf_delete') {
+    if ($action === 'delete_pdf' || $action === 'pdf_delete') {
         $id = trim((string)($_POST['id'] ?? ''));
         if ($id === '') sr_admin_json(false, 'id zorunludur.', [], 422);
         $s = $pdo->prepare('SELECT file_path FROM study_resource_pdfs WHERE id=? LIMIT 1');
         $s->execute([$id]);
         $path = (string)($s->fetchColumn() ?: '');
+        if ($path === '') {
+            sr_admin_json(false, 'PDF bulunamadı.', [], 404);
+        }
         $pdo->prepare('DELETE FROM study_resource_user_states WHERE pdf_id=?')->execute([$id]);
         $pdo->prepare('DELETE FROM study_resource_user_events WHERE pdf_id=?')->execute([$id]);
         $pdo->prepare('DELETE FROM study_resource_pdfs WHERE id=?')->execute([$id]);
-        if ($path !== '') { $abs = sr_safe_abs_from_rel($path); if ($abs && is_file($abs)) @unlink($abs); }
+        if ($path !== '') {
+            $abs = sr_safe_abs_from_rel($path);
+            if ($abs && is_file($abs)) {
+                if (!@unlink($abs)) {
+                    error_log('[study-resources.ajax] action=' . $action
+                        . ' message=Dosya fiziksel olarak silinemedi'
+                        . ' file=' . __FILE__
+                        . ' line=' . __LINE__
+                        . ' pdf_id=' . $id);
+                }
+            }
+        }
         sr_admin_json(true, 'PDF silindi.');
     }
 
