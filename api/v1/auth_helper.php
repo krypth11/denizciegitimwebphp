@@ -1704,7 +1704,12 @@ function api_send_email_smtp(string $toEmail, string $subject, string $bodyText)
 
 function api_send_email_otp_mail(string $email, string $code, string $purpose): void
 {
-    $purposeText = $purpose === 'guest_convert' ? 'hesap tamamlama' : 'kayıt doğrulama';
+    $purposeText = 'kayıt doğrulama';
+    if ($purpose === 'guest_convert') {
+        $purposeText = 'hesap tamamlama';
+    } elseif ($purpose === 'password_reset') {
+        $purposeText = 'şifre sıfırlama';
+    }
     $expiryMin = (int)round((defined('EMAIL_OTP_EXPIRY_SECONDS') ? EMAIL_OTP_EXPIRY_SECONDS : 600) / 60);
     $subject = 'Denizci Eğitim - Email Doğrulama Kodu';
     $body = "Merhaba,\r\n\r\n"
@@ -1767,8 +1772,162 @@ function api_resend_email_otp(PDO $pdo, string $email, string $purpose): array
 function api_validate_email_verification_purpose(string $purpose): string
 {
     $purpose = strtolower(trim($purpose));
-    if (!in_array($purpose, ['signup', 'guest_convert'], true)) {
+    if (!in_array($purpose, ['signup', 'guest_convert', 'password_reset'], true)) {
         api_error('Geçersiz doğrulama amacı.', 422);
     }
     return $purpose;
+}
+
+function api_find_password_reset_user_by_email(PDO $pdo, string $email): ?array
+{
+    return api_find_active_real_user_by_email($pdo, $email);
+}
+
+function api_increment_email_otp_attempt(PDO $pdo, string $recordId): void
+{
+    $schema = api_get_email_verification_schema($pdo);
+    if (!$schema['attempt_count']) {
+        return;
+    }
+
+    $sql = 'UPDATE `' . $schema['table'] . '` '
+        . 'SET `' . $schema['attempt_count'] . '` = COALESCE(`' . $schema['attempt_count'] . '`, 0) + 1 '
+        . 'WHERE `' . $schema['id'] . '` = ?';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$recordId]);
+}
+
+function api_validate_password_reset_otp(PDO $pdo, string $email, string $code): array
+{
+    $purpose = 'password_reset';
+    $record = api_find_latest_active_email_otp($pdo, $email, $purpose);
+    if (!$record) {
+        api_error('Aktif şifre sıfırlama kodu bulunamadı.', 404);
+    }
+
+    if (!empty($record['used_at'])) {
+        api_error('Kod daha önce kullanılmış.', 422);
+    }
+
+    $attemptCount = (int)($record['attempt_count'] ?? 0);
+    $maxAttempts = defined('EMAIL_OTP_MAX_ATTEMPTS') ? (int)EMAIL_OTP_MAX_ATTEMPTS : 5;
+    if ($attemptCount >= $maxAttempts) {
+        api_error('Çok fazla yanlış deneme yapıldı.', 429);
+    }
+
+    $expiresAt = (string)($record['expires_at'] ?? '');
+    if ($expiresAt !== '' && strtotime($expiresAt) <= time()) {
+        api_error('Kodun süresi doldu.', 422);
+    }
+
+    $valid = password_verify($code, (string)($record['code_hash'] ?? ''));
+    if (!$valid) {
+        api_increment_email_otp_attempt($pdo, (string)$record['id']);
+        api_error('Geçersiz kod.', 422);
+    }
+
+    return $record;
+}
+
+function api_request_password_reset_otp(PDO $pdo, string $email): array
+{
+    $normalizedEmail = strtolower(trim($email));
+    $user = api_find_password_reset_user_by_email($pdo, $normalizedEmail);
+    if (!$user || empty($user['id'])) {
+        api_error('Bu e-posta adresiyle kayıtlı kullanıcı bulunamadı.', 404);
+    }
+
+    $code = api_generate_email_otp_code();
+    $codeHash = api_hash_email_otp($code);
+
+    try {
+        $pdo->beginTransaction();
+        api_insert_email_otp_record($pdo, (string)$user['id'], $normalizedEmail, 'password_reset', $codeHash, true);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw new RuntimeException('otp_db_insert_failed: ' . $e->getMessage(), 0, $e);
+    }
+
+    api_send_email_otp_mail($normalizedEmail, $code, 'password_reset');
+
+    return [
+        'success' => true,
+        'email' => $normalizedEmail,
+    ];
+}
+
+function api_verify_password_reset_otp(PDO $pdo, string $email, string $code): array
+{
+    api_validate_password_reset_otp($pdo, $email, $code);
+
+    return [
+        'success' => true,
+        'reset_allowed' => true,
+    ];
+}
+
+function api_complete_password_reset(PDO $pdo, string $email, string $code, string $password): array
+{
+    $normalizedEmail = strtolower(trim($email));
+    $user = api_find_password_reset_user_by_email($pdo, $normalizedEmail);
+    if (!$user || empty($user['id'])) {
+        api_error('Bu e-posta adresiyle kayıtlı kullanıcı bulunamadı.', 404);
+    }
+
+    $record = api_validate_password_reset_otp($pdo, $normalizedEmail, $code);
+    if ((string)($record['user_id'] ?? '') !== (string)$user['id']) {
+        api_error('Kod doğrulaması başarısız.', 422);
+    }
+
+    $passwordHash = hash_password($password);
+    if (!is_string($passwordHash) || trim($passwordHash) === '') {
+        api_error('Şifre güncellenemedi.', 500);
+    }
+
+    $profileSchema = api_get_profile_schema($pdo);
+    if (!$profileSchema['password']) {
+        api_error('Şifre alanı sistemde bulunamadı.', 500);
+    }
+
+    $otpSchema = api_get_email_verification_schema($pdo);
+
+    try {
+        $pdo->beginTransaction();
+
+        $set = ['`' . $profileSchema['password'] . '` = ?'];
+        $params = [$passwordHash];
+        if ($profileSchema['updated_at']) {
+            $set[] = '`' . $profileSchema['updated_at'] . '` = NOW()';
+        }
+        $params[] = (string)$user['id'];
+
+        $sqlPassword = 'UPDATE `' . $profileSchema['table'] . '` SET ' . implode(', ', $set)
+            . ' WHERE `' . $profileSchema['id'] . '` = ?';
+        $stmtPassword = $pdo->prepare($sqlPassword);
+        $stmtPassword->execute($params);
+
+        $sqlUse = 'UPDATE `' . $otpSchema['table'] . '` '
+            . 'SET `' . $otpSchema['used_at'] . '` = NOW() '
+            . 'WHERE `' . $otpSchema['id'] . '` = ? AND `' . $otpSchema['used_at'] . '` IS NULL';
+        $stmtUse = $pdo->prepare($sqlUse);
+        $stmtUse->execute([(string)$record['id']]);
+
+        $token = api_create_user_token($pdo, (string)$user['id']);
+        api_update_last_sign_in($pdo, (string)$user['id']);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    return [
+        'token' => $token,
+        'user' => api_build_auth_user_payload($pdo, (string)$user['id']),
+    ];
 }
