@@ -1602,7 +1602,7 @@ function api_get_smtp_debug_meta(): array
     ];
 }
 
-function api_send_email_smtp(string $toEmail, string $subject, string $bodyText): void
+function api_send_email_smtp(string $toEmail, string $subject, string $bodyText, ?string $bodyHtml = null): void
 {
     $cfg = api_get_smtp_config();
     $transportHost = $cfg['encryption'] === 'ssl' ? ('ssl://' . $cfg['host']) : $cfg['host'];
@@ -1661,21 +1661,46 @@ function api_send_email_smtp(string $toEmail, string $subject, string $bodyText)
         $step = 'data_failed';
         api_smtp_cmd($socket, 'DATA', [354]);
 
-    $headers = [
-        'From: ' . $cfg['from_name'] . ' <' . $cfg['from_email'] . '>',
-        'To: <' . $toEmail . '>',
-        'Subject: =?UTF-8?B?' . base64_encode($subject) . '?=',
-        'MIME-Version: 1.0',
-        'Content-Type: text/plain; charset=UTF-8',
-        'Content-Transfer-Encoding: 8bit',
-    ];
+        $headers = [
+            'From: ' . $cfg['from_name'] . ' <' . $cfg['from_email'] . '>',
+            'To: <' . $toEmail . '>',
+            'Subject: =?UTF-8?B?' . base64_encode($subject) . '?=',
+            'MIME-Version: 1.0',
+        ];
 
-        $normalizedBody = str_replace(["\r\n", "\r"], "\n", $bodyText);
-        $normalizedBody = str_replace("\n", "\r\n", $normalizedBody);
+        $normalizedBodyText = str_replace(["\r\n", "\r"], "\n", $bodyText);
+        $normalizedBodyText = str_replace("\n", "\r\n", $normalizedBodyText);
+
+        $normalizedBodyHtml = null;
+        if ($bodyHtml !== null && trim($bodyHtml) !== '') {
+            $normalizedBodyHtml = str_replace(["\r\n", "\r"], "\n", $bodyHtml);
+            $normalizedBodyHtml = str_replace("\n", "\r\n", $normalizedBodyHtml);
+        }
+
+        if ($normalizedBodyHtml !== null) {
+            $boundary = '=_DenizciEgitim_' . bin2hex(random_bytes(12));
+            $headers[] = 'Content-Type: multipart/alternative; boundary="' . $boundary . '"';
+
+            $messageBody = ''
+                . '--' . $boundary . "\r\n"
+                . "Content-Type: text/plain; charset=UTF-8\r\n"
+                . "Content-Transfer-Encoding: 8bit\r\n\r\n"
+                . $normalizedBodyText . "\r\n"
+                . '--' . $boundary . "\r\n"
+                . "Content-Type: text/html; charset=UTF-8\r\n"
+                . "Content-Transfer-Encoding: 8bit\r\n\r\n"
+                . $normalizedBodyHtml . "\r\n"
+                . '--' . $boundary . '--';
+        } else {
+            $headers[] = 'Content-Type: text/plain; charset=UTF-8';
+            $headers[] = 'Content-Transfer-Encoding: 8bit';
+            $messageBody = $normalizedBodyText;
+        }
+
         // Dot-stuffing: satır başındaki '.' karakterlerini kaçır
-        $normalizedBody = preg_replace('/(^|\r\n)\./', '$1..', $normalizedBody) ?? $normalizedBody;
+        $messageBody = preg_replace('/(^|\r\n)\./', '$1..', $messageBody) ?? $messageBody;
 
-        $data = implode("\r\n", $headers) . "\r\n\r\n" . $normalizedBody . "\r\n.";
+        $data = implode("\r\n", $headers) . "\r\n\r\n" . $messageBody . "\r\n.";
         fwrite($socket, $data . "\r\n");
         api_smtp_expect($socket, [250]);
 
@@ -1702,23 +1727,109 @@ function api_send_email_smtp(string $toEmail, string $subject, string $bodyText)
     }
 }
 
+function api_build_otp_email_template(string $code, string $purpose): array
+{
+    $normalizedPurpose = strtolower(trim($purpose));
+    $expiryMin = (int)round((defined('EMAIL_OTP_EXPIRY_SECONDS') ? EMAIL_OTP_EXPIRY_SECONDS : 600) / 60);
+    if ($expiryMin <= 0) {
+        $expiryMin = 10;
+    }
+
+    $subject = 'Denizci Eğitim – Hesap Doğrulama Kodu';
+    $title = 'Hesabınızı doğrulayın';
+    $description = 'Denizci Eğitim hesabınızı aktifleştirmek için aşağıdaki kodu kullanın.';
+
+    if ($normalizedPurpose === 'guest_convert') {
+        $subject = 'Denizci Eğitim – Hesap Tamamlama Kodu';
+        $title = 'Hesabınızı tamamlayın';
+        $description = 'Misafir hesabınızı kalıcı hesaba dönüştürmek için aşağıdaki kodu kullanın.';
+    } elseif ($normalizedPurpose === 'password_reset') {
+        $subject = 'Denizci Eğitim – Şifre Sıfırlama Kodu';
+        $title = 'Şifrenizi sıfırlayın';
+        $description = 'Şifrenizi yenilemek için aşağıdaki doğrulama kodunu kullanın.';
+    }
+
+    $safeCode = htmlspecialchars(trim($code), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+    $text = $title . "\r\n\r\n"
+        . $description . "\r\n\r\n"
+        . 'Doğrulama kodunuz: ' . trim($code) . "\r\n"
+        . 'Bu kod ' . $expiryMin . " dakika geçerlidir ve tek kullanımlıktır.\r\n"
+        . 'Bu işlemi siz talep etmediyseniz bu e-postayı dikkate almayın.\r\n\r\n'
+        . "Denizci Eğitim\r\n"
+        . 'Denizcilik sınavlarına hazırlık platformu';
+
+    $html = '<!doctype html>'
+        . '<html lang="tr">'
+        . '<head>'
+        . '  <meta charset="UTF-8">'
+        . '  <meta name="viewport" content="width=device-width, initial-scale=1.0">'
+        . '  <title>' . htmlspecialchars($subject, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</title>'
+        . '</head>'
+        . '<body style="margin:0;padding:0;background:#f1f6ff;background-image:linear-gradient(180deg,#f3f8ff 0%,#e8f1ff 100%);font-family:Arial,Helvetica,sans-serif;color:#0f172a;">'
+        . '  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f1f6ff;background-image:linear-gradient(180deg,#f3f8ff 0%,#e8f1ff 100%);padding:28px 12px;">'
+        . '    <tr>'
+        . '      <td align="center">'
+        . '        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:620px;background:#ffffff;border-radius:16px;border:1px solid #dbe7ff;box-shadow:0 12px 28px rgba(15,23,42,0.08);overflow:hidden;">'
+        . '          <tr>'
+        . '            <td align="center" style="padding:28px 24px 12px 24px;">'
+        . '              <img src="https://admin.denizciegitim.com/images/logo-dark.png" width="190" alt="Denizci Eğitim" style="display:block;border:0;outline:none;text-decoration:none;max-width:190px;height:auto;">'
+        . '            </td>'
+        . '          </tr>'
+        . '          <tr>'
+        . '            <td style="padding:8px 28px 0 28px;text-align:center;">'
+        . '              <h1 style="margin:0;font-size:24px;line-height:1.35;color:#0b3a80;font-weight:700;">' . htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</h1>'
+        . '            </td>'
+        . '          </tr>'
+        . '          <tr>'
+        . '            <td style="padding:12px 28px 0 28px;text-align:center;">'
+        . '              <p style="margin:0;font-size:15px;line-height:1.65;color:#334155;">' . htmlspecialchars($description, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>'
+        . '            </td>'
+        . '          </tr>'
+        . '          <tr>'
+        . '            <td align="center" style="padding:22px 28px 0 28px;">'
+        . '              <div style="display:inline-block;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:16px 28px;font-size:36px;line-height:1.2;font-weight:800;letter-spacing:8px;color:#0b3a80;">' . $safeCode . '</div>'
+        . '            </td>'
+        . '          </tr>'
+        . '          <tr>'
+        . '            <td style="padding:18px 28px 0 28px;text-align:center;">'
+        . '              <p style="margin:0;font-size:14px;line-height:1.7;color:#1e3a8a;font-weight:600;">Bu kod ' . $expiryMin . ' dakika geçerlidir ve tek kullanımlıktır.</p>'
+        . '            </td>'
+        . '          </tr>'
+        . '          <tr>'
+        . '            <td style="padding:10px 28px 0 28px;text-align:center;">'
+        . '              <p style="margin:0;font-size:13px;line-height:1.7;color:#64748b;">Bu işlemi siz talep etmediyseniz bu e-postayı dikkate almayın.</p>'
+        . '            </td>'
+        . '          </tr>'
+        . '          <tr>'
+        . '            <td style="padding:22px 28px 28px 28px;text-align:center;">'
+        . '              <p style="margin:0;font-size:14px;line-height:1.6;color:#0f172a;font-weight:700;">Denizci Eğitim</p>'
+        . '              <p style="margin:2px 0 0 0;font-size:12px;line-height:1.6;color:#64748b;">Denizcilik sınavlarına hazırlık platformu</p>'
+        . '            </td>'
+        . '          </tr>'
+        . '        </table>'
+        . '      </td>'
+        . '    </tr>'
+        . '  </table>'
+        . '</body>'
+        . '</html>';
+
+    return [
+        'subject' => $subject,
+        'text' => $text,
+        'html' => $html,
+    ];
+}
+
 function api_send_email_otp_mail(string $email, string $code, string $purpose): void
 {
-    $purposeText = 'kayıt doğrulama';
-    if ($purpose === 'guest_convert') {
-        $purposeText = 'hesap tamamlama';
-    } elseif ($purpose === 'password_reset') {
-        $purposeText = 'şifre sıfırlama';
-    }
-    $expiryMin = (int)round((defined('EMAIL_OTP_EXPIRY_SECONDS') ? EMAIL_OTP_EXPIRY_SECONDS : 600) / 60);
-    $subject = 'Denizci Eğitim - Email Doğrulama Kodu';
-    $body = "Merhaba,\r\n\r\n"
-        . "{$purposeText} işlemi için doğrulama kodunuz: {$code}\r\n"
-        . "Bu kod {$expiryMin} dakika geçerlidir ve tek kullanımlıktır.\r\n"
-        . "Kodu siz talep etmediyseniz bu emaili dikkate almayın.\r\n\r\n"
-        . "Denizci Eğitim";
-
-    api_send_email_smtp($email, $subject, $body);
+    $template = api_build_otp_email_template($code, $purpose);
+    api_send_email_smtp(
+        $email,
+        (string)$template['subject'],
+        (string)$template['text'],
+        (string)$template['html']
+    );
 }
 
 function api_create_and_send_email_otp(PDO $pdo, string $userId, string $email, string $purpose): void
