@@ -45,6 +45,11 @@ include '../includes/sidebar.php';
                         <label class="form-label" for="mock_exam_question_count">Deneme soru sayısı</label>
                         <input type="number" class="form-control" id="mock_exam_question_count" name="mock_exam_question_count" min="1" max="200" step="1" required>
                     </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label" for="study_auto_advance_delay_ms">Doğru cevapta otomatik ilerleme bekleme süresi (ms)</label>
+                        <input type="number" class="form-control" id="study_auto_advance_delay_ms" name="study_auto_advance_delay_ms" min="100" max="5000" step="1" required>
+                        <div class="form-text">Örn: 500 = 0.5 saniye. Mobil ve portal çalışma modunda doğru cevap sonrası otomatik geçiş için kullanılır.</div>
+                    </div>
                 </div>
             </form>
         </div>
@@ -63,7 +68,8 @@ $(function () {
         free_daily_study_question_limit: { min: 1, max: 1000 },
         free_daily_mock_exam_limit: { min: 0, max: 100 },
         study_all_questions_max_limit: { min: 1, max: 2000 },
-        mock_exam_question_count: { min: 1, max: 200 }
+        mock_exam_question_count: { min: 1, max: 200 },
+        study_auto_advance_delay_ms: { min: 100, max: 5000 }
     };
 
     function clampInt(value, min, max, fallback) {

@@ -19,6 +19,7 @@ function app_runtime_settings_defaults(): array
         'free_daily_mock_exam_limit' => 3,
         'study_all_questions_max_limit' => 1000,
         'mock_exam_question_count' => 20,
+        'study_auto_advance_delay_ms' => 500,
     ];
 }
 
@@ -30,6 +31,7 @@ function app_runtime_settings_rules(): array
         'free_daily_mock_exam_limit' => ['min' => 0, 'max' => 100],
         'study_all_questions_max_limit' => ['min' => 1, 'max' => 2000],
         'mock_exam_question_count' => ['min' => 1, 'max' => 200],
+        'study_auto_advance_delay_ms' => ['min' => 100, 'max' => 5000],
     ];
 }
 
