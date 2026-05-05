@@ -51,12 +51,24 @@ include '../includes/sidebar.php';
                         <div class="form-text">Örn: 500 = 0.5 saniye. Mobil ve portal çalışma modunda doğru cevap sonrası otomatik geçiş için kullanılır.</div>
                     </div>
                     <div class="col-12 col-lg-6">
-                        <label class="form-label" for="rewarded_study_bonus">Rewarded reklam sonrası çalışma hakkı bonusu</label>
-                        <input type="number" class="form-control" id="rewarded_study_bonus" name="rewarded_study_bonus" min="0" max="1000" step="1" value="10" required>
+                        <label class="form-label" for="rewarded_study_bonus">Reklamla kazanılacak çalışma hakkı</label>
+                        <input type="number" class="form-control" id="rewarded_study_bonus" name="rewarded_study_bonus" min="1" max="100" step="1" value="10" required>
+                        <div class="form-text">Kullanıcı ödüllü reklam izlediğinde eklenecek çalışma soru hakkı.</div>
                     </div>
                     <div class="col-12 col-lg-6">
-                        <label class="form-label" for="rewarded_mock_exam_bonus">Rewarded reklam sonrası deneme hakkı bonusu</label>
-                        <input type="number" class="form-control" id="rewarded_mock_exam_bonus" name="rewarded_mock_exam_bonus" min="0" max="100" step="1" value="1" required>
+                        <label class="form-label" for="rewarded_mock_exam_bonus">Reklamla kazanılacak deneme hakkı</label>
+                        <input type="number" class="form-control" id="rewarded_mock_exam_bonus" name="rewarded_mock_exam_bonus" min="1" max="10" step="1" value="1" required>
+                        <div class="form-text">Kullanıcı ödüllü reklam izlediğinde eklenecek deneme hakkı.</div>
+                    </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label" for="rewarded_study_daily_ad_limit">Günlük çalışma reklamı izleme limiti</label>
+                        <input type="number" class="form-control" id="rewarded_study_daily_ad_limit" name="rewarded_study_daily_ad_limit" min="0" max="20" step="1" value="3" required>
+                        <div class="form-text">Ücretsiz/guest kullanıcı bir günde çalışma hakkı için en fazla kaç reklam izleyebilir. 0 = kapalı.</div>
+                    </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label" for="rewarded_mock_exam_daily_ad_limit">Günlük deneme reklamı izleme limiti</label>
+                        <input type="number" class="form-control" id="rewarded_mock_exam_daily_ad_limit" name="rewarded_mock_exam_daily_ad_limit" min="0" max="10" step="1" value="1" required>
+                        <div class="form-text">Ücretsiz/guest kullanıcı bir günde deneme hakkı için en fazla kaç reklam izleyebilir. 0 = kapalı.</div>
                     </div>
                 </div>
             </form>
@@ -78,8 +90,10 @@ $(function () {
         study_all_questions_max_limit: { min: 1, max: 2000 },
         mock_exam_question_count: { min: 1, max: 200 },
         study_auto_advance_delay_ms: { min: 100, max: 5000 },
-        rewarded_study_bonus: { min: 0, max: 1000 },
-        rewarded_mock_exam_bonus: { min: 0, max: 100 }
+        rewarded_study_bonus: { min: 1, max: 100 },
+        rewarded_mock_exam_bonus: { min: 1, max: 10 },
+        rewarded_study_daily_ad_limit: { min: 0, max: 20 },
+        rewarded_mock_exam_daily_ad_limit: { min: 0, max: 10 }
     };
 
     function clampInt(value, min, max, fallback) {

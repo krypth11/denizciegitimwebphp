@@ -22,6 +22,8 @@ function app_runtime_settings_defaults(): array
         'study_auto_advance_delay_ms' => 500,
         'rewarded_study_bonus' => 10,
         'rewarded_mock_exam_bonus' => 1,
+        'rewarded_study_daily_ad_limit' => 3,
+        'rewarded_mock_exam_daily_ad_limit' => 1,
     ];
 }
 
@@ -34,8 +36,10 @@ function app_runtime_settings_rules(): array
         'study_all_questions_max_limit' => ['min' => 1, 'max' => 2000],
         'mock_exam_question_count' => ['min' => 1, 'max' => 200],
         'study_auto_advance_delay_ms' => ['min' => 100, 'max' => 5000],
-        'rewarded_study_bonus' => ['min' => 0, 'max' => 1000],
-        'rewarded_mock_exam_bonus' => ['min' => 0, 'max' => 100],
+        'rewarded_study_bonus' => ['min' => 1, 'max' => 100],
+        'rewarded_mock_exam_bonus' => ['min' => 1, 'max' => 10],
+        'rewarded_study_daily_ad_limit' => ['min' => 0, 'max' => 20],
+        'rewarded_mock_exam_daily_ad_limit' => ['min' => 0, 'max' => 10],
     ];
 }
 
@@ -71,6 +75,16 @@ function get_rewarded_study_bonus() {
 function get_rewarded_mock_exam_bonus() {
     $row = get_runtime_settings_row();
     return (int) ($row['rewarded_mock_exam_bonus'] ?? 1);
+}
+
+function get_rewarded_study_daily_ad_limit() {
+    $row = get_runtime_settings_row();
+    return (int) ($row['rewarded_study_daily_ad_limit'] ?? 3);
+}
+
+function get_rewarded_mock_exam_daily_ad_limit() {
+    $row = get_runtime_settings_row();
+    return (int) ($row['rewarded_mock_exam_daily_ad_limit'] ?? 1);
 }
 
 function app_runtime_settings_allowed_keys(): array
