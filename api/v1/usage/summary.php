@@ -21,7 +21,13 @@ try {
     $subscriptionIsActive = usage_limits_is_subscription_active($subscription);
 
     $summary = usage_limits_get_summary($pdo, $userId, $qualificationId);
+    $runtime = get_runtime_settings_row();
     $computedIsPro = (bool)($summary['is_pro'] ?? false);
+
+    $summary['rewarded'] = [
+        'study_bonus' => (int)($runtime['rewarded_study_bonus'] ?? 10),
+        'exam_bonus' => (int)($runtime['rewarded_mock_exam_bonus'] ?? 1),
+    ];
 
     usage_limits_subscription_debug_log('usage_summary_computed', [
         'user_id' => $userId,

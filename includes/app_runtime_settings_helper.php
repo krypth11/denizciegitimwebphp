@@ -20,6 +20,8 @@ function app_runtime_settings_defaults(): array
         'study_all_questions_max_limit' => 1000,
         'mock_exam_question_count' => 20,
         'study_auto_advance_delay_ms' => 500,
+        'rewarded_study_bonus' => 10,
+        'rewarded_mock_exam_bonus' => 1,
     ];
 }
 
@@ -32,7 +34,43 @@ function app_runtime_settings_rules(): array
         'study_all_questions_max_limit' => ['min' => 1, 'max' => 2000],
         'mock_exam_question_count' => ['min' => 1, 'max' => 200],
         'study_auto_advance_delay_ms' => ['min' => 100, 'max' => 5000],
+        'rewarded_study_bonus' => ['min' => 0, 'max' => 1000],
+        'rewarded_mock_exam_bonus' => ['min' => 0, 'max' => 100],
     ];
+}
+
+function get_runtime_settings_row() {
+    global $db;
+
+    if ($db instanceof mysqli) {
+        $result = $db->query("SELECT * FROM app_runtime_settings WHERE id = 1");
+        if ($result instanceof mysqli_result) {
+            $row = $result->fetch_assoc();
+            if (is_array($row)) {
+                return $row;
+            }
+        }
+    }
+
+    if (isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
+        $stmt = $GLOBALS['pdo']->query('SELECT * FROM `app_runtime_settings` WHERE `id` = 1 LIMIT 1');
+        $row = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
+        if (is_array($row)) {
+            return $row;
+        }
+    }
+
+    return app_runtime_settings_defaults();
+}
+
+function get_rewarded_study_bonus() {
+    $row = get_runtime_settings_row();
+    return (int) ($row['rewarded_study_bonus'] ?? 10);
+}
+
+function get_rewarded_mock_exam_bonus() {
+    $row = get_runtime_settings_row();
+    return (int) ($row['rewarded_mock_exam_bonus'] ?? 1);
 }
 
 function app_runtime_settings_allowed_keys(): array

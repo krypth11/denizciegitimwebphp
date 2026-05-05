@@ -50,6 +50,14 @@ include '../includes/sidebar.php';
                         <input type="number" class="form-control" id="study_auto_advance_delay_ms" name="study_auto_advance_delay_ms" min="100" max="5000" step="1" required>
                         <div class="form-text">Örn: 500 = 0.5 saniye. Mobil ve portal çalışma modunda doğru cevap sonrası otomatik geçiş için kullanılır.</div>
                     </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label" for="rewarded_study_bonus">Rewarded reklam sonrası çalışma hakkı bonusu</label>
+                        <input type="number" class="form-control" id="rewarded_study_bonus" name="rewarded_study_bonus" min="0" max="1000" step="1" value="10" required>
+                    </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label" for="rewarded_mock_exam_bonus">Rewarded reklam sonrası deneme hakkı bonusu</label>
+                        <input type="number" class="form-control" id="rewarded_mock_exam_bonus" name="rewarded_mock_exam_bonus" min="0" max="100" step="1" value="1" required>
+                    </div>
                 </div>
             </form>
         </div>
@@ -69,7 +77,9 @@ $(function () {
         free_daily_mock_exam_limit: { min: 0, max: 100 },
         study_all_questions_max_limit: { min: 1, max: 2000 },
         mock_exam_question_count: { min: 1, max: 200 },
-        study_auto_advance_delay_ms: { min: 100, max: 5000 }
+        study_auto_advance_delay_ms: { min: 100, max: 5000 },
+        rewarded_study_bonus: { min: 0, max: 1000 },
+        rewarded_mock_exam_bonus: { min: 0, max: 100 }
     };
 
     function clampInt(value, min, max, fallback) {
