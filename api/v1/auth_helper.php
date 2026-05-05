@@ -1773,7 +1773,7 @@ function api_build_otp_email_template(string $code, string $purpose): array
         . '        <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:620px;background:#ffffff;border-radius:16px;border:1px solid #dbe7ff;box-shadow:0 12px 28px rgba(15,23,42,0.08);overflow:hidden;">'
         . '          <tr>'
         . '            <td align="center" style="padding:28px 24px 12px 24px;">'
-        . '              <div style="text-align:center; font-weight:600; font-size:18px; margin-bottom:12px;">Denizci Eğitim</div>'
+        . '              '
         . '              <img src="https://denizciegitim.com/images/logo-dark.png" alt="Denizci Eğitim" width="160" style="display:block; margin:0 auto 16px auto;" />'
         . '            </td>'
         . '          </tr>'
