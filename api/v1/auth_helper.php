@@ -325,6 +325,7 @@ function api_get_user_auth_provider_schema(PDO $pdo): array
         'provider_email' => $pick(['provider_email'], false),
         'provider_name' => $pick(['provider_name'], false),
         'provider_avatar' => $pick(['provider_avatar', 'provider_picture'], false),
+        'last_login_at' => $pick(['last_login_at'], false),
         'created_at' => $pick(['created_at'], false),
         'updated_at' => $pick(['updated_at'], false),
     ];
@@ -370,6 +371,10 @@ function api_create_user_auth_provider(PDO $pdo, string $userId, string $provide
         $columns[] = '`' . $schema['provider_avatar'] . '`';
         $holders[] = '?';
         $params[] = trim((string)($meta['provider_avatar'] ?? ''));
+    }
+    if ($schema['last_login_at']) {
+        $columns[] = '`' . $schema['last_login_at'] . '`';
+        $holders[] = 'NOW()';
     }
     if ($schema['created_at']) {
         $columns[] = '`' . $schema['created_at'] . '`';
