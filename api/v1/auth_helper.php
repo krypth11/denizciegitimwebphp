@@ -206,6 +206,185 @@ function api_create_user_token(PDO $pdo, string $userId): string
     return $token;
 }
 
+function api_get_google_allowed_client_ids(): array
+{
+    return [
+        '655007197479-6eng92bdtifnbh4r7nqipbgt4b2icsfn.apps.googleusercontent.com',
+        '655007197479-bojaf78fspimij2fev9onnb9k30v8ifn.apps.googleusercontent.com',
+    ];
+}
+
+function api_fetch_google_tokeninfo(string $idToken): ?array
+{
+    $url = 'https://oauth2.googleapis.com/tokeninfo?id_token=' . rawurlencode($idToken);
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_HTTPHEADER => ['Accept: application/json'],
+        ]);
+        $body = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if (!is_string($body) || $body === '' || $status !== 200) {
+            return null;
+        }
+
+        $decoded = json_decode($body, true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'timeout' => 10,
+            'header' => "Accept: application/json\r\n",
+            'ignore_errors' => true,
+        ],
+    ]);
+    $body = @file_get_contents($url, false, $context);
+    if (!is_string($body) || trim($body) === '') {
+        return null;
+    }
+
+    $status = 0;
+    if (isset($http_response_header) && is_array($http_response_header) && isset($http_response_header[0])) {
+        if (preg_match('/\s(\d{3})\s/', (string)$http_response_header[0], $m)) {
+            $status = (int)$m[1];
+        }
+    }
+    if ($status !== 200) {
+        return null;
+    }
+
+    $decoded = json_decode($body, true);
+    return is_array($decoded) ? $decoded : null;
+}
+
+function api_verify_google_id_token(string $idToken): ?array
+{
+    $payload = api_fetch_google_tokeninfo($idToken);
+    if (!$payload) {
+        return null;
+    }
+
+    $aud = trim((string)($payload['aud'] ?? ''));
+    if ($aud === '' || !in_array($aud, api_get_google_allowed_client_ids(), true)) {
+        return null;
+    }
+
+    $sub = trim((string)($payload['sub'] ?? ''));
+    if ($sub === '') {
+        return null;
+    }
+
+    $email = strtolower(trim((string)($payload['email'] ?? '')));
+    $emailVerifiedRaw = $payload['email_verified'] ?? null;
+    $emailVerified = in_array($emailVerifiedRaw, [true, 1, '1', 'true', 'TRUE'], true);
+
+    return [
+        'sub' => $sub,
+        'email' => $email,
+        'email_verified' => $emailVerified,
+        'name' => trim((string)($payload['name'] ?? '')),
+        'picture' => trim((string)($payload['picture'] ?? '')),
+    ];
+}
+
+function api_get_user_auth_provider_schema(PDO $pdo): array
+{
+    $columns = get_table_columns($pdo, 'user_auth_providers');
+    if (!$columns) {
+        throw new RuntimeException('user_auth_providers tablosu okunamadı.');
+    }
+
+    $pick = static function (array $candidates, bool $required = true) use ($columns): ?string {
+        foreach ($candidates as $candidate) {
+            if (in_array($candidate, $columns, true)) {
+                return $candidate;
+            }
+        }
+
+        if ($required) {
+            throw new RuntimeException('Gerekli provider kolonu bulunamadı: ' . implode(', ', $candidates));
+        }
+
+        return null;
+    };
+
+    return [
+        'table' => 'user_auth_providers',
+        'id' => $pick(['id']),
+        'user_id' => $pick(['user_id']),
+        'provider' => $pick(['provider']),
+        'provider_user_id' => $pick(['provider_user_id']),
+        'provider_email' => $pick(['provider_email'], false),
+        'provider_name' => $pick(['provider_name'], false),
+        'provider_avatar' => $pick(['provider_avatar', 'provider_picture'], false),
+        'created_at' => $pick(['created_at'], false),
+        'updated_at' => $pick(['updated_at'], false),
+    ];
+}
+
+function api_find_user_id_by_auth_provider(PDO $pdo, string $provider, string $providerUserId): ?string
+{
+    $schema = api_get_user_auth_provider_schema($pdo);
+    $sql = 'SELECT `' . $schema['user_id'] . '` AS user_id FROM `' . $schema['table'] . '` '
+        . 'WHERE `' . $schema['provider'] . '` = ? AND `' . $schema['provider_user_id'] . '` = ? LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$provider, $providerUserId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $row ? (string)$row['user_id'] : null;
+}
+
+function api_create_user_auth_provider(PDO $pdo, string $userId, string $provider, string $providerUserId, array $meta = []): void
+{
+    $schema = api_get_user_auth_provider_schema($pdo);
+
+    $columns = [
+        '`' . $schema['id'] . '`',
+        '`' . $schema['user_id'] . '`',
+        '`' . $schema['provider'] . '`',
+        '`' . $schema['provider_user_id'] . '`',
+    ];
+    $holders = ['?', '?', '?', '?'];
+    $params = [generate_uuid(), $userId, $provider, $providerUserId];
+
+    if ($schema['provider_email']) {
+        $columns[] = '`' . $schema['provider_email'] . '`';
+        $holders[] = '?';
+        $params[] = trim((string)($meta['provider_email'] ?? ''));
+    }
+    if ($schema['provider_name']) {
+        $columns[] = '`' . $schema['provider_name'] . '`';
+        $holders[] = '?';
+        $params[] = trim((string)($meta['provider_name'] ?? ''));
+    }
+    if ($schema['provider_avatar']) {
+        $columns[] = '`' . $schema['provider_avatar'] . '`';
+        $holders[] = '?';
+        $params[] = trim((string)($meta['provider_avatar'] ?? ''));
+    }
+    if ($schema['created_at']) {
+        $columns[] = '`' . $schema['created_at'] . '`';
+        $holders[] = 'NOW()';
+    }
+    if ($schema['updated_at']) {
+        $columns[] = '`' . $schema['updated_at'] . '`';
+        $holders[] = 'NOW()';
+    }
+
+    $sql = 'INSERT INTO `' . $schema['table'] . '` (' . implode(', ', $columns) . ') VALUES (' . implode(', ', $holders) . ')';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+}
+
 function api_resolve_auth(PDO $pdo): ?array
 {
     $token = api_get_bearer_token();
