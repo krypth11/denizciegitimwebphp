@@ -136,7 +136,7 @@ try {
         . 'COUNT(DISTINCT e.user_id) AS unique_users,'
         . 'SUM(CASE WHEN DATE(e.created_at) = CURDATE() THEN 1 ELSE 0 END) AS today_watches '
         . 'FROM rewarded_ad_events e '
-        . 'LEFT JOIN user_profiles u ON u.id = e.user_id '
+        . 'LEFT JOIN user_profiles u ON u.id COLLATE utf8mb4_unicode_ci = e.user_id COLLATE utf8mb4_unicode_ci '
         . $whereSql;
     $stmt = $pdo->prepare($summarySql);
     $stmt->execute($params);
@@ -164,7 +164,7 @@ try {
         . 'SUM(CASE WHEN e.platform=\'android\' THEN 1 ELSE 0 END) AS android,'
         . 'SUM(CASE WHEN e.platform=\'ios\' THEN 1 ELSE 0 END) AS ios,'
         . 'SUM(CASE WHEN e.platform=\'unknown\' THEN 1 ELSE 0 END) AS unknown_count '
-        . 'FROM rewarded_ad_events e LEFT JOIN user_profiles u ON u.id = e.user_id '
+        . 'FROM rewarded_ad_events e LEFT JOIN user_profiles u ON u.id COLLATE utf8mb4_unicode_ci = e.user_id COLLATE utf8mb4_unicode_ci '
         . $whereSql . ' GROUP BY DATE(e.created_at) ORDER BY DATE(e.created_at) ASC';
     $stmt = $pdo->prepare($dailySql);
     $stmt->execute($params);
@@ -176,13 +176,13 @@ try {
         . 'SUM(CASE WHEN e.reward_type=\'study\' THEN e.bonus_amount ELSE 0 END) AS total_study_bonus,'
         . 'SUM(CASE WHEN e.reward_type=\'exam\' THEN e.bonus_amount ELSE 0 END) AS total_exam_bonus,'
         . 'MAX(e.created_at) AS last_watch_at '
-        . 'FROM rewarded_ad_events e LEFT JOIN user_profiles u ON u.id = e.user_id '
+        . 'FROM rewarded_ad_events e LEFT JOIN user_profiles u ON u.id COLLATE utf8mb4_unicode_ci = e.user_id COLLATE utf8mb4_unicode_ci '
         . $whereSql . ' GROUP BY e.user_id, u.full_name, u.email ORDER BY total_watches DESC LIMIT 10';
     $stmt = $pdo->prepare($topSql);
     $stmt->execute($params);
     $topUsers = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-    $countSql = 'SELECT COUNT(*) FROM rewarded_ad_events e LEFT JOIN user_profiles u ON u.id = e.user_id ' . $whereSql;
+    $countSql = 'SELECT COUNT(*) FROM rewarded_ad_events e LEFT JOIN user_profiles u ON u.id COLLATE utf8mb4_unicode_ci = e.user_id COLLATE utf8mb4_unicode_ci ' . $whereSql;
     $stmt = $pdo->prepare($countSql);
     $stmt->execute($params);
     $total = (int)$stmt->fetchColumn();
@@ -193,7 +193,7 @@ try {
     $eventsSql = 'SELECT e.id, e.user_id, COALESCE(u.full_name, \'-\') AS full_name, COALESCE(u.email, \'-\') AS email, '
         . 'e.reward_type, e.platform, e.bonus_amount, e.created_at, e.ip_address '
         . 'FROM rewarded_ad_events e '
-        . 'LEFT JOIN user_profiles u ON u.id = e.user_id '
+        . 'LEFT JOIN user_profiles u ON u.id COLLATE utf8mb4_unicode_ci = e.user_id COLLATE utf8mb4_unicode_ci '
         . $whereSql
         . ' ORDER BY e.created_at DESC LIMIT ' . (int)$perPage . ' OFFSET ' . (int)$offset;
     $stmt = $pdo->prepare($eventsSql);
