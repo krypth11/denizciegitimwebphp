@@ -88,6 +88,36 @@ function questions_has_scope_links_table(PDO $pdo): bool
 }
 
 /**
+ * @param array<int,string> $rawTopicIds
+ * @return array<int,string>
+ */
+function questions_normalize_topic_ids(array $rawTopicIds): array
+{
+    $normalized = [];
+    foreach ($rawTopicIds as $rawId) {
+        $id = trim((string)$rawId);
+        if ($id === '') {
+            continue;
+        }
+
+        $id = api_validate_optional_id($id, 'topic_ids', 191);
+        if ($id === '') {
+            continue;
+        }
+
+        if (!in_array($id, $normalized, true)) {
+            $normalized[] = $id;
+        }
+    }
+
+    if (count($normalized) > 50) {
+        api_error('topic_ids en fazla 50 öğe içerebilir.', 422);
+    }
+
+    return $normalized;
+}
+
+/**
  * @return array{where: array<int,string>, params: array<int,mixed>, normalized_question_type: string, requested_qualification_id: string}
  */
 function build_question_filters(PDO $pdo, array $params): array
@@ -98,6 +128,7 @@ function build_question_filters(PDO $pdo, array $params): array
     $qualificationId = trim((string)($params['qualification_id'] ?? ''));
     $courseId = trim((string)($params['course_id'] ?? ''));
     $topicId = trim((string)($params['topic_id'] ?? ''));
+    $topicIds = questions_normalize_topic_ids((array)($params['topic_ids'] ?? []));
     $questionType = trim((string)($params['question_type'] ?? ''));
     $questionAlias = trim((string)($params['question_alias'] ?? 'q'));
     $courseGuardContext = (string)($params['course_guard_context'] ?? 'questions.filter.course_guard');
@@ -140,7 +171,37 @@ function build_question_filters(PDO $pdo, array $params): array
         );
     }
 
-    if ($topicId !== '') {
+    if ($topicIds) {
+        $topicPlaceholders = implode(', ', array_fill(0, count($topicIds), '?'));
+        $topicGuardStmt = $pdo->prepare(
+            'SELECT t.id, c.qualification_id
+             FROM topics t
+             INNER JOIN courses c ON t.course_id = c.id
+             WHERE t.id IN (' . $topicPlaceholders . ')'
+        );
+        $topicGuardStmt->execute($topicIds);
+        $topicGuardRows = $topicGuardStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $foundTopicIds = [];
+        foreach ($topicGuardRows as $topicGuardRow) {
+            $guardTopicId = (string)($topicGuardRow['id'] ?? '');
+            if ($guardTopicId === '') {
+                continue;
+            }
+            $foundTopicIds[] = $guardTopicId;
+            api_assert_requested_qualification_matches_current(
+                $pdo,
+                $auth,
+                (string)($topicGuardRow['qualification_id'] ?? ''),
+                $topicGuardContext
+            );
+        }
+
+        $missingTopicIds = array_values(array_diff($topicIds, $foundTopicIds));
+        if ($missingTopicIds) {
+            api_error('Konu bulunamadı.', 404);
+        }
+    } elseif ($topicId !== '') {
         $topicGuardStmt = $pdo->prepare(
             'SELECT c.qualification_id
              FROM topics t
@@ -174,7 +235,11 @@ function build_question_filters(PDO $pdo, array $params): array
             $scopeClauses[] = 'qsl.course_id = ?';
             $scopeParams[] = $courseId;
         }
-        if ($topicId !== '' && $hasQ('topic_id')) {
+        if ($topicIds && $hasQ('topic_id')) {
+            $topicPlaceholders = implode(', ', array_fill(0, count($topicIds), '?'));
+            $scopeClauses[] = 'qsl.topic_id IN (' . $topicPlaceholders . ')';
+            array_push($scopeParams, ...$topicIds);
+        } elseif ($topicId !== '' && $hasQ('topic_id')) {
             $scopeClauses[] = 'qsl.topic_id = ?';
             $scopeParams[] = $topicId;
         }
@@ -188,7 +253,11 @@ function build_question_filters(PDO $pdo, array $params): array
             $fallbackClauses[] = $qc('course_id') . ' = ?';
             $fallbackParams[] = $courseId;
         }
-        if ($topicId !== '' && $hasQ('topic_id')) {
+        if ($topicIds && $hasQ('topic_id')) {
+            $topicPlaceholders = implode(', ', array_fill(0, count($topicIds), '?'));
+            $fallbackClauses[] = $qc('topic_id') . ' IN (' . $topicPlaceholders . ')';
+            array_push($fallbackParams, ...$topicIds);
+        } elseif ($topicId !== '' && $hasQ('topic_id')) {
             $fallbackClauses[] = $qc('topic_id') . ' = ?';
             $fallbackParams[] = $topicId;
         }
@@ -211,7 +280,11 @@ function build_question_filters(PDO $pdo, array $params): array
             $queryParams[] = $courseId;
         }
 
-        if ($topicId !== '' && $hasQ('topic_id')) {
+        if ($topicIds && $hasQ('topic_id')) {
+            $topicPlaceholders = implode(', ', array_fill(0, count($topicIds), '?'));
+            $where[] = $qc('topic_id') . ' IN (' . $topicPlaceholders . ')';
+            array_push($queryParams, ...$topicIds);
+        } elseif ($topicId !== '' && $hasQ('topic_id')) {
             $where[] = $qc('topic_id') . ' = ?';
             $queryParams[] = $topicId;
         }

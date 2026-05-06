@@ -25,6 +25,8 @@ try {
     $qualificationId = api_validate_optional_id((string)($_GET['qualification_id'] ?? ''), 'qualification_id', 191);
     $courseId = api_validate_optional_id((string)($_GET['course_id'] ?? ''), 'course_id', 191);
     $topicId = api_validate_optional_id((string)($_GET['topic_id'] ?? ''), 'topic_id', 191);
+    $topicIdsRaw = trim((string)($_GET['topic_ids'] ?? ''));
+    $topicIds = $topicIdsRaw !== '' ? explode(',', $topicIdsRaw) : [];
     $questionType = trim((string)($_GET['question_type'] ?? ''));
     $poolType = questions_normalize_pool_type((string)($_GET['pool_type'] ?? 'all'));
 
@@ -38,6 +40,7 @@ try {
         'qualification_id' => $qualificationId,
         'course_id' => $courseId,
         'topic_id' => $topicId,
+        'topic_ids' => $topicIds,
         'question_type' => $questionType,
         'question_columns' => $questionColumns,
         'question_alias' => 'q',

@@ -23,6 +23,8 @@ try {
     $qualificationId = api_validate_optional_id((string)($_GET['qualification_id'] ?? ''), 'qualification_id', 191);
     $courseId = api_validate_optional_id((string)($_GET['course_id'] ?? ''), 'course_id', 191);
     $topicId = api_validate_optional_id((string)($_GET['topic_id'] ?? ''), 'topic_id', 191);
+    $topicIdsRaw = trim((string)($_GET['topic_ids'] ?? ''));
+    $topicIds = $topicIdsRaw !== '' ? explode(',', $topicIdsRaw) : [];
     $questionType = trim((string)($_GET['question_type'] ?? ''));
     $poolTypeRaw = (string)($_GET['pool_type'] ?? 'all');
     $poolType = questions_normalize_pool_type($poolTypeRaw);
@@ -52,6 +54,7 @@ try {
         'qualification_id' => $qualificationId,
         'course_id' => $courseId,
         'topic_id' => $topicId,
+        'topic_ids' => $topicIds,
         'question_type' => $questionType,
         'question_columns' => $columns,
         'question_alias' => 'q',
@@ -63,13 +66,18 @@ try {
     $where = $filterBuild['where'];
     $params = $filterBuild['params'];
     $scopeLinksAvailable = !empty($filterBuild['scope_links_available']);
+    $normalizedTopicIds = questions_normalize_topic_ids($topicIds);
 
     $scopedCourseExpr = $hasCol('course_id') ? $qc('course_id') : 'NULL';
     $scopedTopicExpr = $hasCol('topic_id') ? $qc('topic_id') : 'NULL';
     if ($scopeLinksAvailable && $hasCol('course_id')) {
         $scopeQualificationSql = $pdo->quote((string)$filterBuild['requested_qualification_id']);
         $scopeCourseFilterSql = ($courseId !== '') ? (' AND qsl.course_id = ' . $pdo->quote($courseId)) : '';
-        $scopeTopicFilterSql = ($topicId !== '') ? (' AND qsl.topic_id = ' . $pdo->quote($topicId)) : '';
+        if ($normalizedTopicIds) {
+            $scopeTopicFilterSql = ' AND qsl.topic_id IN (' . implode(', ', array_map([$pdo, 'quote'], $normalizedTopicIds)) . ')';
+        } else {
+            $scopeTopicFilterSql = ($topicId !== '') ? (' AND qsl.topic_id = ' . $pdo->quote($topicId)) : '';
+        }
 
         $scopeBase = 'qsl.question_id = ' . $qc('id')
             . ' AND qsl.qualification_id = ' . $scopeQualificationSql
