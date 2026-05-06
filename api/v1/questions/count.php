@@ -27,6 +27,7 @@ try {
     $topicId = api_validate_optional_id((string)($_GET['topic_id'] ?? ''), 'topic_id', 191);
     $topicIdsRaw = trim((string)($_GET['topic_ids'] ?? ''));
     $topicIds = $topicIdsRaw !== '' ? explode(',', $topicIdsRaw) : [];
+    $debugEnabled = ((string)($_GET['debug'] ?? '') === '1');
     $questionType = trim((string)($_GET['question_type'] ?? ''));
     $poolType = questions_normalize_pool_type((string)($_GET['pool_type'] ?? 'all'));
 
@@ -51,6 +52,7 @@ try {
 
     $baseWhere = $filterBuild['where'];
     $baseParams = $filterBuild['params'];
+    $normalizedTopicIds = questions_normalize_topic_ids($topicIds);
 
     $countQuery = static function (PDO $pdo, string $sql, array $params): int {
         $stmt = $pdo->prepare($sql);
@@ -209,10 +211,25 @@ try {
         }
     }
 
-    api_success('Müsait soru sayısı getirildi.', [
+    $payload = [
         'available_count' => max(0, (int)$availableCount),
         'pool_type' => $poolType,
-    ]);
+    ];
+
+    if ($debugEnabled) {
+        $payload['debug'] = [
+            'topic_ids_count' => count($normalizedTopicIds),
+            'topic_ids' => $normalizedTopicIds,
+            'where_count' => count($baseWhere),
+            'scope_links_available' => !empty($filterBuild['scope_links_available']),
+            'available_count' => max(0, (int)$availableCount),
+        ];
+    }
+
+    api_success('Müsait soru sayısı getirildi.', $payload);
 } catch (Throwable $e) {
+    if (((string)($_GET['debug'] ?? '') === '1')) {
+        api_error('İşlem sırasında bir sunucu hatası oluştu: ' . $e->getMessage(), 500);
+    }
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
 }

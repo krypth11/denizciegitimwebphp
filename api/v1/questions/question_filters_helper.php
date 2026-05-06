@@ -235,11 +235,11 @@ function build_question_filters(PDO $pdo, array $params): array
             $scopeClauses[] = 'qsl.course_id = ?';
             $scopeParams[] = $courseId;
         }
-        if ($topicIds && $hasQ('topic_id')) {
+        if ($topicIds) {
             $topicPlaceholders = implode(', ', array_fill(0, count($topicIds), '?'));
             $scopeClauses[] = 'qsl.topic_id IN (' . $topicPlaceholders . ')';
             array_push($scopeParams, ...$topicIds);
-        } elseif ($topicId !== '' && $hasQ('topic_id')) {
+        } elseif ($topicId !== '') {
             $scopeClauses[] = 'qsl.topic_id = ?';
             $scopeParams[] = $topicId;
         }
