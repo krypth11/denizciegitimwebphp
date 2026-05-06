@@ -124,6 +124,20 @@ $(function () {
         const formatted = fmtDate(value);
         return formatted === EMPTY_TEXT ? fallback : formatted;
     };
+    const mysqlDateToDateTimeLocal = (value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        const normalized = raw.replace(' ', 'T');
+        const d = new Date(normalized);
+        if (Number.isNaN(d.getTime())) return '';
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    const dateTimeLocalToMysql = (value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        return `${raw.replace('T', ' ')}:00`;
+    };
     const boolBadge = (value) => normalizeBool(value)
         ? '<span class="badge text-bg-success">Evet</span>'
         : '<span class="badge text-bg-secondary">Hayır</span>';
@@ -464,6 +478,15 @@ $(function () {
             </div>
         `;
 
+        const provider = String(s.provider || '').trim().toLowerCase();
+        const isManual = provider === 'manual';
+        const isRevenuecat = provider === 'revenuecat';
+        const currentLocalValue = mysqlDateToDateTimeLocal(s.expires_at);
+        const plusOneMonth = new Date();
+        plusOneMonth.setMonth(plusOneMonth.getMonth() + 1);
+        const defaultLocalValue = currentLocalValue || mysqlDateToDateTimeLocal(plusOneMonth.toISOString());
+        const showRemoveBtn = isManual && isPremiumActive;
+
         $('#tab-subscription').html(`
             <div class="card user-soft-card mb-3">
                 <div class="card-body">
@@ -486,12 +509,77 @@ $(function () {
                     </div>
                 </div>
             </div>
+            <div class="card user-soft-card mb-3">
+                <div class="card-body">
+                    <h6 class="mb-1">Manuel Premium Yönetimi</h6>
+                    <p class="text-muted small mb-3">Bu kullanıcıya belirlediğiniz tarihe kadar manuel premium erişimi verebilirsiniz.</p>
+                    ${isRevenuecat ? '<div class="alert alert-warning py-2 small mb-3">Bu kullanıcının aboneliği RevenueCat kaynaklı görünüyor. Manuel işlem mevcut abonelik kaydını manuel premium olarak değiştirebilir.</div>' : ''}
+                    <div class="row g-2 align-items-end">
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small mb-1" for="manualPremiumExpiresAt">Bitiş Tarihi / Saat</label>
+                            <input type="datetime-local" class="form-control" id="manualPremiumExpiresAt" value="${esc(defaultLocalValue)}">
+                        </div>
+                        <div class="col-12 col-md-6 d-flex gap-2 flex-wrap">
+                            <button type="button" class="btn btn-primary" id="saveManualPremiumBtn">Premium Ver / Güncelle</button>
+                            ${showRemoveBtn ? '<button type="button" class="btn btn-outline-danger" id="removeManualPremiumBtn">Manuel Premiumu Kaldır</button>' : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div class="mb-2 d-flex align-items-center justify-content-between gap-2 flex-wrap">
                 <h6 class="mb-0">Abonelik Geçmişi</h6>
                 <span class="text-muted small">Toplam kayıt: ${esc(history.length)}</span>
             </div>
             <div class="sub-history-wrap">${historyHtml}</div>
         `);
+    }
+
+    async function saveManualPremium() {
+        const localValue = String($('#manualPremiumExpiresAt').val() || '').trim();
+        if (!localValue) {
+            await appAlert('Uyarı', 'Lütfen bitiş tarihi seçin.', 'warning');
+            return;
+        }
+
+        const provider = String(detailData?.user?.premium?.provider || '').toLowerCase();
+        if (provider === 'revenuecat') {
+            const okRevenuecat = await appConfirm(
+                'RevenueCat Uyarısı',
+                'Bu kullanıcının RevenueCat kaynaklı abonelik kaydı var. Manuel premium vermek mevcut abonelik kaydını manuel provider ile değiştirebilir.',
+                { type: 'warning', confirmText: 'Devam Et', cancelText: 'Vazgeç' }
+            );
+            if (!okRevenuecat) return;
+        }
+
+        const res = await api('set_manual_premium', 'POST', {
+            user_id: userId,
+            expires_at: localValue
+        });
+        if (!res?.success) {
+            await appAlert('Hata', getResponseMessage(res, 'Manuel premium kaydedilemedi.'), 'error');
+            return;
+        }
+
+        await appAlert('Başarılı', getResponseMessage(res, 'Manuel premium kaydedildi.'), 'success');
+        loadedTabs.subscription = false;
+        await loadTab('subscription');
+        await loadDetail();
+    }
+
+    async function removeManualPremium() {
+        const ok = await appConfirm('Onay', 'Manuel premium kaldırılacak. Devam edilsin mi?', { type: 'warning', confirmText: 'Kaldır', cancelText: 'İptal' });
+        if (!ok) return;
+
+        const res = await api('remove_manual_premium', 'POST', { user_id: userId });
+        if (!res?.success) {
+            await appAlert('Hata', getResponseMessage(res, 'Manuel premium kaldırılamadı.'), 'error');
+            return;
+        }
+
+        await appAlert('Başarılı', getResponseMessage(res, 'Manuel premium kaldırıldı.'), 'success');
+        loadedTabs.subscription = false;
+        await loadTab('subscription');
+        await loadDetail();
     }
 
     function renderStudy(data) {
@@ -904,6 +992,9 @@ $(function () {
         renderNotes(noteList);
         await appAlert('Başarılı', res.message || 'Not silindi.', 'success');
     });
+
+    $(document).on('click', '#saveManualPremiumBtn', saveManualPremium);
+    $(document).on('click', '#removeManualPremiumBtn', removeManualPremium);
 
     $('#noteForm').on('submit', async function (e) {
         e.preventDefault();

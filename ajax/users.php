@@ -192,6 +192,59 @@ function users_now(): string
     return date('Y-m-d H:i:s');
 }
 
+function users_parse_manual_expires_at(string $raw): ?string
+{
+    $value = trim($raw);
+    if ($value === '') {
+        return null;
+    }
+
+    if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/', $value) === 1) {
+        $value .= ':00';
+        $value = str_replace('T', ' ', $value);
+    } elseif (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $value) !== 1) {
+        return null;
+    }
+
+    $normalized = usage_limits_normalize_datetime_to_mysql($value);
+    return $normalized ?: null;
+}
+
+function users_force_subscription_provider_manual(PDO $pdo, string $userId): void
+{
+    $schema = users_subscription_schema($pdo);
+    if (!$schema || empty($schema['provider'])) {
+        return;
+    }
+
+    $orderCol = $schema['updated_at'] ?: ($schema['created_at'] ?: ($schema['id'] ?: $schema['user_id']));
+    $idSelect = $schema['id'] ? ('`' . $schema['id'] . '` AS row_id, ') : '';
+    $sqlFind = 'SELECT ' . $idSelect . '`' . $schema['user_id'] . '` AS user_id FROM `' . $schema['table'] . '` WHERE `' . $schema['user_id'] . '` = ? ORDER BY `' . $orderCol . '` DESC LIMIT 1';
+    $stmtFind = $pdo->prepare($sqlFind);
+    $stmtFind->execute([$userId]);
+    $row = $stmtFind->fetch(PDO::FETCH_ASSOC) ?: null;
+    if (!$row) {
+        return;
+    }
+
+    if ($schema['id'] && !empty($row['row_id'])) {
+        $sqlUpdate = 'UPDATE `' . $schema['table'] . '` SET `' . $schema['provider'] . '` = ? WHERE `' . $schema['id'] . '` = ? LIMIT 1';
+        $stmtUpdate = $pdo->prepare($sqlUpdate);
+        $stmtUpdate->execute(['manual', (string)$row['row_id']]);
+        return;
+    }
+
+    $sqlUpdate = 'UPDATE `' . $schema['table'] . '` SET `' . $schema['provider'] . '` = ? WHERE `' . $schema['user_id'] . '` = ? ORDER BY `' . $orderCol . '` DESC LIMIT 1';
+    $stmtUpdate = $pdo->prepare($sqlUpdate);
+    $stmtUpdate->execute(['manual', $userId]);
+}
+
+function users_get_latest_subscription_row(PDO $pdo, string $userId): array
+{
+    $map = users_get_subscription_map($pdo, [$userId]);
+    return $map[$userId] ?? [];
+}
+
 function users_fmt_bool($value): int
 {
     return ((int)$value === 1) ? 1 : 0;
@@ -1946,6 +1999,118 @@ try {
 
             users_response(true, '', [
                 'items' => users_get_user_subscription_history($pdo, $id),
+            ]);
+            break;
+        }
+
+        case 'set_manual_premium': {
+            $userId = trim((string)($_POST['user_id'] ?? ''));
+            $expiresAtRaw = trim((string)($_POST['expires_at'] ?? ''));
+            if ($userId === '') {
+                users_response(false, 'Kullanıcı ID gerekli.', [], 422, ['user_id' => 'required']);
+            }
+            if ($expiresAtRaw === '') {
+                users_response(false, 'Bitiş tarihi gerekli.', [], 422, ['expires_at' => 'required']);
+            }
+
+            $targetUser = users_find_by_id($pdo, $schema, $userId);
+            if (!$targetUser) {
+                users_response(false, 'Kullanıcı bulunamadı.', [], 404);
+            }
+
+            $expiresAt = users_parse_manual_expires_at($expiresAtRaw);
+            if ($expiresAt === null) {
+                users_response(false, 'Bitiş tarihi formatı geçersiz.', [], 422, ['expires_at' => 'invalid_format']);
+            }
+            if (strtotime($expiresAt) === false || strtotime($expiresAt) <= time()) {
+                users_response(false, 'Geçmiş tarih için premium verilemez.', [], 422, ['expires_at' => 'past_not_allowed']);
+            }
+
+            $before = users_get_latest_subscription_row($pdo, $userId);
+            usage_limits_upsert_subscription_status($pdo, $userId, [
+                'is_pro' => 1,
+                'plan_code' => 'manual_premium',
+                'entitlement_id' => 'manual_premium',
+                'rc_app_user_id' => $userId,
+                'expires_at' => $expiresAt,
+                'last_synced_at' => users_now(),
+            ]);
+            users_force_subscription_provider_manual($pdo, $userId);
+
+            $afterRow = users_get_latest_subscription_row($pdo, $userId);
+
+            $beforeActive = usage_limits_is_subscription_active($before);
+            $eventType = $beforeActive ? 'premium_renewed' : 'premium_started';
+            $beforeSummary = 'is_pro=' . (!empty($before['is_pro']) ? '1' : '0') . ', expires_at=' . (string)($before['expires_at'] ?? '-') . ', provider=' . (string)($before['provider'] ?? '-');
+            user_lifecycle_log_event(
+                $pdo,
+                $userId,
+                $eventType,
+                'Manuel premium verildi',
+                'admin_manual',
+                $beforeSummary,
+                $expiresAt,
+                [
+                    'admin_user_id' => (string)($authUser['user_id'] ?? ''),
+                    'provider' => 'manual',
+                    'plan_code' => 'manual_premium',
+                ],
+                0
+            );
+
+            users_response(true, 'Manuel premium kaydedildi.', [
+                'subscription' => $afterRow,
+            ]);
+            break;
+        }
+
+        case 'remove_manual_premium': {
+            $userId = trim((string)($_POST['user_id'] ?? ''));
+            if ($userId === '') {
+                users_response(false, 'Kullanıcı ID gerekli.', [], 422, ['user_id' => 'required']);
+            }
+
+            $targetUser = users_find_by_id($pdo, $schema, $userId);
+            if (!$targetUser) {
+                users_response(false, 'Kullanıcı bulunamadı.', [], 404);
+            }
+
+            $before = users_get_latest_subscription_row($pdo, $userId);
+            $provider = strtolower(trim((string)($before['provider'] ?? '')));
+            if ($provider !== 'manual') {
+                users_response(false, 'Bu kullanıcı RevenueCat kaynaklı görünüyor. Manuel kaldırma işlemi uygulanmadı.', [], 409);
+            }
+
+            $now = users_now();
+            usage_limits_upsert_subscription_status($pdo, $userId, [
+                'is_pro' => 0,
+                'plan_code' => null,
+                'entitlement_id' => null,
+                'rc_app_user_id' => $userId,
+                'expires_at' => $now,
+                'last_synced_at' => $now,
+            ]);
+            users_force_subscription_provider_manual($pdo, $userId);
+
+            $afterRow = users_get_latest_subscription_row($pdo, $userId);
+
+            user_lifecycle_log_event(
+                $pdo,
+                $userId,
+                'premium_cancelled',
+                'Manuel premium kaldırıldı',
+                'admin_manual',
+                (string)($before['expires_at'] ?? '-'),
+                $now,
+                [
+                    'admin_user_id' => (string)($authUser['user_id'] ?? ''),
+                    'provider' => 'manual',
+                ],
+                0
+            );
+
+            users_response(true, 'Manuel premium kaldırıldı.', [
+                'subscription' => $afterRow,
             ]);
             break;
         }
