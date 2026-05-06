@@ -174,6 +174,48 @@ function rewarded_build_summary(PDO $pdo, string $userId, bool $isPro, array $ru
     ];
 }
 
+function rewarded_normalize_platform(array $payload): string
+{
+    $platform = strtolower(trim((string)($payload['platform'] ?? '')));
+    if ($platform === '' && function_exists('getallheaders')) {
+        $headers = getallheaders();
+        if (is_array($headers)) {
+            $platform = strtolower(trim((string)($headers['X-Platform'] ?? $headers['x-platform'] ?? '')));
+            if ($platform === '') {
+                $platform = strtolower(trim((string)($headers['X-Client-Platform'] ?? $headers['x-client-platform'] ?? '')));
+            }
+        }
+    }
+
+    if ($platform === '' && !empty($_SERVER['HTTP_X_PLATFORM'])) {
+        $platform = strtolower(trim((string)$_SERVER['HTTP_X_PLATFORM']));
+    }
+    if ($platform === '' && !empty($_SERVER['HTTP_X_CLIENT_PLATFORM'])) {
+        $platform = strtolower(trim((string)$_SERVER['HTTP_X_CLIENT_PLATFORM']));
+    }
+
+    return in_array($platform, ['android', 'ios'], true) ? $platform : 'unknown';
+}
+
+function rewarded_log_event(PDO $pdo, array $event): void
+{
+    $sql = 'INSERT INTO `rewarded_ad_events` '
+        . '(`user_id`, `reward_type`, `platform`, `bonus_amount`, `ad_unit_id`, `reward_item_type`, `reward_item_amount`, `ip_address`, `user_agent`, `created_at`) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        $event['user_id'],
+        $event['reward_type'],
+        $event['platform'],
+        $event['bonus_amount'],
+        $event['ad_unit_id'],
+        $event['reward_item_type'],
+        $event['reward_item_amount'],
+        $event['ip_address'],
+        $event['user_agent'],
+    ]);
+}
+
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
@@ -201,6 +243,11 @@ try {
 
     $runtime = app_runtime_settings_get($pdo);
     $today = usage_limits_tr_date();
+    $platform = rewarded_normalize_platform($payload);
+    $adUnitId = trim((string)($payload['ad_unit_id'] ?? ''));
+    $rewardItemType = trim((string)($payload['reward_item_type'] ?? ''));
+    $rewardItemAmountRaw = $payload['reward_item_amount'] ?? null;
+    $rewardItemAmount = is_numeric($rewardItemAmountRaw) ? (int)$rewardItemAmountRaw : null;
 
     if ($type === 'study') {
         $bonus = max(1, (int)($runtime['rewarded_study_bonus'] ?? 10));
@@ -276,6 +323,23 @@ try {
         $stmt->execute($params);
 
         rewarded_usage_increment($pdo, rewarded_daily_usage_schema($pdo), $userId, $type, $today);
+
+        try {
+            rewarded_log_event($pdo, [
+                'user_id' => $userId,
+                'reward_type' => $type,
+                'platform' => $platform,
+                'bonus_amount' => $bonus,
+                'ad_unit_id' => ($adUnitId !== '' ? $adUnitId : null),
+                'reward_item_type' => ($rewardItemType !== '' ? $rewardItemType : null),
+                'reward_item_amount' => $rewardItemAmount,
+                'ip_address' => (string)($_SERVER['REMOTE_ADDR'] ?? ''),
+                'user_agent' => mb_substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500),
+            ]);
+        } catch (Throwable $eventError) {
+            error_log('[rewarded.apply] rewarded_ad_events yazılamadı: ' . $eventError->getMessage());
+        }
+
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
