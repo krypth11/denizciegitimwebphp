@@ -6,6 +6,7 @@ require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 
 $authUser = require_auth();
+$debug = isset($_GET['debug']) && $_GET['debug'] === '1';
 
 function rewarded_stats_json(bool $success, string $message = '', array $payload = [], int $status = 200): void
 {
@@ -20,6 +21,13 @@ function rewarded_stats_date(string $value): ?string
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) return null;
     $dt = DateTime::createFromFormat('Y-m-d', $value);
     return ($dt && $dt->format('Y-m-d') === $value) ? $value : null;
+}
+
+function rewarded_stats_table_exists(PDO $pdo, string $table): bool
+{
+    $stmt = $pdo->prepare("\n        SELECT 1\n        FROM information_schema.TABLES\n        WHERE TABLE_SCHEMA = DATABASE()\n          AND TABLE_NAME = ?\n        LIMIT 1\n    ");
+    $stmt->execute([$table]);
+    return (bool)$stmt->fetchColumn();
 }
 
 try {
@@ -59,6 +67,44 @@ try {
         if ($startDate > $endDate) {
             rewarded_stats_json(false, 'start_date end_date değerinden büyük olamaz.', [], 422);
         }
+    }
+
+    if (!rewarded_stats_table_exists($pdo, 'rewarded_ad_events')) {
+        rewarded_stats_json(true, '', [
+            'summary' => [
+                'total_watches' => 0,
+                'study_watches' => 0,
+                'exam_watches' => 0,
+                'android_watches' => 0,
+                'ios_watches' => 0,
+                'unknown_watches' => 0,
+                'total_study_bonus' => 0,
+                'total_exam_bonus' => 0,
+                'unique_users' => 0,
+                'avg_watches_per_user' => 0,
+                'today_watches' => 0,
+            ],
+            'charts' => [
+                'daily' => [],
+                'type_distribution' => [
+                    'study' => 0,
+                    'exam' => 0,
+                ],
+                'platform_distribution' => [
+                    'android' => 0,
+                    'ios' => 0,
+                    'unknown' => 0,
+                ],
+            ],
+            'top_users' => [],
+            'events' => [],
+            'pagination' => [
+                'page' => 1,
+                'per_page' => $perPage,
+                'total' => 0,
+                'total_pages' => 0,
+            ],
+        ]);
     }
 
     $where = ['DATE(e.created_at) BETWEEN ? AND ?'];
@@ -117,14 +163,14 @@ try {
         . 'SUM(CASE WHEN e.reward_type=\'exam\' THEN 1 ELSE 0 END) AS exam,'
         . 'SUM(CASE WHEN e.platform=\'android\' THEN 1 ELSE 0 END) AS android,'
         . 'SUM(CASE WHEN e.platform=\'ios\' THEN 1 ELSE 0 END) AS ios,'
-        . 'SUM(CASE WHEN e.platform=\'unknown\' THEN 1 ELSE 0 END) AS unknown '
+        . 'SUM(CASE WHEN e.platform=\'unknown\' THEN 1 ELSE 0 END) AS unknown_count '
         . 'FROM rewarded_ad_events e LEFT JOIN user_profiles u ON u.id = e.user_id '
         . $whereSql . ' GROUP BY DATE(e.created_at) ORDER BY DATE(e.created_at) ASC';
     $stmt = $pdo->prepare($dailySql);
     $stmt->execute($params);
     $dailyRows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-    $topSql = 'SELECT e.user_id, COALESCE(u.full_name, "-") AS full_name, COALESCE(u.email, "-") AS email, COUNT(*) AS total_watches,'
+    $topSql = 'SELECT e.user_id, COALESCE(u.full_name, \'-\') AS full_name, COALESCE(u.email, \'-\') AS email, COUNT(*) AS total_watches,'
         . 'SUM(CASE WHEN e.reward_type=\'study\' THEN 1 ELSE 0 END) AS study_watches,'
         . 'SUM(CASE WHEN e.reward_type=\'exam\' THEN 1 ELSE 0 END) AS exam_watches,'
         . 'SUM(CASE WHEN e.reward_type=\'study\' THEN e.bonus_amount ELSE 0 END) AS total_study_bonus,'
@@ -144,7 +190,7 @@ try {
     $page = min($page, $totalPages);
     $offset = ($page - 1) * $perPage;
 
-    $eventsSql = 'SELECT e.id, e.user_id, COALESCE(u.full_name, "-") AS full_name, COALESCE(u.email, "-") AS email, '
+    $eventsSql = 'SELECT e.id, e.user_id, COALESCE(u.full_name, \'-\') AS full_name, COALESCE(u.email, \'-\') AS email, '
         . 'e.reward_type, e.platform, e.bonus_amount, e.created_at, e.ip_address '
         . 'FROM rewarded_ad_events e '
         . 'LEFT JOIN user_profiles u ON u.id = e.user_id '
@@ -154,10 +200,22 @@ try {
     $stmt->execute($params);
     $events = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
+    $dailyOut = array_map(static function (array $row): array {
+        return [
+            'date' => (string)($row['date'] ?? ''),
+            'total' => (int)($row['total'] ?? 0),
+            'study' => (int)($row['study'] ?? 0),
+            'exam' => (int)($row['exam'] ?? 0),
+            'android' => (int)($row['android'] ?? 0),
+            'ios' => (int)($row['ios'] ?? 0),
+            'unknown' => (int)($row['unknown_count'] ?? 0),
+        ];
+    }, $dailyRows);
+
     rewarded_stats_json(true, '', [
         'summary' => $summaryOut,
         'charts' => [
-            'daily' => $dailyRows,
+            'daily' => $dailyOut,
             'type_distribution' => [
                 'study' => $summaryOut['study_watches'],
                 'exam' => $summaryOut['exam_watches'],
@@ -179,5 +237,13 @@ try {
     ]);
 } catch (Throwable $e) {
     error_log('[rewarded-ad-stats] ' . $e->getMessage());
-    rewarded_stats_json(false, 'Reklam istatistikleri alınırken hata oluştu.', [], 500);
+    $payload = [];
+    if (!empty($debug)) {
+        $payload['debug'] = [
+            'error' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ];
+    }
+    rewarded_stats_json(false, 'Reklam istatistikleri alınırken hata oluştu.', $payload, 500);
 }
