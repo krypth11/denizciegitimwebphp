@@ -110,10 +110,40 @@ try {
         $hasCol('created_at') ? ($qc('created_at') . ' AS created_at') : 'NULL AS created_at',
     ];
 
+    $countQuery = static function (PDO $pdo, string $sql, array $params): int {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        return (int)$stmt->fetchColumn();
+    };
+
+    $totalAvailableCount = 0;
+
     $rows = [];
     if ($poolType === 'most_wrong') {
         $ws = study_get_wrong_score_schema($pdo);
+        $wsCount = 0;
         if ($ws && !empty($ws['user_id']) && !empty($ws['question_id']) && !empty($ws['wrong_score'])) {
+            $whereMostWrong = $where;
+            $whereMostWrong[] = 'COALESCE(ws.' . study_q($ws['wrong_score']) . ', 0) > 0';
+
+            $countSql = 'SELECT COUNT(DISTINCT ' . $qc('id') . ')'
+                . ' FROM questions ' . $q
+                . ' INNER JOIN ' . study_q($ws['table']) . ' ws'
+                . ' ON ws.' . study_q($ws['question_id']) . ' = ' . $qc('id')
+                . ' AND ws.' . study_q($ws['user_id']) . ' = ?';
+
+            $countParams = [$userId];
+            if (!empty($ws['qualification_id'])) {
+                $countSql .= ' AND ws.' . study_q($ws['qualification_id']) . ' = ?';
+                $countParams[] = $currentQualificationId;
+            }
+
+            if ($whereMostWrong) {
+                $countSql .= ' WHERE ' . implode(' AND ', $whereMostWrong);
+            }
+
+            $wsCount = $countQuery($pdo, $countSql, array_merge($countParams, $params));
+
             $selectWithWrongScore = $select;
             $selectWithWrongScore[] = 'COALESCE(ws.' . study_q($ws['wrong_score']) . ', 0) AS wrong_score';
 
@@ -130,8 +160,6 @@ try {
             }
             $paramsMostWrong = array_merge($joinParams, $params);
 
-            $whereMostWrong = $where;
-            $whereMostWrong[] = 'COALESCE(ws.' . study_q($ws['wrong_score']) . ', 0) > 0';
             if ($whereMostWrong) {
                 $sql .= ' WHERE ' . implode(' AND ', $whereMostWrong);
             }
@@ -201,10 +229,32 @@ try {
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute(array_merge([$userId], $params));
                     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+                    $countSql = 'SELECT COUNT(DISTINCT ' . $qc('id') . ')'
+                        . ' FROM questions ' . $q
+                        . ' INNER JOIN ' . study_q($up['table']) . ' up'
+                        . ' ON up.' . study_q($up['question_id']) . ' = ' . $qc('id')
+                        . ' AND up.' . study_q($up['user_id']) . ' = ?';
+
+                    if ($whereFallback) {
+                        $countSql .= ' WHERE ' . implode(' AND ', $whereFallback);
+                    }
+
+                    $totalAvailableCount = $countQuery($pdo, $countSql, array_merge([$userId], $params));
                 }
             }
         }
+
+        if ($wsCount > 0) {
+            $totalAvailableCount = $wsCount;
+        }
     } elseif ($poolType === 'all') {
+        $countSql = 'SELECT COUNT(DISTINCT ' . $qc('id') . ') FROM questions ' . $q;
+        if ($where) {
+            $countSql .= ' WHERE ' . implode(' AND ', $where);
+        }
+        $totalAvailableCount = $countQuery($pdo, $countSql, $params);
+
         $sql = 'SELECT ' . implode(', ', $select) . ' FROM questions ' . $q;
         if ($where) {
             $sql .= ' WHERE ' . implode(' AND ', $where);
@@ -224,6 +274,12 @@ try {
         $upColumns = get_table_columns($pdo, 'user_progress');
         if (!$upColumns) {
             if ($poolType === 'unanswered') {
+                $countSql = 'SELECT COUNT(DISTINCT ' . $qc('id') . ') FROM questions ' . $q;
+                if ($where) {
+                    $countSql .= ' WHERE ' . implode(' AND ', $where);
+                }
+                $totalAvailableCount = $countQuery($pdo, $countSql, $params);
+
                 $sql = 'SELECT ' . implode(', ', $select) . ' FROM questions ' . $q;
                 if ($where) {
                     $sql .= ' WHERE ' . implode(' AND ', $where);
@@ -282,6 +338,18 @@ try {
                 $stmt = $pdo->prepare($sql);
                 $stmt->execute(array_merge([$userId], $params));
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+                $countSql = 'SELECT COUNT(DISTINCT ' . $qc('id') . ')'
+                    . ' FROM questions ' . $q
+                    . ' LEFT JOIN ' . study_q($up['table']) . ' up'
+                    . ' ON up.' . study_q($up['question_id']) . ' = ' . $qc('id')
+                    . ' AND up.' . study_q($up['user_id']) . ' = ?';
+
+                if ($whereUnanswered) {
+                    $countSql .= ' WHERE ' . implode(' AND ', $whereUnanswered);
+                }
+
+                $totalAvailableCount = $countQuery($pdo, $countSql, array_merge([$userId], $params));
             } elseif ($poolType === 'answered') {
                 if ($answeredExpr === '') {
                     $rows = [];
@@ -309,6 +377,18 @@ try {
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute(array_merge([$userId], $params));
                     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+                    $countSql = 'SELECT COUNT(DISTINCT ' . $qc('id') . ')'
+                        . ' FROM questions ' . $q
+                        . ' INNER JOIN ' . study_q($up['table']) . ' up'
+                        . ' ON up.' . study_q($up['question_id']) . ' = ' . $qc('id')
+                        . ' AND up.' . study_q($up['user_id']) . ' = ?';
+
+                    if ($whereAnswered) {
+                        $countSql .= ' WHERE ' . implode(' AND ', $whereAnswered);
+                    }
+
+                    $totalAvailableCount = $countQuery($pdo, $countSql, array_merge([$userId], $params));
                 }
             } elseif ($poolType === 'bookmarked') {
                 if (empty($up['is_bookmarked'])) {
@@ -337,6 +417,18 @@ try {
                     $stmt = $pdo->prepare($sql);
                     $stmt->execute(array_merge([$userId], $params));
                     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+                    $countSql = 'SELECT COUNT(DISTINCT ' . $qc('id') . ')'
+                        . ' FROM questions ' . $q
+                        . ' INNER JOIN ' . study_q($up['table']) . ' up'
+                        . ' ON up.' . study_q($up['question_id']) . ' = ' . $qc('id')
+                        . ' AND up.' . study_q($up['user_id']) . ' = ?';
+
+                    if ($whereBookmarked) {
+                        $countSql .= ' WHERE ' . implode(' AND ', $whereBookmarked);
+                    }
+
+                    $totalAvailableCount = $countQuery($pdo, $countSql, array_merge([$userId], $params));
                 }
             }
         }
@@ -380,6 +472,11 @@ try {
 
     api_success('Soru listesi getirildi.', [
         'questions' => $questions,
+        'available_count' => max(0, (int)$totalAvailableCount),
+        'total_count' => max(0, (int)$totalAvailableCount),
+        'pagination' => [
+            'total' => max(0, (int)$totalAvailableCount),
+        ],
     ]);
 } catch (Throwable $e) {
     error_log('questions.list failed: ' . $e->getMessage());
