@@ -36,9 +36,8 @@ function qualification_change_get_or_create_credit(PDO $pdo, string $userId): ar
 
     if (!$row) {
         $now = qualification_change_now();
-        $id = generate_uuid();
-        $ins = $pdo->prepare('INSERT INTO user_qualification_change_credits (id, user_id, credits, annual_grant_count, last_granted_at, created_at, updated_at) VALUES (?, ?, 1, 0, NULL, ?, ?)');
-        $ins->execute([$id, $userId, $now, $now]);
+        $ins = $pdo->prepare('INSERT INTO user_qualification_change_credits (user_id, credits, annual_grant_count, last_granted_at, created_at, updated_at) VALUES (?, 1, 0, NULL, ?, ?)');
+        $ins->execute([$userId, $now, $now]);
         $stmt->execute([$userId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
     }
@@ -114,8 +113,8 @@ function qualification_change_consume(PDO $pdo, string $userId, ?string $oldQual
     $upd = $pdo->prepare('UPDATE user_qualification_change_credits SET credits = ?, updated_at = ? WHERE user_id = ?');
     $upd->execute([$newCredits, $now, $userId]);
 
-    $ins = $pdo->prepare('INSERT INTO user_qualification_change_history (id, user_id, old_qualification_id, new_qualification_id, source, created_at) VALUES (?, ?, ?, ?, ?, ?)');
-    $ins->execute([generate_uuid(), $userId, $oldQualificationId ?: null, $newQualificationId, $source, $now]);
+    $ins = $pdo->prepare('INSERT INTO user_qualification_change_history (user_id, old_qualification_id, new_qualification_id, source, created_at) VALUES (?, ?, ?, ?, ?)');
+    $ins->execute([$userId, $oldQualificationId ?: null, $newQualificationId, $source, $now]);
 
     return qualification_change_get_status($pdo, $userId);
 }
