@@ -132,6 +132,149 @@ function support_fetch_ticket_messages(PDO $pdo, string $ticketId): array
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
 
+function support_calculate_reply_meta(array $ticket, array $messages): array
+{
+    $status = support_normalize_status((string)($ticket['status'] ?? 'submitted'));
+    $userMessageCount = 0;
+    $lastAdminReplyAt = null;
+    $lastMessagePreview = null;
+    $latestUserMessagePreview = null;
+
+    foreach ($messages as $message) {
+        $senderType = strtolower(trim((string)($message['sender_type'] ?? '')));
+        $messageText = trim((string)($message['message'] ?? ''));
+        if ($messageText !== '') {
+            $lastMessagePreview = $messageText;
+            if ($senderType === 'user') {
+                $latestUserMessagePreview = $messageText;
+            }
+        }
+
+        if ($senderType === 'user') {
+            $userMessageCount++;
+            continue;
+        }
+
+        if ($senderType === 'admin') {
+            $createdAt = (string)($message['created_at'] ?? '');
+            if ($createdAt !== '') {
+                $lastAdminReplyAt = $createdAt;
+            }
+        }
+    }
+
+    $canReply = false;
+    $followupRemaining = 0;
+    $replyDisabledReason = null;
+
+    if ($status === 'completed') {
+        $replyDisabledReason = 'Bu destek talebi tamamlandı. Yeni mesaj eklenemez.';
+    } else {
+        if ($lastAdminReplyAt === null) {
+            if ($userMessageCount <= 1) {
+                $canReply = true;
+                $followupRemaining = 1;
+            } else {
+                $replyDisabledReason = 'Bu talep için ek mesaj hakkınız kullanılmıştır.';
+            }
+        } else {
+            $postAdminUserMessageCount = 0;
+            foreach ($messages as $message) {
+                $senderType = strtolower(trim((string)($message['sender_type'] ?? '')));
+                if ($senderType !== 'user') {
+                    continue;
+                }
+                $createdAt = (string)($message['created_at'] ?? '');
+                if ($createdAt !== '' && $createdAt > $lastAdminReplyAt) {
+                    $postAdminUserMessageCount++;
+                }
+            }
+
+            if ($postAdminUserMessageCount < 1) {
+                $canReply = true;
+                $followupRemaining = 1;
+            } else {
+                $replyDisabledReason = 'Bu talep için yanıt hakkınız kullanılmıştır.';
+            }
+        }
+    }
+
+    return [
+        'status' => $status,
+        'can_reply' => $canReply,
+        'reply_disabled_reason' => $replyDisabledReason,
+        'followup_remaining' => $followupRemaining,
+        'has_admin_reply' => $lastAdminReplyAt !== null,
+        'last_admin_reply_at' => $lastAdminReplyAt,
+        'user_message_count' => $userMessageCount,
+        'message_preview' => $lastMessagePreview,
+        'latest_user_message_preview' => $latestUserMessagePreview,
+    ];
+}
+
+function support_preview_text(?string $text, int $limit = 120): ?string
+{
+    if ($text === null) {
+        return null;
+    }
+    $plain = trim($text);
+    if ($plain === '') {
+        return '';
+    }
+    if (mb_strlen($plain, 'UTF-8') <= $limit) {
+        return $plain;
+    }
+    return mb_substr($plain, 0, $limit, 'UTF-8');
+}
+
+function support_fetch_ticket_message_previews(PDO $pdo, array $ticketIds): array
+{
+    $ticketIds = array_values(array_filter(array_map(static function ($id): string {
+        return trim((string)$id);
+    }, $ticketIds), static function (string $id): bool {
+        return $id !== '';
+    }));
+
+    if (!$ticketIds) {
+        return [];
+    }
+
+    $msg = support_ticket_message_schema($pdo);
+    $placeholders = implode(',', array_fill(0, count($ticketIds), '?'));
+    $sql = "SELECT `{$msg['ticket_id']}` AS ticket_id, `{$msg['sender_type']}` AS sender_type, `{$msg['message']}` AS message, `{$msg['created_at']}` AS created_at"
+        . " FROM `{$msg['table']}`"
+        . " WHERE `{$msg['ticket_id']}` IN ({$placeholders})"
+        . " ORDER BY `{$msg['created_at']}` ASC";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($ticketIds);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $result = [];
+    foreach ($rows as $row) {
+        $ticketId = (string)($row['ticket_id'] ?? '');
+        if ($ticketId === '') {
+            continue;
+        }
+        $message = trim((string)($row['message'] ?? ''));
+        if (!isset($result[$ticketId])) {
+            $result[$ticketId] = [
+                'first_user_message' => null,
+                'latest_message' => null,
+            ];
+        }
+        if ($message !== '') {
+            $result[$ticketId]['latest_message'] = $message;
+        }
+        $senderType = strtolower(trim((string)($row['sender_type'] ?? '')));
+        if ($senderType === 'user' && $result[$ticketId]['first_user_message'] === null && $message !== '') {
+            $result[$ticketId]['first_user_message'] = $message;
+        }
+    }
+
+    return $result;
+}
+
 function support_add_message(PDO $pdo, string $ticketId, string $senderUserId, string $senderType, string $message): string
 {
     $msg = support_ticket_message_schema($pdo);
@@ -141,6 +284,17 @@ function support_add_message(PDO $pdo, string $ticketId, string $senderUserId, s
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$id, $ticketId, $senderUserId, $senderType, $message]);
     return $id;
+}
+
+function support_touch_ticket_updated_at(PDO $pdo, string $ticketId): void
+{
+    $ticket = support_ticket_schema($pdo);
+    if (!$ticket['updated_at']) {
+        return;
+    }
+    $sql = "UPDATE `{$ticket['table']}` SET `{$ticket['updated_at']}` = NOW() WHERE `{$ticket['id']}` = ?";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$ticketId]);
 }
 
 function support_update_ticket_status(PDO $pdo, string $ticketId, string $status, bool $setCompletedAt = false): void

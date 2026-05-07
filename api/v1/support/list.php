@@ -21,7 +21,8 @@ try {
     $sql = "SELECT `{$ticket['id']}` AS id, `{$ticket['subject']}` AS subject, `{$ticket['status']}` AS status, "
         . ($ticket['user_followup_count'] ? "COALESCE(`{$ticket['user_followup_count']}`,0) AS user_followup_count, " : '0 AS user_followup_count, ')
         . ($ticket['completed_at'] ? "`{$ticket['completed_at']}` AS completed_at, " : 'NULL AS completed_at, ')
-        . "`{$ticket['created_at']}` AS created_at"
+        . "`{$ticket['created_at']}` AS created_at, "
+        . ($ticket['updated_at'] ? "`{$ticket['updated_at']}` AS updated_at" : 'NULL AS updated_at')
         . " FROM `{$ticket['table']}` WHERE `{$ticket['user_id']}` = ?"
         . " ORDER BY `{$ticket['created_at']}` DESC";
 
@@ -29,14 +30,29 @@ try {
     $stmt->execute([$userId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-    $tickets = array_map(static function (array $r): array {
+    $ticketIds = array_values(array_filter(array_map(static function (array $row): string {
+        return trim((string)($row['id'] ?? ''));
+    }, $rows), static function (string $id): bool {
+        return $id !== '';
+    }));
+    $messagePreviewsByTicket = support_fetch_ticket_message_previews($pdo, $ticketIds);
+
+    $tickets = array_map(static function (array $r) use ($messagePreviewsByTicket): array {
+        $ticketId = (string)($r['id'] ?? '');
+        $previewRow = $messagePreviewsByTicket[$ticketId] ?? null;
+        $latestMessage = is_array($previewRow) ? ($previewRow['latest_message'] ?? null) : null;
+        $firstUserMessage = is_array($previewRow) ? ($previewRow['first_user_message'] ?? null) : null;
+        $messagePreview = $latestMessage ?? $firstUserMessage;
+
         return [
-            'id' => (string)($r['id'] ?? ''),
+            'id' => $ticketId,
             'subject' => (string)($r['subject'] ?? ''),
             'status' => support_normalize_status((string)($r['status'] ?? 'submitted')),
             'user_followup_count' => (int)($r['user_followup_count'] ?? 0),
             'completed_at' => $r['completed_at'] ?? null,
             'created_at' => $r['created_at'] ?? null,
+            'updated_at' => $r['updated_at'] ?? null,
+            'message_preview' => support_preview_text($messagePreview, 120),
         ];
     }, $rows);
 

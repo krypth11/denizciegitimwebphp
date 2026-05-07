@@ -32,21 +32,17 @@ try {
         api_error('Destek talebi bulunamadı.', 404);
     }
 
-    $status = support_normalize_status((string)($ticket['status'] ?? 'submitted'));
-    if ($status === 'completed') {
-        api_error('Tamamlanan taleplere mesaj gönderemezsiniz.', 422);
-    }
-
-    $hasAdminReply = support_ticket_has_admin_reply($pdo, $ticketId);
-    $followupCount = (int)($ticket['user_followup_count'] ?? 0);
-    if ($hasAdminReply && $followupCount > 0) {
-        api_error('Bu talep için follow-up hakkınız doldu.', 422);
+    $messages = support_fetch_ticket_messages($pdo, $ticketId);
+    $replyMeta = support_calculate_reply_meta($ticket, $messages);
+    if (!$replyMeta['can_reply']) {
+        api_error((string)($replyMeta['reply_disabled_reason'] ?? 'Bu talep için mesaj gönderemezsiniz.'), 422);
     }
 
     $pdo->beginTransaction();
     try {
         $messageId = support_add_message($pdo, $ticketId, $userId, 'user', $message);
-        if ($hasAdminReply) {
+        support_touch_ticket_updated_at($pdo, $ticketId);
+        if ($replyMeta['has_admin_reply']) {
             support_ticket_increment_followup($pdo, $ticketId);
         }
         $pdo->commit();

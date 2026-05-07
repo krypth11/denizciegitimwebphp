@@ -27,15 +27,22 @@ try {
     }
 
     $messages = support_fetch_ticket_messages($pdo, $ticketId);
+    $replyMeta = support_calculate_reply_meta($ticket, $messages);
 
     api_success('Destek talebi detayı getirildi.', [
         'ticket' => [
             'id' => (string)($ticket['id'] ?? ''),
             'subject' => (string)($ticket['subject'] ?? ''),
-            'status' => support_normalize_status((string)($ticket['status'] ?? 'submitted')),
+            'status' => (string)$replyMeta['status'],
             'user_followup_count' => (int)($ticket['user_followup_count'] ?? 0),
+            'can_reply' => (bool)$replyMeta['can_reply'],
+            'reply_disabled_reason' => $replyMeta['reply_disabled_reason'],
+            'followup_remaining' => (int)$replyMeta['followup_remaining'],
+            'message_preview' => support_preview_text($replyMeta['message_preview'] ?? null, 120),
+            'latest_user_message_preview' => support_preview_text($replyMeta['latest_user_message_preview'] ?? null, 120),
             'completed_at' => $ticket['completed_at'] ?? null,
             'created_at' => $ticket['created_at'] ?? null,
+            'updated_at' => $ticket['updated_at'] ?? null,
         ],
         'messages' => array_map(static function (array $m): array {
             return [
