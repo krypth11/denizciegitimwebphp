@@ -16,7 +16,7 @@ try {
         api_error('Misafir kullanıcılar destek talebi görüntüleyemez.', 403);
     }
 
-    $ticketId = trim((string)($_GET['id'] ?? ''));
+    $ticketId = trim((string)($_GET['id'] ?? $_GET['ticket_id'] ?? ''));
     if ($ticketId === '') {
         api_error('id parametresi zorunludur.', 422);
     }
