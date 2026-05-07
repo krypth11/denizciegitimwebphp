@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/qualification_change_credit_helper.php';
 
 api_require_method('GET');
 
@@ -14,6 +15,9 @@ try {
     if (!$profile) {
         api_error('Profil bulunamadı.', 404);
     }
+
+    qualification_change_apply_annual_grant($pdo, $userId);
+    $profile['qualification_change_status'] = qualification_change_get_status($pdo, $userId);
 
     $profile['avatar_type'] = api_profile_resolve_avatar_type($profile['avatar_type'] ?? null);
     $profile['avatar_id'] = api_profile_normalize_avatar_id($profile['avatar_id'] ?? null);

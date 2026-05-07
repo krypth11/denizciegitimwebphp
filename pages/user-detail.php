@@ -89,6 +89,7 @@ $(function () {
     const userId = String($('#userDetailRoot').data('userId') || '');
     let detailData = null;
     let noteList = [];
+    let qualificationCreditData = null;
     const loadedTabs = { general: false };
     const EMPTY_TEXT = '-';
 
@@ -202,6 +203,83 @@ $(function () {
         if (['abandoned', 'cancelled', 'expired'].includes(s)) return '<span class="badge text-bg-danger">Terk Edildi</span>';
         return `<span class="badge text-bg-secondary">${esc(safeText(status))}</span>`;
     };
+    const renderQualificationHistoryRows = (items) => {
+        const rows = Array.isArray(items) ? items : [];
+        if (!rows.length) return '<tr><td colspan="4" class="text-muted">Geçmiş kayıt bulunamadı.</td></tr>';
+        return rows.map((x) => `
+            <tr>
+                <td>${esc(fmtDate(x.created_at))}</td>
+                <td>${esc(x.old_qualification_id || '-')}</td>
+                <td>${esc(x.new_qualification_id || '-')}</td>
+                <td>${esc(x.source || '-')}</td>
+            </tr>
+        `).join('');
+    };
+
+    function renderQualificationChangeCard() {
+        const d = qualificationCreditData || {};
+        const credits = safeNumber(d.credits, 0);
+        const annualGrantCount = safeNumber(d.annual_grant_count, 0);
+        const nextGrantAt = safeDateText(d.next_grant_at);
+        const lastGrantedAt = safeDateText(d.last_granted_at);
+        const historyRows = renderQualificationHistoryRows(d.history || []);
+
+        $('#qualificationChangeCardWrap').html(`
+            <div class="card user-soft-card mt-3">
+                <div class="card-body">
+                    <h6 class="mb-3">Yeterlilik Değiştirme Hakkı</h6>
+                    <div class="row g-3 mb-3">
+                        <div class="col-6 col-lg-3"><div class="small text-muted">Mevcut Hak</div><div class="h5 mb-0">${esc(fmtInt(credits))}</div></div>
+                        <div class="col-6 col-lg-3"><div class="small text-muted">Yıllık Hak Sayacı</div><div class="h5 mb-0">${esc(fmtInt(annualGrantCount))}</div></div>
+                        <div class="col-12 col-lg-3"><div class="small text-muted">Son Yıllık Hak Tarihi</div><div class="mb-0">${esc(lastGrantedAt)}</div></div>
+                        <div class="col-12 col-lg-3"><div class="small text-muted">Bir Sonraki Hak Tarihi</div><div class="mb-0">${esc(nextGrantAt)}</div></div>
+                    </div>
+                    <div class="row g-2 align-items-end mb-3">
+                        <div class="col-12 col-md-4">
+                            <label class="form-label small">Hak (0-1000)</label>
+                            <input type="number" min="0" max="1000" class="form-control" id="qualificationCreditsInput" value="${esc(String(credits))}">
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <button type="button" class="btn btn-primary" id="saveQualificationCreditsBtn">Kaydet</button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm mb-0">
+                            <thead><tr><th>Tarih</th><th>Eski Yeterlilik</th><th>Yeni Yeterlilik</th><th>Kaynak</th></tr></thead>
+                            <tbody>${historyRows}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `);
+    }
+
+    async function loadQualificationChangeCredits() {
+        const res = await api('get_qualification_change_credits', 'POST', { user_id: userId });
+        if (!res?.success) {
+            $('#qualificationChangeCardWrap').html('<div class="card user-soft-card mt-3"><div class="card-body text-danger">Yeterlilik değiştirme hakkı bilgisi alınamadı.</div></div>');
+            return;
+        }
+        qualificationCreditData = res.data || {};
+        renderQualificationChangeCard();
+    }
+
+    async function saveQualificationChangeCredits() {
+        const credits = Number($('#qualificationCreditsInput').val());
+        if (!Number.isInteger(credits) || credits < 0 || credits > 1000) {
+            await appAlert('Uyarı', 'Hak değeri 0 ile 1000 arasında tamsayı olmalıdır.', 'warning');
+            return;
+        }
+
+        const res = await api('set_qualification_change_credits', 'POST', { user_id: userId, credits });
+        if (!res?.success) {
+            await appAlert('Hata', getResponseMessage(res, 'Hak güncellenemedi.'), 'error');
+            return;
+        }
+        qualificationCreditData = res.data || {};
+        renderQualificationChangeCard();
+        await appAlert('Başarılı', getResponseMessage(res, 'Hak güncellendi.'), 'success');
+    }
     const subscriptionEventUiMap = {
         premium_started: { label: 'Premium başlatıldı', className: 'sub-event-started' },
         premium_renewed: { label: 'Premium yenilendi', className: 'sub-event-renewed' },
@@ -403,7 +481,12 @@ $(function () {
                     </table>
                 </div>
             </div>
+            <div id="qualificationChangeCardWrap"></div>
         `);
+
+        loadQualificationChangeCredits().catch(() => {
+            $('#qualificationChangeCardWrap').html('<div class="card user-soft-card mt-3"><div class="card-body text-danger">Yeterlilik değiştirme hakkı bilgisi yüklenemedi.</div></div>');
+        });
     }
 
     function renderLifecycle(items) {
@@ -995,6 +1078,7 @@ $(function () {
 
     $(document).on('click', '#saveManualPremiumBtn', saveManualPremium);
     $(document).on('click', '#removeManualPremiumBtn', removeManualPremium);
+    $(document).on('click', '#saveQualificationCreditsBtn', saveQualificationChangeCredits);
 
     $('#noteForm').on('submit', async function (e) {
         e.preventDefault();

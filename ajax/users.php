@@ -5,6 +5,7 @@ require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/user_lifecycle_helper.php';
+require_once '../includes/qualification_change_credit_helper.php';
 require_once '../api/v1/usage_limits_helper.php';
 
 $authUser = require_admin();
@@ -876,6 +877,14 @@ function users_get_admin_notes(PDO $pdo, string $userId): array
         . " ORDER BY `{$orderCol}` DESC LIMIT 200";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function users_get_qualification_change_history(PDO $pdo, string $userId, int $limit = 20): array
+{
+    $limit = max(1, min(100, $limit));
+    $stmt = $pdo->prepare('SELECT id, user_id, old_qualification_id, new_qualification_id, source, created_at FROM user_qualification_change_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ' . $limit);
+    $stmt->execute([$userId]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
 
@@ -1999,6 +2008,64 @@ try {
 
             users_response(true, '', [
                 'items' => users_get_user_subscription_history($pdo, $id),
+            ]);
+            break;
+        }
+
+        case 'get_qualification_change_credits': {
+            $id = trim((string)($_POST['user_id'] ?? $_GET['user_id'] ?? ''));
+            if ($id === '') {
+                users_response(false, 'Kullanıcı ID gerekli.', [], 422, ['user_id' => 'required']);
+            }
+
+            $targetUser = users_find_by_id($pdo, $schema, $id);
+            if (!$targetUser) {
+                users_response(false, 'Kullanıcı bulunamadı.', [], 404);
+            }
+
+            qualification_change_apply_annual_grant($pdo, $id);
+            $status = qualification_change_get_status($pdo, $id);
+            $history = users_get_qualification_change_history($pdo, $id, 20);
+
+            users_response(true, '', [
+                'credits' => (int)($status['credits'] ?? 0),
+                'annual_grant_count' => (int)($status['annual_grant_count'] ?? 0),
+                'next_grant_at' => $status['next_grant_at'] ?? null,
+                'last_granted_at' => $status['last_granted_at'] ?? null,
+                'history' => $history,
+            ]);
+            break;
+        }
+
+        case 'set_qualification_change_credits': {
+            $id = trim((string)($_POST['user_id'] ?? ''));
+            if ($id === '') {
+                users_response(false, 'Kullanıcı ID gerekli.', [], 422, ['user_id' => 'required']);
+            }
+
+            if (!isset($_POST['credits']) || filter_var($_POST['credits'], FILTER_VALIDATE_INT) === false) {
+                users_response(false, 'credits tamsayı olmalıdır.', [], 422, ['credits' => 'invalid']);
+            }
+            $credits = (int)$_POST['credits'];
+            if ($credits < 0 || $credits > 1000) {
+                users_response(false, 'credits 0 ile 1000 arasında olmalıdır.', [], 422, ['credits' => 'out_of_range']);
+            }
+
+            $targetUser = users_find_by_id($pdo, $schema, $id);
+            if (!$targetUser) {
+                users_response(false, 'Kullanıcı bulunamadı.', [], 404);
+            }
+
+            $adminUserId = (string)($authUser['user_id'] ?? '');
+            $status = qualification_change_set_admin_credits($pdo, $id, $credits, $adminUserId);
+            $history = users_get_qualification_change_history($pdo, $id, 20);
+
+            users_response(true, 'Yeterlilik değiştirme hakkı güncellendi.', [
+                'credits' => (int)($status['credits'] ?? 0),
+                'annual_grant_count' => (int)($status['annual_grant_count'] ?? 0),
+                'next_grant_at' => $status['next_grant_at'] ?? null,
+                'last_granted_at' => $status['last_granted_at'] ?? null,
+                'history' => $history,
             ]);
             break;
         }
