@@ -53,6 +53,28 @@ try {
     }
 
     try {
+        $lockKey = 'google_login_health_' . bin2hex(random_bytes(4));
+        $lockStmt = $pdo->prepare('SELECT GET_LOCK(?, 1)');
+        $lockStmt->execute([$lockKey]);
+        $locked = ((int)$lockStmt->fetchColumn()) === 1;
+
+        if ($locked) {
+            $unlockStmt = $pdo->prepare('SELECT RELEASE_LOCK(?)');
+            $unlockStmt->execute([$lockKey]);
+        }
+
+        $result['checks']['mysql_named_lock_available'] = [
+            'ok' => $locked,
+            'error' => $locked ? null : 'GET_LOCK başarısız veya timeout.',
+        ];
+    } catch (Throwable $e) {
+        $result['checks']['mysql_named_lock_available'] = [
+            'ok' => false,
+            'error' => $e->getMessage(),
+        ];
+    }
+
+    try {
         $providerSchema = api_get_user_auth_provider_schema($pdo);
         $result['checks']['provider_schema_available'] = [
             'ok' => true,

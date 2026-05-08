@@ -222,32 +222,44 @@ function api_fetch_google_tokeninfo(string $idToken): ?array
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 10,
-            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 5,
+            CURLOPT_CONNECTTIMEOUT => 3,
             CURLOPT_HTTPHEADER => ['Accept: application/json'],
         ]);
         $body = curl_exec($ch);
         $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        if (!is_string($body) || $body === '' || $status !== 200) {
+        if (!is_string($body) || $body === '') {
+            error_log('[google-login][token_verify] {"error":"empty_response","http_status":' . $status . '}');
+            return null;
+        }
+
+        if ($status !== 200) {
+            error_log('[google-login][token_verify] {"error":"http_status_invalid","http_status":' . $status . '}');
             return null;
         }
 
         $decoded = json_decode($body, true);
+        if (!is_array($decoded)) {
+            error_log('[google-login][token_verify] {"error":"json_parse_failed"}');
+            return null;
+        }
+
         return is_array($decoded) ? $decoded : null;
     }
 
     $context = stream_context_create([
         'http' => [
             'method' => 'GET',
-            'timeout' => 10,
+            'timeout' => 5,
             'header' => "Accept: application/json\r\n",
             'ignore_errors' => true,
         ],
     ]);
     $body = @file_get_contents($url, false, $context);
     if (!is_string($body) || trim($body) === '') {
+        error_log('[google-login][token_verify] {"error":"empty_response_stream"}');
         return null;
     }
 
@@ -258,10 +270,16 @@ function api_fetch_google_tokeninfo(string $idToken): ?array
         }
     }
     if ($status !== 200) {
+        error_log('[google-login][token_verify] {"error":"http_status_invalid_stream","http_status":' . $status . '}');
         return null;
     }
 
     $decoded = json_decode($body, true);
+    if (!is_array($decoded)) {
+        error_log('[google-login][token_verify] {"error":"json_parse_failed_stream"}');
+        return null;
+    }
+
     return is_array($decoded) ? $decoded : null;
 }
 
