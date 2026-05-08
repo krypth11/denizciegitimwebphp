@@ -43,6 +43,19 @@ function api_generate_deleted_email(PDO $pdo, array $profileSchema, int $maxAtte
     throw new RuntimeException('Silinen kullanıcı için benzersiz email üretilemedi.');
 }
 
+/**
+ * silinen{random}@denizciegitim.com emailinden denizci{random} display name üretir.
+ */
+function api_deleted_email_to_display_name(string $deletedEmail): string
+{
+    $prefix = strtolower(trim(strstr($deletedEmail, '@', true) ?: ''));
+    if (preg_match('/^silinen(\d+)$/', $prefix, $matches)) {
+        return 'denizci' . $matches[1];
+    }
+
+    return 'denizci' . random_int(10000, 1000000);
+}
+
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)$auth['user']['id'];
@@ -124,7 +137,7 @@ try {
         }
 
         if ($profileSchema['full_name']) {
-            $updates[$profileSchema['full_name']] = 'Silinen Kullanıcı';
+            $updates[$profileSchema['full_name']] = api_deleted_email_to_display_name($deletedEmail);
         }
 
         if ($profileSchema['pending_email']) {

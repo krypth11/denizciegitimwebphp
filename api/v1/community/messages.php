@@ -211,7 +211,16 @@ try {
             $emailPrefix = trim((string)$emailPrefix);
         }
 
-        $displayName = $fullName !== '' ? $fullName : ($emailPrefix !== '' ? $emailPrefix : 'Kullanıcı');
+        $deletedDisplayName = '';
+        if ($emailPrefix !== '' && preg_match('/^silinen(\d+)$/i', $emailPrefix, $matches)) {
+            $deletedDisplayName = 'denizci' . $matches[1];
+        }
+
+        if ($deletedDisplayName !== '') {
+            $displayName = $deletedDisplayName;
+        } else {
+            $displayName = $fullName !== '' ? $fullName : ($emailPrefix !== '' ? $emailPrefix : 'Kullanıcı');
+        }
         $resolvedIsGuest = null;
         if (($r['user_is_guest_raw'] ?? null) !== null) {
             $resolvedIsGuest = ((int)($r['user_is_guest_raw'] ?? 0) === 1);
