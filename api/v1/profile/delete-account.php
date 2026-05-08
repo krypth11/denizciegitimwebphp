@@ -166,6 +166,11 @@ try {
         $revokeStmt = $pdo->prepare($revokeSql);
         $revokeStmt->execute([$userId]);
 
+        $providerSchema = api_get_user_auth_provider_schema($pdo);
+        $deleteProviderSql = 'DELETE FROM `' . $providerSchema['table'] . '` WHERE `' . $providerSchema['user_id'] . '` = ?';
+        $deleteProviderStmt = $pdo->prepare($deleteProviderSql);
+        $deleteProviderStmt->execute([$userId]);
+
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {

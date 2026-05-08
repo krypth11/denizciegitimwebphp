@@ -344,6 +344,72 @@ function api_find_user_id_by_auth_provider(PDO $pdo, string $provider, string $p
     return $row ? (string)$row['user_id'] : null;
 }
 
+function api_find_active_user_id_by_auth_provider(PDO $pdo, string $provider, string $providerUserId): ?string
+{
+    $providerSchema = api_get_user_auth_provider_schema($pdo);
+    $profileSchema = api_get_profile_schema($pdo);
+
+    $selectDeleted = $profileSchema['is_deleted']
+        ? ('`u`.`' . $profileSchema['is_deleted'] . '` AS is_deleted')
+        : '0 AS is_deleted';
+
+    $sql = 'SELECT p.`' . $providerSchema['user_id'] . '` AS user_id, ' . $selectDeleted
+        . ' FROM `' . $providerSchema['table'] . '` p'
+        . ' INNER JOIN `' . $profileSchema['table'] . '` u'
+        . ' ON p.`' . $providerSchema['user_id'] . '` = u.`' . $profileSchema['id'] . '`'
+        . ' WHERE p.`' . $providerSchema['provider'] . '` = ?'
+        . ' AND p.`' . $providerSchema['provider_user_id'] . '` = ?'
+        . ' LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$provider, $providerUserId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$row) {
+        return null;
+    }
+
+    if (((int)($row['is_deleted'] ?? 0)) === 1) {
+        return null;
+    }
+
+    return (string)$row['user_id'];
+}
+
+function api_cleanup_deleted_auth_provider_binding(PDO $pdo, string $provider, string $providerUserId): void
+{
+    $providerSchema = api_get_user_auth_provider_schema($pdo);
+    $profileSchema = api_get_profile_schema($pdo);
+
+    $selectDeleted = $profileSchema['is_deleted']
+        ? ('`u`.`' . $profileSchema['is_deleted'] . '` AS is_deleted')
+        : '0 AS is_deleted';
+
+    $findSql = 'SELECT p.`' . $providerSchema['id'] . '` AS provider_row_id, ' . $selectDeleted
+        . ' FROM `' . $providerSchema['table'] . '` p'
+        . ' INNER JOIN `' . $profileSchema['table'] . '` u'
+        . ' ON p.`' . $providerSchema['user_id'] . '` = u.`' . $profileSchema['id'] . '`'
+        . ' WHERE p.`' . $providerSchema['provider'] . '` = ?'
+        . ' AND p.`' . $providerSchema['provider_user_id'] . '` = ?'
+        . ' LIMIT 1';
+
+    $findStmt = $pdo->prepare($findSql);
+    $findStmt->execute([$provider, $providerUserId]);
+    $row = $findStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$row) {
+        return;
+    }
+
+    if (((int)($row['is_deleted'] ?? 0)) !== 1) {
+        return;
+    }
+
+    $deleteSql = 'DELETE FROM `' . $providerSchema['table'] . '` WHERE `' . $providerSchema['id'] . '` = ?';
+    $deleteStmt = $pdo->prepare($deleteSql);
+    $deleteStmt->execute([(string)$row['provider_row_id']]);
+}
+
 function api_create_user_auth_provider(PDO $pdo, string $userId, string $provider, string $providerUserId, array $meta = []): void
 {
     $schema = api_get_user_auth_provider_schema($pdo);

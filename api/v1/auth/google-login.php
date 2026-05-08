@@ -31,6 +31,8 @@ try {
     $provider = 'google';
     $providerSchema = api_get_user_auth_provider_schema($pdo);
 
+    api_cleanup_deleted_auth_provider_binding($pdo, $provider, $googleSub);
+
     $touchProviderLastLogin = static function (string $userId) use ($pdo, $providerSchema, $provider, $googleSub): void {
         if (!$providerSchema['last_login_at']) {
             return;
@@ -45,7 +47,7 @@ try {
         $stmt->execute([$userId, $provider, $googleSub]);
     };
 
-    $existingUserId = api_find_user_id_by_auth_provider($pdo, $provider, $googleSub);
+    $existingUserId = api_find_active_user_id_by_auth_provider($pdo, $provider, $googleSub);
     if ($existingUserId) {
         $touchProviderLastLogin($existingUserId);
         $token = api_create_user_token($pdo, $existingUserId);
@@ -61,7 +63,8 @@ try {
         $pdo->beginTransaction();
 
         // yarış durumu için transaction içinde provider tekrar kontrolü
-        $existingUserIdTx = api_find_user_id_by_auth_provider($pdo, $provider, $googleSub);
+        api_cleanup_deleted_auth_provider_binding($pdo, $provider, $googleSub);
+        $existingUserIdTx = api_find_active_user_id_by_auth_provider($pdo, $provider, $googleSub);
         if ($existingUserIdTx) {
             $touchProviderLastLogin($existingUserIdTx);
             $token = api_create_user_token($pdo, $existingUserIdTx);
@@ -153,7 +156,8 @@ try {
 
         if (api_is_duplicate_error($e)) {
             // Provider/sub zaten başka user'a bağlı ise net conflict döndür
-            $boundUserId = api_find_user_id_by_auth_provider($pdo, $provider, $googleSub);
+            api_cleanup_deleted_auth_provider_binding($pdo, $provider, $googleSub);
+            $boundUserId = api_find_active_user_id_by_auth_provider($pdo, $provider, $googleSub);
             if ($boundUserId) {
                 api_error('Bu Google hesabı başka bir kullanıcıya bağlı.', 409);
             }
