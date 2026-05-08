@@ -5,6 +5,8 @@ require_once dirname(__DIR__) . '/auth_helper.php';
 
 api_require_method('POST');
 
+$debug = isset($_GET['debug']) && $_GET['debug'] === '1';
+
 try {
     $payload = api_get_request_data();
     $idToken = trim((string)($payload['id_token'] ?? ''));
@@ -149,6 +151,8 @@ try {
             $pdo->rollBack();
         }
 
+        error_log('[google-login][tx] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+
         $status = (int)$e->getCode();
         if ($status >= 400 && $status < 500) {
             api_error($e->getMessage(), $status);
@@ -200,6 +204,8 @@ try {
                         if ($pdo->inTransaction()) {
                             $pdo->rollBack();
                         }
+
+                        error_log('[google-login][rebind] ' . $rebindError->getMessage() . ' @ ' . $rebindError->getFile() . ':' . $rebindError->getLine());
                     }
                 }
             }
@@ -216,5 +222,15 @@ try {
     ]);
 } catch (Throwable $e) {
     error_log('[google-login] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
+
+    if ($debug) {
+        api_error('Google login debug hatası.', 500, [
+            'error' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'trace' => array_slice(explode("\n", $e->getTraceAsString()), 0, 8),
+        ]);
+    }
+
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
 }
