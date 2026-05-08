@@ -410,6 +410,38 @@ function api_cleanup_deleted_auth_provider_binding(PDO $pdo, string $provider, s
     $deleteStmt->execute([(string)$row['provider_row_id']]);
 }
 
+function api_cleanup_deleted_auth_provider_bindings_for_google(PDO $pdo, string $provider, string $providerUserId, string $providerEmail): void
+{
+    $providerSchema = api_get_user_auth_provider_schema($pdo);
+    $profileSchema = api_get_profile_schema($pdo);
+
+    $providerEmail = strtolower(trim($providerEmail));
+
+    $whereParts = [
+        '(p.`' . $providerSchema['provider'] . '` = ? AND p.`' . $providerSchema['provider_user_id'] . '` = ?)',
+    ];
+    $params = [$provider, $providerUserId];
+
+    if ($providerSchema['provider_email'] && $providerEmail !== '') {
+        $whereParts[] = '(p.`' . $providerSchema['provider'] . '` = ? AND LOWER(p.`' . $providerSchema['provider_email'] . '`) = LOWER(?))';
+        $params[] = $provider;
+        $params[] = $providerEmail;
+    }
+
+    $deletedCondition = $profileSchema['is_deleted']
+        ? ('u.`' . $profileSchema['is_deleted'] . '` = 1')
+        : '0 = 1';
+
+    $sql = 'DELETE p FROM `' . $providerSchema['table'] . '` p'
+        . ' INNER JOIN `' . $profileSchema['table'] . '` u'
+        . ' ON p.`' . $providerSchema['user_id'] . '` = u.`' . $profileSchema['id'] . '`'
+        . ' WHERE (' . implode(' OR ', $whereParts) . ')'
+        . ' AND ' . $deletedCondition;
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+}
+
 function api_create_user_auth_provider(PDO $pdo, string $userId, string $provider, string $providerUserId, array $meta = []): void
 {
     $schema = api_get_user_auth_provider_schema($pdo);

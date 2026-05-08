@@ -31,7 +31,7 @@ try {
     $provider = 'google';
     $providerSchema = api_get_user_auth_provider_schema($pdo);
 
-    api_cleanup_deleted_auth_provider_binding($pdo, $provider, $googleSub);
+    api_cleanup_deleted_auth_provider_bindings_for_google($pdo, $provider, $googleSub, $googleEmail);
 
     $touchProviderLastLogin = static function (string $userId) use ($pdo, $providerSchema, $provider, $googleSub): void {
         if (!$providerSchema['last_login_at']) {
@@ -63,7 +63,7 @@ try {
         $pdo->beginTransaction();
 
         // yarış durumu için transaction içinde provider tekrar kontrolü
-        api_cleanup_deleted_auth_provider_binding($pdo, $provider, $googleSub);
+        api_cleanup_deleted_auth_provider_bindings_for_google($pdo, $provider, $googleSub, $googleEmail);
         $existingUserIdTx = api_find_active_user_id_by_auth_provider($pdo, $provider, $googleSub);
         if ($existingUserIdTx) {
             $touchProviderLastLogin($existingUserIdTx);
@@ -155,11 +155,53 @@ try {
         }
 
         if (api_is_duplicate_error($e)) {
-            // Provider/sub zaten başka user'a bağlı ise net conflict döndür
-            api_cleanup_deleted_auth_provider_binding($pdo, $provider, $googleSub);
+            api_cleanup_deleted_auth_provider_bindings_for_google($pdo, $provider, $googleSub, $googleEmail);
             $boundUserId = api_find_active_user_id_by_auth_provider($pdo, $provider, $googleSub);
             if ($boundUserId) {
-                api_error('Bu Google hesabı başka bir kullanıcıya bağlı.', 409);
+                $touchProviderLastLogin($boundUserId);
+                $token = api_create_user_token($pdo, $boundUserId);
+                api_update_last_sign_in($pdo, $boundUserId);
+
+                api_success('Giriş başarılı.', [
+                    'token' => $token,
+                    'user' => api_build_auth_user_payload($pdo, $boundUserId),
+                ]);
+            }
+
+            $activeUserByEmail = api_find_active_user_by_email($pdo, $googleEmail);
+            if ($activeUserByEmail) {
+                $activeUserIdByEmail = (string)($activeUserByEmail['id'] ?? '');
+                if ($activeUserIdByEmail !== '') {
+                    try {
+                        $pdo->beginTransaction();
+                        api_cleanup_deleted_auth_provider_bindings_for_google($pdo, $provider, $googleSub, $googleEmail);
+
+                        $boundUserIdTx = api_find_active_user_id_by_auth_provider($pdo, $provider, $googleSub);
+                        if (!$boundUserIdTx) {
+                            api_create_user_auth_provider($pdo, $activeUserIdByEmail, $provider, $googleSub, [
+                                'provider_email' => $googleEmail,
+                                'provider_name' => $googleName,
+                                'provider_avatar' => $googlePicture,
+                            ]);
+                        } else {
+                            $activeUserIdByEmail = $boundUserIdTx;
+                        }
+
+                        $touchProviderLastLogin($activeUserIdByEmail);
+                        $token = api_create_user_token($pdo, $activeUserIdByEmail);
+                        api_update_last_sign_in($pdo, $activeUserIdByEmail);
+                        $pdo->commit();
+
+                        api_success('Giriş başarılı.', [
+                            'token' => $token,
+                            'user' => api_build_auth_user_payload($pdo, $activeUserIdByEmail),
+                        ]);
+                    } catch (Throwable $rebindError) {
+                        if ($pdo->inTransaction()) {
+                            $pdo->rollBack();
+                        }
+                    }
+                }
             }
 
             api_error('Bu e-posta zaten kullanılıyor. Lütfen tekrar deneyin.', 409);
@@ -173,5 +215,6 @@ try {
         'user' => api_build_auth_user_payload($pdo, $newUserId),
     ]);
 } catch (Throwable $e) {
+    error_log('[google-login] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
 }

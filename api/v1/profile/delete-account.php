@@ -166,10 +166,14 @@ try {
         $revokeStmt = $pdo->prepare($revokeSql);
         $revokeStmt->execute([$userId]);
 
-        $providerSchema = api_get_user_auth_provider_schema($pdo);
-        $deleteProviderSql = 'DELETE FROM `' . $providerSchema['table'] . '` WHERE `' . $providerSchema['user_id'] . '` = ?';
-        $deleteProviderStmt = $pdo->prepare($deleteProviderSql);
-        $deleteProviderStmt->execute([$userId]);
+        try {
+            $providerSchema = api_get_user_auth_provider_schema($pdo);
+            $deleteProviderSql = 'DELETE FROM `' . $providerSchema['table'] . '` WHERE `' . $providerSchema['user_id'] . '` = ?';
+            $deleteProviderStmt = $pdo->prepare($deleteProviderSql);
+            $deleteProviderStmt->execute([$userId]);
+        } catch (Throwable $providerCleanupError) {
+            error_log('[delete-account provider cleanup] ' . $providerCleanupError->getMessage());
+        }
 
         $pdo->commit();
     } catch (Throwable $e) {
