@@ -103,7 +103,7 @@ try {
                 $newUserId = api_create_user_profile($pdo, [
                     'full_name' => $googleName,
                     'email' => $googleEmail,
-                    'password_hash' => '',
+                    'password_hash' => api_generate_unusable_password_hash(),
                     'is_admin' => 0,
                     'is_guest' => 0,
                     'email_verified' => 1,
@@ -125,6 +125,14 @@ try {
 
         if ($resolvedUserId === '') {
             throw new RuntimeException('İşlem sırasında bir sunucu hatası oluştu.', 500);
+        }
+
+        $passwordHashRepaired = api_repair_missing_password_hash_if_empty($pdo, $resolvedUserId);
+        if ($passwordHashRepaired) {
+            $googleLog('repaired_missing_password_hash', [
+                'user_id' => $resolvedUserId,
+                'provider' => $provider,
+            ]);
         }
 
         $googleLog('provider_bind', ['step' => 'start']);

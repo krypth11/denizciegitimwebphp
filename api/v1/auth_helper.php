@@ -53,6 +53,44 @@ function api_generate_token_plain(): string
     return bin2hex(random_bytes(32));
 }
 
+function api_generate_unusable_password_hash(): string
+{
+    return password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT);
+}
+
+function api_user_has_usable_password_hash(PDO $pdo, string $userId): bool
+{
+    $schema = api_get_user_schema($pdo);
+    if (!$schema['password']) {
+        return false;
+    }
+
+    $sql = 'SELECT `' . $schema['password'] . '` AS password_hash FROM `' . $schema['table'] . '` WHERE `' . $schema['id'] . '` = ? LIMIT 1';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$userId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return false;
+    }
+
+    return trim((string)($row['password_hash'] ?? '')) !== '';
+}
+
+function api_repair_missing_password_hash_if_empty(PDO $pdo, string $userId): bool
+{
+    $schema = api_get_user_schema($pdo);
+    if (!$schema['password']) {
+        return false;
+    }
+
+    $newHash = api_generate_unusable_password_hash();
+    $sql = 'UPDATE `' . $schema['table'] . '` SET `' . $schema['password'] . '` = ? WHERE `' . $schema['id'] . '` = ? AND (`' . $schema['password'] . '` IS NULL OR TRIM(`' . $schema['password'] . '`) = \'\')';
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$newHash, $userId]);
+
+    return $stmt->rowCount() > 0;
+}
+
 function api_get_user_schema(PDO $pdo): array
 {
     $columns = get_table_columns($pdo, 'user_profiles');

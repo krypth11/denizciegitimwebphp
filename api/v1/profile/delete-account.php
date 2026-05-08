@@ -109,6 +109,28 @@ try {
     }
 
     $currentHash = (string)($userRow['password_hash'] ?? '');
+    if ($currentHash === '') {
+        $hasGoogleProvider = false;
+        try {
+            $providerSchema = api_get_user_auth_provider_schema($pdo);
+            $providerSql = 'SELECT COUNT(*) FROM `' . $providerSchema['table'] . '` WHERE `' . $providerSchema['user_id'] . '` = ? AND LOWER(`' . $providerSchema['provider'] . '`) = LOWER(?)';
+            $providerStmt = $pdo->prepare($providerSql);
+            $providerStmt->execute([$userId, 'google']);
+            $hasGoogleProvider = ((int)$providerStmt->fetchColumn()) > 0;
+        } catch (Throwable $providerCheckError) {
+            $hasGoogleProvider = false;
+        }
+
+        if ($hasGoogleProvider) {
+            api_repair_missing_password_hash_if_empty($pdo, $userId);
+
+            $refreshStmt = $pdo->prepare($userSql);
+            $refreshStmt->execute([$userId]);
+            $refreshedUserRow = $refreshStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            $currentHash = (string)($refreshedUserRow['password_hash'] ?? '');
+        }
+    }
+
     if ($currentHash === '' || !verify_password($password, $currentHash)) {
         api_error('Şifre hatalı.', 401);
     }
