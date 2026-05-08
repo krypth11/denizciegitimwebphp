@@ -234,6 +234,46 @@ function question_scope_bulk_update_mapping_stats(PDO $pdo, string $mappingId, a
     $stmt->execute($params);
 }
 
+function question_scope_bulk_deactivate_mapping_if_empty(PDO $pdo, string $mappingId, int $targetLinkedCount): void
+{
+    $mappingId = trim($mappingId);
+    if ($mappingId === '' || $targetLinkedCount > 0) {
+        return;
+    }
+
+    $cols = get_table_columns($pdo, 'question_scope_bulk_mappings');
+    if (!$cols) {
+        return;
+    }
+
+    // Audit ihtiyacı için mümkünse soft-hide tercih edilir.
+    if (in_array('is_active', $cols, true)) {
+        $sets = ['is_active = 0'];
+        if (in_array('updated_at', $cols, true)) {
+            $sets[] = 'updated_at = NOW()';
+        }
+        $sql = 'UPDATE question_scope_bulk_mappings SET ' . implode(', ', $sets) . ' WHERE id = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$mappingId]);
+        return;
+    }
+
+    if (in_array('deleted_at', $cols, true)) {
+        $sets = ['deleted_at = NOW()'];
+        if (in_array('updated_at', $cols, true)) {
+            $sets[] = 'updated_at = NOW()';
+        }
+        $sql = 'UPDATE question_scope_bulk_mappings SET ' . implode(', ', $sets) . ' WHERE id = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$mappingId]);
+        return;
+    }
+
+    // Soft-hide kolonu yoksa boş mapping kullanıcıya görünmemesi için fiziksel kaldır.
+    $stmt = $pdo->prepare('DELETE FROM question_scope_bulk_mappings WHERE id = ? LIMIT 1');
+    $stmt->execute([$mappingId]);
+}
+
 function question_scope_bulk_upsert_mapping(PDO $pdo, array $filters, array $target, array $summary): string
 {
     if (!question_scope_bulk_has_mappings_table($pdo)) {
@@ -472,6 +512,12 @@ function question_scope_bulk_list_mappings(PDO $pdo): array
     $out = [];
     foreach ($rows as $row) {
         $summary = question_scope_bulk_compute_mapping_summary($pdo, $row);
+
+        // Aktif eşleşme listesinde boş/eski mappingleri gizle.
+        if ((int)$summary['target_linked_count'] <= 0 || (int)$summary['source_count'] <= 0) {
+            continue;
+        }
+
         $out[] = [
             'id' => (string)$row['id'],
             'source_qualification_name' => (string)($row['source_qualification_name'] ?? ''),
@@ -596,6 +642,7 @@ function question_scope_bulk_cancel_mapping(PDO $pdo, string $mappingId): array
             'inserted_count' => 0,
             'removed_count' => (int)$result['deleted_count'],
         ], false);
+        question_scope_bulk_deactivate_mapping_if_empty($pdo, (string)$mapping['id'], $targetLinkedAfter);
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {

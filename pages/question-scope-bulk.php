@@ -690,9 +690,7 @@ $(function () {
 
         await appAlert('Başarılı', (res.message || 'İşlem tamamlandı.') + '\n\n' + detailMessage, 'success');
         await doPreview();
-        if (isAdd) {
-            await loadMappings();
-        }
+        await loadMappings();
     }
 
     $('#sourceQualification').on('change', function () {
