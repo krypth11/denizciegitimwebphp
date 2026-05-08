@@ -133,11 +133,13 @@ try {
     try {
         $providerSchema = api_get_user_auth_provider_schema($pdo);
         $profileSchema = api_get_profile_schema($pdo);
+        $joinProviderUserIdExpr = api_sql_collated_utf8_expr('p.`' . $providerSchema['user_id'] . '`');
+        $joinProfileIdExpr = api_sql_collated_utf8_expr('u.`' . $profileSchema['id'] . '`');
 
         $joinSql = 'SELECT p.`' . $providerSchema['user_id'] . '` AS user_id '
             . 'FROM `' . $providerSchema['table'] . '` p '
             . 'INNER JOIN `' . $profileSchema['table'] . '` u '
-            . 'ON u.`' . $profileSchema['id'] . '` = p.`' . $providerSchema['user_id'] . '` '
+            . 'ON ' . $joinProviderUserIdExpr . ' = ' . $joinProfileIdExpr . ' '
             . 'LIMIT 1';
 
         $joinStmt = $pdo->query($joinSql);

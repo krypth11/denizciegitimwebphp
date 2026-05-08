@@ -40,11 +40,19 @@ try {
             return;
         }
 
+        $userIdExpr = api_sql_collated_utf8_expr('`' . $providerSchema['user_id'] . '`');
+        $userIdParamExpr = api_sql_collated_utf8_expr('?');
+        $providerExpr = api_sql_collated_utf8_expr('`' . $providerSchema['provider'] . '`');
+        $providerParamExpr = api_sql_collated_utf8_expr('?');
+        $providerUserIdExpr = api_sql_collated_utf8_expr('`' . $providerSchema['provider_user_id'] . '`');
+        $providerUserIdParamExpr = api_sql_collated_utf8_expr('?');
+
         $sql = 'UPDATE `' . $providerSchema['table'] . '` SET `'
-            . $providerSchema['last_login_at'] . '` = NOW() WHERE `'
-            . $providerSchema['user_id'] . '` = ? AND `'
-            . $providerSchema['provider'] . '` = ? AND `'
-            . $providerSchema['provider_user_id'] . '` = ? LIMIT 1';
+            . $providerSchema['last_login_at'] . '` = NOW() WHERE '
+            . $userIdExpr . ' = ' . $userIdParamExpr
+            . ' AND ' . $providerExpr . ' = ' . $providerParamExpr
+            . ' AND ' . $providerUserIdExpr . ' = ' . $providerUserIdParamExpr
+            . ' LIMIT 1';
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$userId, $provider, $googleSub]);
     };

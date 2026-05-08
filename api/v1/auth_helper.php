@@ -331,11 +331,33 @@ function api_get_user_auth_provider_schema(PDO $pdo): array
     ];
 }
 
+function api_sql_auth_collation(): string
+{
+    return 'utf8mb4_unicode_ci';
+}
+
+function api_sql_collated_utf8_expr(string $expression): string
+{
+    $collation = api_sql_auth_collation();
+    return 'CONVERT(' . $expression . ' USING utf8mb4) COLLATE ' . $collation;
+}
+
+function api_sql_collated_lower_utf8_expr(string $expression): string
+{
+    return 'LOWER(' . api_sql_collated_utf8_expr($expression) . ')';
+}
+
 function api_find_user_id_by_auth_provider(PDO $pdo, string $provider, string $providerUserId): ?string
 {
     $schema = api_get_user_auth_provider_schema($pdo);
+    $providerExpr = api_sql_collated_utf8_expr('`' . $schema['provider'] . '`');
+    $providerParamExpr = api_sql_collated_utf8_expr('?');
+    $providerUserIdExpr = api_sql_collated_utf8_expr('`' . $schema['provider_user_id'] . '`');
+    $providerUserIdParamExpr = api_sql_collated_utf8_expr('?');
+
     $sql = 'SELECT `' . $schema['user_id'] . '` AS user_id FROM `' . $schema['table'] . '` '
-        . 'WHERE `' . $schema['provider'] . '` = ? AND `' . $schema['provider_user_id'] . '` = ? LIMIT 1';
+        . 'WHERE ' . $providerExpr . ' = ' . $providerParamExpr
+        . ' AND ' . $providerUserIdExpr . ' = ' . $providerUserIdParamExpr . ' LIMIT 1';
 
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$provider, $providerUserId]);
@@ -348,6 +370,12 @@ function api_find_active_user_id_by_auth_provider(PDO $pdo, string $provider, st
 {
     $providerSchema = api_get_user_auth_provider_schema($pdo);
     $profileSchema = api_get_profile_schema($pdo);
+    $joinProviderUserIdExpr = api_sql_collated_utf8_expr('p.`' . $providerSchema['user_id'] . '`');
+    $joinProfileIdExpr = api_sql_collated_utf8_expr('u.`' . $profileSchema['id'] . '`');
+    $providerExpr = api_sql_collated_utf8_expr('p.`' . $providerSchema['provider'] . '`');
+    $providerParamExpr = api_sql_collated_utf8_expr('?');
+    $providerUserIdExpr = api_sql_collated_utf8_expr('p.`' . $providerSchema['provider_user_id'] . '`');
+    $providerUserIdParamExpr = api_sql_collated_utf8_expr('?');
 
     $selectDeleted = $profileSchema['is_deleted']
         ? ('`u`.`' . $profileSchema['is_deleted'] . '` AS is_deleted')
@@ -356,9 +384,9 @@ function api_find_active_user_id_by_auth_provider(PDO $pdo, string $provider, st
     $sql = 'SELECT p.`' . $providerSchema['user_id'] . '` AS user_id, ' . $selectDeleted
         . ' FROM `' . $providerSchema['table'] . '` p'
         . ' INNER JOIN `' . $profileSchema['table'] . '` u'
-        . ' ON p.`' . $providerSchema['user_id'] . '` = u.`' . $profileSchema['id'] . '`'
-        . ' WHERE p.`' . $providerSchema['provider'] . '` = ?'
-        . ' AND p.`' . $providerSchema['provider_user_id'] . '` = ?'
+        . ' ON ' . $joinProviderUserIdExpr . ' = ' . $joinProfileIdExpr
+        . ' WHERE ' . $providerExpr . ' = ' . $providerParamExpr
+        . ' AND ' . $providerUserIdExpr . ' = ' . $providerUserIdParamExpr
         . ' LIMIT 1';
 
     $stmt = $pdo->prepare($sql);
@@ -380,6 +408,12 @@ function api_cleanup_deleted_auth_provider_binding(PDO $pdo, string $provider, s
 {
     $providerSchema = api_get_user_auth_provider_schema($pdo);
     $profileSchema = api_get_profile_schema($pdo);
+    $joinProviderUserIdExpr = api_sql_collated_utf8_expr('p.`' . $providerSchema['user_id'] . '`');
+    $joinProfileIdExpr = api_sql_collated_utf8_expr('u.`' . $profileSchema['id'] . '`');
+    $providerExpr = api_sql_collated_utf8_expr('p.`' . $providerSchema['provider'] . '`');
+    $providerParamExpr = api_sql_collated_utf8_expr('?');
+    $providerUserIdExpr = api_sql_collated_utf8_expr('p.`' . $providerSchema['provider_user_id'] . '`');
+    $providerUserIdParamExpr = api_sql_collated_utf8_expr('?');
 
     $selectDeleted = $profileSchema['is_deleted']
         ? ('`u`.`' . $profileSchema['is_deleted'] . '` AS is_deleted')
@@ -388,9 +422,9 @@ function api_cleanup_deleted_auth_provider_binding(PDO $pdo, string $provider, s
     $findSql = 'SELECT p.`' . $providerSchema['id'] . '` AS provider_row_id, ' . $selectDeleted
         . ' FROM `' . $providerSchema['table'] . '` p'
         . ' INNER JOIN `' . $profileSchema['table'] . '` u'
-        . ' ON p.`' . $providerSchema['user_id'] . '` = u.`' . $profileSchema['id'] . '`'
-        . ' WHERE p.`' . $providerSchema['provider'] . '` = ?'
-        . ' AND p.`' . $providerSchema['provider_user_id'] . '` = ?'
+        . ' ON ' . $joinProviderUserIdExpr . ' = ' . $joinProfileIdExpr
+        . ' WHERE ' . $providerExpr . ' = ' . $providerParamExpr
+        . ' AND ' . $providerUserIdExpr . ' = ' . $providerUserIdParamExpr
         . ' LIMIT 1';
 
     $findStmt = $pdo->prepare($findSql);
@@ -414,16 +448,24 @@ function api_cleanup_deleted_auth_provider_bindings_for_google(PDO $pdo, string 
 {
     $providerSchema = api_get_user_auth_provider_schema($pdo);
     $profileSchema = api_get_profile_schema($pdo);
+    $joinProviderUserIdExpr = api_sql_collated_utf8_expr('p.`' . $providerSchema['user_id'] . '`');
+    $joinProfileIdExpr = api_sql_collated_utf8_expr('u.`' . $profileSchema['id'] . '`');
+    $providerExpr = api_sql_collated_utf8_expr('p.`' . $providerSchema['provider'] . '`');
+    $providerParamExpr = api_sql_collated_utf8_expr('?');
+    $providerUserIdExpr = api_sql_collated_utf8_expr('p.`' . $providerSchema['provider_user_id'] . '`');
+    $providerUserIdParamExpr = api_sql_collated_utf8_expr('?');
 
     $providerEmail = strtolower(trim($providerEmail));
 
     $whereParts = [
-        '(p.`' . $providerSchema['provider'] . '` = ? AND p.`' . $providerSchema['provider_user_id'] . '` = ?)',
+        '(' . $providerExpr . ' = ' . $providerParamExpr . ' AND ' . $providerUserIdExpr . ' = ' . $providerUserIdParamExpr . ')',
     ];
     $params = [$provider, $providerUserId];
 
     if ($providerSchema['provider_email'] && $providerEmail !== '') {
-        $whereParts[] = '(p.`' . $providerSchema['provider'] . '` = ? AND LOWER(p.`' . $providerSchema['provider_email'] . '`) = LOWER(?))';
+        $providerEmailExpr = api_sql_collated_lower_utf8_expr('p.`' . $providerSchema['provider_email'] . '`');
+        $providerEmailParamExpr = api_sql_collated_lower_utf8_expr('?');
+        $whereParts[] = '(' . $providerExpr . ' = ' . $providerParamExpr . ' AND ' . $providerEmailExpr . ' = ' . $providerEmailParamExpr . ')';
         $params[] = $provider;
         $params[] = $providerEmail;
     }
@@ -434,7 +476,7 @@ function api_cleanup_deleted_auth_provider_bindings_for_google(PDO $pdo, string 
 
     $sql = 'DELETE p FROM `' . $providerSchema['table'] . '` p'
         . ' INNER JOIN `' . $profileSchema['table'] . '` u'
-        . ' ON p.`' . $providerSchema['user_id'] . '` = u.`' . $profileSchema['id'] . '`'
+        . ' ON ' . $joinProviderUserIdExpr . ' = ' . $joinProfileIdExpr
         . ' WHERE (' . implode(' OR ', $whereParts) . ')'
         . ' AND ' . $deletedCondition;
 
