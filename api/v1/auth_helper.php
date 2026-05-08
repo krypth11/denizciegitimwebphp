@@ -322,7 +322,7 @@ function api_get_user_auth_provider_schema(PDO $pdo): array
         'user_id' => $pick(['user_id']),
         'provider' => $pick(['provider']),
         'provider_user_id' => $pick(['provider_user_id']),
-        'provider_email' => $pick(['provider_email'], false),
+        'provider_email' => $pick(['provider_email', 'email'], false),
         'provider_name' => $pick(['provider_name'], false),
         'provider_avatar' => $pick(['provider_avatar', 'provider_picture'], false),
         'last_login_at' => $pick(['last_login_at'], false),

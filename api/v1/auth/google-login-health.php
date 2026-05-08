@@ -131,12 +131,16 @@ try {
     }
 
     try {
-        $joinStmt = $pdo->query(
-            'SELECT uap.user_id\n'
-            . 'FROM user_auth_providers uap\n'
-            . 'INNER JOIN user_profiles up ON up.id = uap.user_id\n'
-            . 'LIMIT 1'
-        );
+        $providerSchema = api_get_user_auth_provider_schema($pdo);
+        $profileSchema = api_get_profile_schema($pdo);
+
+        $joinSql = 'SELECT p.`' . $providerSchema['user_id'] . '` AS user_id '
+            . 'FROM `' . $providerSchema['table'] . '` p '
+            . 'INNER JOIN `' . $profileSchema['table'] . '` u '
+            . 'ON u.`' . $profileSchema['id'] . '` = p.`' . $providerSchema['user_id'] . '` '
+            . 'LIMIT 1';
+
+        $joinStmt = $pdo->query($joinSql);
         $joinStmt->fetch(PDO::FETCH_ASSOC);
 
         $result['checks']['can_query_provider_join'] = [
