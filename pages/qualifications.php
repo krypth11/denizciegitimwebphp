@@ -238,6 +238,91 @@ include '../includes/sidebar.php';
 
 <?php
 $extra_js = <<<'JAVASCRIPT'
+<style>
+.qualification-detail-row > td {
+    background: #fff;
+}
+
+.qualification-breakdown-wrapper {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: visible;
+}
+
+.course-breakdown-card {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    overflow: visible;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: .5rem;
+    background: var(--bs-light-bg-subtle, #f8f9fa);
+    margin-bottom: .5rem;
+}
+
+.course-breakdown-toggle {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    padding: .625rem .75rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    text-align: left;
+}
+
+.course-breakdown-toggle-main {
+    display: inline-flex;
+    align-items: center;
+    gap: .375rem;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.course-title {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.topic-breakdown-list {
+    margin-left: .75rem;
+    margin-right: .75rem;
+    margin-bottom: .75rem;
+}
+
+.topic-breakdown-row {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    padding: .5rem .625rem;
+    border: 1px solid var(--bs-border-color, #dee2e6);
+    border-radius: .375rem;
+    background: #fff;
+}
+
+@media (max-width: 768px) {
+    .qualification-breakdown-wrapper {
+        padding: 10px 8px;
+    }
+
+    .course-breakdown-card {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        overflow: visible;
+    }
+
+    .topic-breakdown-list {
+        margin-left: 0;
+        margin-right: 0;
+    }
+}
+</style>
 <script>
 $(document).ready(function() {
     const appAlert = (title, message, type = 'info') => {
@@ -432,18 +517,18 @@ $(document).ready(function() {
     const topicHtml = (topic) => {
         const count = parseInt(topic.question_count || 0, 10);
         return `
-            <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+            <div class="topic-breakdown-row">
                 <span>${$('<div>').text(topic.name || '-').html()}</span>
                 <span class="badge ${countBadgeClass(count)}">${count}</span>
-            </li>
+            </div>
         `;
     };
 
     const unassignedTopicHtml = (count) => `
-        <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+        <div class="topic-breakdown-row">
             <span class="text-muted">Konuya bağlanmamış sorular</span>
             <span class="badge ${countBadgeClass(count)}">${count}</span>
-        </li>
+        </div>
     `;
 
     const courseHtml = (course) => {
@@ -456,20 +541,19 @@ $(document).ready(function() {
             ...topics.map(topicHtml)
         ].join('');
 
-        const topicsContent = topics.length
-            ? `<ul class="list-group list-group-flush mt-2 d-none course-topics">${topicItems}</ul>`
-            : (shouldShowUnassigned
-                ? `<ul class="list-group list-group-flush mt-2 d-none course-topics">${topicItems}</ul>`
-                : '<div class="text-muted small mt-2 d-none course-topics">Bu ders için konu bulunamadı.</div>');
+        const topicsContent = (topics.length || shouldShowUnassigned)
+            ? `<div class="topic-breakdown-list d-none course-topics">${topicItems}</div>`
+            : '<div class="topic-breakdown-list text-muted small mt-2 d-none course-topics">Bu ders için konu bulunamadı.</div>';
 
         return `
-            <div class="border rounded p-2 mb-2 bg-light-subtle">
-                <div class="d-flex justify-content-between align-items-center">
-                    <button type="button" class="btn btn-sm btn-link text-decoration-none p-0 course-expand-btn" aria-expanded="false">
-                        <i class="bi bi-chevron-right me-1"></i>${$('<div>').text(course.name || '-').html()}
-                    </button>
+            <div class="course-breakdown-card">
+                <button type="button" class="course-breakdown-toggle" data-course-toggle aria-expanded="false">
+                    <span class="course-breakdown-toggle-main">
+                        <i class="bi bi-chevron-right" data-course-icon></i>
+                        <span class="course-title">${$('<div>').text(course.name || '-').html()}</span>
+                    </span>
                     <span class="badge ${countBadgeClass(count)}">${count}</span>
-                </div>
+                </button>
                 ${topicsContent}
             </div>
         `;
@@ -479,6 +563,16 @@ $(document).ready(function() {
         const courses = Array.isArray(payload.courses) ? payload.courses : [];
         if (!courses.length) return '<div class="text-muted">Bu yeterlilik için ders bulunamadı.</div>';
         return courses.map(courseHtml).join('');
+    };
+
+    const createDetailRowHtml = (detailId, colCount, contentHtml, tdClass = 'p-0') => {
+        return `
+            <tr id="${detailId}" class="qualification-detail-row">
+                <td colspan="${colCount}" class="${tdClass}">
+                    <div class="qualification-breakdown-wrapper">${contentHtml}</div>
+                </td>
+            </tr>
+        `;
     };
 
     $(document).on('click', '.qualification-expand-btn', async function(e) {
@@ -504,7 +598,8 @@ $(document).ready(function() {
         $icon.removeClass('bi-chevron-right').addClass('bi-chevron-down');
 
         if (!breakdownCache[id]) {
-            $row.after(`<tr id="${detailId}" class="qualification-detail-row"><td colspan="${colCount}" class="text-muted">Yükleniyor...</td></tr>`);
+            const loadingHtml = '<div class="text-muted px-2 py-2">Yükleniyor...</div>';
+            $row.after(createDetailRowHtml(detailId, colCount, loadingHtml, 'p-0'));
             const response = await api('get_breakdown', 'GET', { qualification_id: id });
             if (!response.success) {
                 $('#' + detailId).remove();
@@ -518,22 +613,34 @@ $(document).ready(function() {
 
         const html = buildBreakdownHtml(breakdownCache[id]);
         if (!$('#' + detailId).length) {
-            $row.after(`<tr id="${detailId}" class="qualification-detail-row"><td colspan="${colCount}"><div class="p-2">${html}</div></td></tr>`);
+            $row.after(createDetailRowHtml(detailId, colCount, html, 'p-0'));
         } else {
-            $('#' + detailId + ' td').html(`<div class="p-2">${html}</div>`);
+            $('#' + detailId + ' .qualification-breakdown-wrapper').html(html);
         }
     });
 
-    $(document).on('click', '.course-expand-btn', function(e) {
+    document.addEventListener('click', function(e) {
+        const btn = e.target.closest('[data-course-toggle]');
+        if (!btn) return;
+
         e.preventDefault();
         e.stopPropagation();
-        const $btn = $(this);
-        const isOpen = $btn.attr('aria-expanded') === 'true';
-        const $icon = $btn.find('i');
-        const $topics = $btn.closest('.border').find('.course-topics').first();
-        $btn.attr('aria-expanded', isOpen ? 'false' : 'true');
-        $icon.toggleClass('bi-chevron-right', isOpen).toggleClass('bi-chevron-down', !isOpen);
-        $topics.toggleClass('d-none', isOpen);
+
+        const isOpen = btn.getAttribute('aria-expanded') === 'true';
+        const card = btn.closest('.course-breakdown-card');
+        if (!card) return;
+
+        const icon = btn.querySelector('[data-course-icon]');
+        const topics = card.querySelector('.course-topics');
+
+        btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+        if (icon) {
+            icon.classList.toggle('bi-chevron-right', isOpen);
+            icon.classList.toggle('bi-chevron-down', !isOpen);
+        }
+        if (topics) {
+            topics.classList.toggle('d-none', isOpen);
+        }
     });
 });
 </script>
