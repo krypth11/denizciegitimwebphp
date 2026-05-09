@@ -47,7 +47,18 @@ function qr_find_snapshot_value(array $snapshot, string $key): ?string
     return null;
 }
 
+function qr_question_id_is_valid(string $id): bool
+{
+    return $id !== '' && (bool)preg_match('/^[a-zA-Z0-9\-]{8,64}$/', $id);
+}
+
 try {
+    $questionCols = get_table_columns($pdo, 'questions');
+    $hasOptionE = is_array($questionCols) && in_array('option_e', $questionCols, true);
+    $hasQuestionType = is_array($questionCols) && in_array('question_type', $questionCols, true);
+    $hasStatus = is_array($questionCols) && in_array('status', $questionCols, true);
+    $hasIsActive = is_array($questionCols) && in_array('is_active', $questionCols, true);
+
     if ($action === 'list') {
         $sql = "SELECT
                     qr.id AS report_id,
@@ -127,6 +138,171 @@ try {
         $stmt->execute([$reportId]);
 
         qr_json(true, 'Bildirim silindi.');
+    }
+
+    if ($action === 'get_question') {
+        $questionId = trim((string)($_GET['question_id'] ?? ''));
+        if (!qr_question_id_is_valid($questionId)) {
+            qr_json(false, 'Geçersiz question_id.', [], 422);
+        }
+
+        $selectCols = [
+            'id',
+            'question_text',
+            'option_a',
+            'option_b',
+            'option_c',
+            'option_d',
+            'correct_answer',
+            'explanation',
+        ];
+        if ($hasOptionE) {
+            $selectCols[] = 'option_e';
+        }
+        if ($hasQuestionType) {
+            $selectCols[] = 'question_type';
+        }
+        if ($hasStatus) {
+            $selectCols[] = 'status';
+        }
+        if ($hasIsActive) {
+            $selectCols[] = 'is_active';
+        }
+
+        $sql = 'SELECT ' . implode(', ', $selectCols) . ' FROM questions WHERE id = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$questionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$row) {
+            qr_json(false, 'Soru bulunamadı veya silinmiş.', [], 404);
+        }
+
+        $question = [
+            'id' => (string)($row['id'] ?? ''),
+            'question_text' => (string)($row['question_text'] ?? ''),
+            'option_a' => (string)($row['option_a'] ?? ''),
+            'option_b' => (string)($row['option_b'] ?? ''),
+            'option_c' => (string)($row['option_c'] ?? ''),
+            'option_d' => (string)($row['option_d'] ?? ''),
+            'option_e' => $hasOptionE ? (string)($row['option_e'] ?? '') : '',
+            'correct_answer' => (string)($row['correct_answer'] ?? ''),
+            'explanation' => (string)($row['explanation'] ?? ''),
+        ];
+
+        if ($hasQuestionType) {
+            $question['question_type'] = (string)($row['question_type'] ?? '');
+        }
+
+        if ($hasStatus) {
+            $question['status'] = (string)($row['status'] ?? '');
+        } elseif ($hasIsActive) {
+            $question['status'] = ((int)($row['is_active'] ?? 1) === 1) ? 'active' : 'inactive';
+        }
+
+        qr_json(true, '', [
+            'question' => $question,
+            'meta' => [
+                'has_option_e' => $hasOptionE,
+                'has_question_type' => $hasQuestionType,
+                'status_mode' => $hasStatus ? 'status' : ($hasIsActive ? 'is_active' : 'none'),
+            ],
+        ]);
+    }
+
+    if ($action === 'update_question') {
+        $questionId = trim((string)($_POST['question_id'] ?? ''));
+        $questionText = sanitize_input($_POST['question_text'] ?? '');
+        $optionA = sanitize_input($_POST['option_a'] ?? '');
+        $optionB = sanitize_input($_POST['option_b'] ?? '');
+        $optionC = sanitize_input($_POST['option_c'] ?? '');
+        $optionD = sanitize_input($_POST['option_d'] ?? '');
+        $optionE = sanitize_input($_POST['option_e'] ?? '');
+        $correctAnswer = strtoupper(trim((string)($_POST['correct_answer'] ?? '')));
+        $explanation = sanitize_input($_POST['explanation'] ?? '');
+        $questionType = sanitize_input($_POST['question_type'] ?? '');
+        $statusInput = strtolower(trim((string)($_POST['status'] ?? '')));
+
+        if (!qr_question_id_is_valid($questionId)) {
+            qr_json(false, 'Geçersiz question_id.', [], 422);
+        }
+
+        if ($questionText === '' || $optionA === '' || $optionB === '' || $optionC === '' || $optionD === '' || $correctAnswer === '') {
+            qr_json(false, 'Tüm zorunlu alanları doldurun!', [], 422);
+        }
+
+        if (!in_array($correctAnswer, ['A', 'B', 'C', 'D', 'E'], true)) {
+            qr_json(false, 'Geçersiz doğru cevap!', [], 422);
+        }
+
+        if ($correctAnswer === 'E' && !$hasOptionE) {
+            qr_json(false, 'correct_answer E seçildi ancak option_e kolonu bulunamadı.', ['error_code' => 'correct_answer_e_but_option_e_not_supported'], 422);
+        }
+
+        if ($correctAnswer === 'E' && $optionE === '') {
+            qr_json(false, 'E doğru cevap için Şık E doldurulmalıdır!', [], 422);
+        }
+
+        $setParts = [
+            'question_text = ?',
+            'option_a = ?',
+            'option_b = ?',
+            'option_c = ?',
+            'option_d = ?',
+            'correct_answer = ?',
+            'explanation = ?',
+        ];
+        $params = [
+            $questionText,
+            $optionA,
+            $optionB,
+            $optionC,
+            $optionD,
+            $correctAnswer,
+            $explanation,
+        ];
+
+        if ($hasOptionE) {
+            $setParts[] = 'option_e = ?';
+            $params[] = ($optionE !== '' ? $optionE : null);
+        }
+
+        if ($hasQuestionType) {
+            if (!in_array($questionType, ['sayısal', 'sözel', 'karışık'], true)) {
+                qr_json(false, 'Geçersiz soru tipi!', [], 422);
+            }
+            $setParts[] = 'question_type = ?';
+            $params[] = $questionType;
+        }
+
+        if ($hasStatus) {
+            if ($statusInput === '') {
+                qr_json(false, 'Durum zorunludur.', [], 422);
+            }
+            $setParts[] = 'status = ?';
+            $params[] = $statusInput;
+        } elseif ($hasIsActive) {
+            if (!in_array($statusInput, ['active', 'inactive'], true)) {
+                qr_json(false, 'Geçersiz durum!', [], 422);
+            }
+            $setParts[] = 'is_active = ?';
+            $params[] = ($statusInput === 'active' ? 1 : 0);
+        }
+
+        $params[] = $questionId;
+        $sql = 'UPDATE questions SET ' . implode(', ', $setParts) . ' WHERE id = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+
+        if ($stmt->rowCount() < 1) {
+            $existsStmt = $pdo->prepare('SELECT COUNT(*) FROM questions WHERE id = ?');
+            $existsStmt->execute([$questionId]);
+            if ((int)$existsStmt->fetchColumn() < 1) {
+                qr_json(false, 'Soru bulunamadı veya silinmiş.', [], 404);
+            }
+        }
+
+        qr_json(true, 'Soru güncellendi.', ['question_id' => $questionId]);
     }
 
     qr_json(false, 'Geçersiz işlem.', [], 400);
