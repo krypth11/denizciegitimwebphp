@@ -287,9 +287,15 @@ $extra_js = <<<'JAVASCRIPT'
 }
 
 .topic-breakdown-list {
+    display: none;
+    width: 100%;
     margin-left: .75rem;
     margin-right: .75rem;
     margin-bottom: .75rem;
+}
+
+.course-breakdown-card.open .topic-breakdown-list {
+    display: block;
 }
 
 .topic-breakdown-row {
@@ -308,18 +314,27 @@ $extra_js = <<<'JAVASCRIPT'
 @media (max-width: 768px) {
     .qualification-breakdown-wrapper {
         padding: 10px 8px;
+        overflow: visible;
     }
 
     .course-breakdown-card {
-        display: block;
         width: 100%;
-        min-width: 0;
         overflow: visible;
     }
 
     .topic-breakdown-list {
+        display: none;
+        width: 100%;
+        margin-top: 8px;
         margin-left: 0;
         margin-right: 0;
+        padding-left: 8px;
+        overflow: visible;
+    }
+
+    .topic-breakdown-row {
+        width: 100%;
+        flex-wrap: wrap;
     }
 }
 </style>
@@ -542,8 +557,8 @@ $(document).ready(function() {
         ].join('');
 
         const topicsContent = (topics.length || shouldShowUnassigned)
-            ? `<div class="topic-breakdown-list d-none course-topics">${topicItems}</div>`
-            : '<div class="topic-breakdown-list text-muted small mt-2 d-none course-topics">Bu ders için konu bulunamadı.</div>';
+            ? `<div class="topic-breakdown-list">${topicItems}</div>`
+            : '<div class="topic-breakdown-list text-muted small mt-2">Bu ders için konu bulunamadı.</div>';
 
         return `
             <div class="course-breakdown-card">
@@ -599,7 +614,8 @@ $(document).ready(function() {
 
         if (!breakdownCache[id]) {
             const loadingHtml = '<div class="text-muted px-2 py-2">Yükleniyor...</div>';
-            $row.after(createDetailRowHtml(detailId, colCount, loadingHtml, 'p-0'));
+            const detailRow = $(createDetailRowHtml(detailId, colCount, loadingHtml, 'p-0'));
+            $row.after(detailRow);
             const response = await api('get_breakdown', 'GET', { qualification_id: id });
             if (!response.success) {
                 $('#' + detailId).remove();
@@ -613,33 +629,41 @@ $(document).ready(function() {
 
         const html = buildBreakdownHtml(breakdownCache[id]);
         if (!$('#' + detailId).length) {
-            $row.after(createDetailRowHtml(detailId, colCount, html, 'p-0'));
+            const detailRow = $(createDetailRowHtml(detailId, colCount, html, 'p-0'));
+            $row.after(detailRow);
         } else {
             $('#' + detailId + ' .qualification-breakdown-wrapper').html(html);
         }
     });
 
     document.addEventListener('click', function(e) {
-        const btn = e.target.closest('[data-course-toggle]');
-        if (!btn) return;
+        const toggle = e.target.closest('[data-course-toggle]');
+        if (!toggle) return;
 
         e.preventDefault();
         e.stopPropagation();
 
-        const isOpen = btn.getAttribute('aria-expanded') === 'true';
-        const card = btn.closest('.course-breakdown-card');
+        const card = toggle.closest('.course-breakdown-card');
         if (!card) return;
 
-        const icon = btn.querySelector('[data-course-icon]');
-        const topics = card.querySelector('.course-topics');
+        const topics = card.querySelector('.topic-breakdown-list');
+        if (!topics) return;
 
-        btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+        const isOpen = card.classList.contains('open');
+
+        card.classList.toggle('open');
+
+        if (isOpen) {
+            topics.style.display = 'none';
+        } else {
+            topics.style.display = 'block';
+        }
+
+        toggle.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+        const icon = toggle.querySelector('[data-course-icon]');
         if (icon) {
             icon.classList.toggle('bi-chevron-right', isOpen);
             icon.classList.toggle('bi-chevron-down', !isOpen);
-        }
-        if (topics) {
-            topics.classList.toggle('d-none', isOpen);
         }
     });
 });
