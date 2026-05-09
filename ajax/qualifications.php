@@ -25,6 +25,7 @@ try {
             $name = sanitize_input($_POST['name'] ?? '');
             $description = sanitize_input($_POST['description'] ?? '');
             $order_index = (int)($_POST['order_index'] ?? 0);
+            $is_active = (int)($_POST['is_active'] ?? 1) === 1 ? 1 : 0;
 
             if ($name === '') {
                 echo json_encode([
@@ -35,8 +36,8 @@ try {
             }
 
             $id = generate_uuid();
-            $stmt = $pdo->prepare('INSERT INTO qualifications (id, name, description, order_index, created_at) VALUES (?, ?, ?, ?, NOW())');
-            $result = $stmt->execute([$id, $name, $description, $order_index]);
+            $stmt = $pdo->prepare('INSERT INTO qualifications (id, name, description, order_index, is_active, created_at) VALUES (?, ?, ?, ?, ?, NOW())');
+            $result = $stmt->execute([$id, $name, $description, $order_index, $is_active]);
 
             if ($result) {
                 try {
@@ -46,7 +47,7 @@ try {
                 }
 
                 try {
-                    community_sync_qualification_room($pdo, $id, $name, true);
+                    community_sync_qualification_room($pdo, $id, $name, $is_active === 1);
                 } catch (Throwable $syncError) {
                     error_log('Qualification room sync add failed: ' . $syncError->getMessage());
                 }
@@ -97,6 +98,7 @@ try {
             $name = sanitize_input($_POST['name'] ?? '');
             $description = sanitize_input($_POST['description'] ?? '');
             $order_index = (int)($_POST['order_index'] ?? 0);
+            $is_active = (int)($_POST['is_active'] ?? 1) === 1 ? 1 : 0;
 
             if ($id === '' || $name === '') {
                 echo json_encode([
@@ -106,8 +108,8 @@ try {
                 break;
             }
 
-            $stmt = $pdo->prepare('UPDATE qualifications SET name = ?, description = ?, order_index = ? WHERE id = ?');
-            $result = $stmt->execute([$name, $description, $order_index, $id]);
+            $stmt = $pdo->prepare('UPDATE qualifications SET name = ?, description = ?, order_index = ?, is_active = ? WHERE id = ?');
+            $result = $stmt->execute([$name, $description, $order_index, $is_active, $id]);
 
             if ($result) {
                 try {
@@ -117,7 +119,7 @@ try {
                 }
 
                 try {
-                    community_sync_qualification_room($pdo, $id, $name, true);
+                    community_sync_qualification_room($pdo, $id, $name, $is_active === 1);
                 } catch (Throwable $syncError) {
                     error_log('Qualification room sync update failed: ' . $syncError->getMessage());
                 }
@@ -130,6 +132,64 @@ try {
                 echo json_encode([
                     'success' => false,
                     'message' => 'Güncelleme başarısız!',
+                ], JSON_UNESCAPED_UNICODE);
+            }
+            break;
+
+        case 'toggle_active':
+            $id = trim((string)($_POST['id'] ?? ''));
+            $rawIsActive = $_POST['is_active'] ?? null;
+
+            if ($id === '') {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'ID parametresi gerekli!',
+                ], JSON_UNESCAPED_UNICODE);
+                break;
+            }
+
+            if (!in_array((string)$rawIsActive, ['0', '1'], true)) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'is_active sadece 0 veya 1 olabilir.',
+                ], JSON_UNESCAPED_UNICODE);
+                break;
+            }
+
+            $isActive = (int)$rawIsActive;
+
+            $nameStmt = $pdo->prepare('SELECT name FROM qualifications WHERE id = ? LIMIT 1');
+            $nameStmt->execute([$id]);
+            $qualificationName = (string)($nameStmt->fetchColumn() ?: 'Yeterlilik Odası');
+
+            if ($qualificationName === '') {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Kayıt bulunamadı!',
+                ], JSON_UNESCAPED_UNICODE);
+                break;
+            }
+
+            $stmt = $pdo->prepare('UPDATE qualifications SET is_active = ? WHERE id = ?');
+            $result = $stmt->execute([$isActive, $id]);
+
+            if ($result) {
+                try {
+                    community_sync_qualification_room($pdo, $id, $qualificationName, $isActive === 1);
+                } catch (Throwable $syncError) {
+                    error_log('Qualification room sync toggle failed: ' . $syncError->getMessage());
+                }
+
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'Yeterlilik durumu güncellendi.',
+                    'is_active' => $isActive,
+                ], JSON_UNESCAPED_UNICODE);
+            } else {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Durum güncelleme başarısız!',
+                    'is_active' => $isActive,
                 ], JSON_UNESCAPED_UNICODE);
             }
             break;

@@ -1004,7 +1004,7 @@ function api_update_profile_fields(PDO $pdo, string $userId, array $updates): vo
 
 function api_qualification_exists(PDO $pdo, string $qualificationId): bool
 {
-    $stmt = $pdo->prepare('SELECT COUNT(*) FROM qualifications WHERE id = ?');
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM qualifications WHERE id = ? AND COALESCE(is_active, 1) = 1');
     $stmt->execute([$qualificationId]);
     return ((int)$stmt->fetchColumn()) > 0;
 }

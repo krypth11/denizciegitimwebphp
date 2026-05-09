@@ -24,7 +24,7 @@ try {
     $isGuest = (int)($profile['is_guest'] ?? 0) === 1;
 
     community_ensure_general_room($pdo);
-    $quals = $pdo->query('SELECT id, name FROM qualifications')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $quals = $pdo->query('SELECT id, name FROM qualifications WHERE COALESCE(is_active, 1) = 1')->fetchAll(PDO::FETCH_ASSOC) ?: [];
     foreach ($quals as $q) {
         community_sync_qualification_room($pdo, (string)$q['id'], (string)$q['name'], true);
     }

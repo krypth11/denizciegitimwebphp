@@ -48,6 +48,7 @@ if (($_GET['scope'] ?? '') === 'admin') {
             $sql = 'SELECT `' . $qId . '` AS id, `' . $qName . '` AS name'
                 . ($qOrder ? ', `' . $qOrder . '` AS order_index' : ', 0 AS order_index')
                 . ' FROM `qualifications`'
+                . ' WHERE COALESCE(is_active, 1) = 1'
                 . ' ORDER BY order_index ASC, name ASC';
             $qualifications = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
         }

@@ -410,8 +410,10 @@ function offline_get_downloadable_qualifications(PDO $pdo, ?string $qualificatio
     $params = [];
     $qualificationIdFilter = trim((string)$qualificationIdFilter);
     if ($qualificationIdFilter !== '') {
-        $sql .= ' WHERE ' . offline_q($qual['id']) . ' = ?';
+        $sql .= ' WHERE ' . offline_q($qual['id']) . ' = ? AND COALESCE(is_active, 1) = 1';
         $params[] = $qualificationIdFilter;
+    } else {
+        $sql .= ' WHERE COALESCE(is_active, 1) = 1';
     }
 
     $sql .= ' ORDER BY ' . offline_q($qual['name']) . ' ASC';

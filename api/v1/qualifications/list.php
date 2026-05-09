@@ -12,7 +12,7 @@ try {
     $stmt = $pdo->prepare(
         'SELECT id, name, description, order_index
          FROM qualifications
-         WHERE id = ?
+         WHERE id = ? AND COALESCE(is_active, 1) = 1
          ORDER BY COALESCE(order_index, 0) ASC, name ASC'
     );
     $stmt->execute([$currentQualificationId]);

@@ -35,6 +35,7 @@ include '../includes/sidebar.php';
                             <th class="mobile-hide">Sıra</th>
                             <th>İsim</th>
                             <th class="mobile-hide">Açıklama</th>
+                            <th class="mobile-hide">Durum</th>
                             <th class="mobile-hide">Oluşturulma</th>
                             <th>İşlemler</th>
                         </tr>
@@ -55,6 +56,13 @@ include '../includes/sidebar.php';
                                     </div>
                                 </td>
                                 <td class="mobile-hide"><?= htmlspecialchars($q['description'] ?? '-') ?></td>
+                                <td class="mobile-hide">
+                                    <?php $isActive = (int)($q['is_active'] ?? 1) === 1; ?>
+                                    <div class="form-check form-switch d-inline-flex align-items-center gap-2">
+                                        <input class="form-check-input active-toggle" type="checkbox" role="switch" data-id="<?= htmlspecialchars($q['id']) ?>" <?= $isActive ? 'checked' : '' ?>>
+                                        <span class="badge <?= $isActive ? 'bg-success' : 'bg-secondary' ?> status-badge"><?= $isActive ? 'Aktif' : 'Pasif' ?></span>
+                                    </div>
+                                </td>
                                 <td class="mobile-hide"><?= format_date($q['created_at']) ?></td>
                                 <td>
                                     <div class="table-actions mobile-list-actions">
@@ -106,6 +114,11 @@ include '../includes/sidebar.php';
                         <?php if (!empty($q['description'])): ?>
                             <div><strong>Açıklama:</strong> <?= htmlspecialchars($q['description']) ?></div>
                         <?php endif; ?>
+                        <div>
+                            <strong>Durum:</strong>
+                            <?php $isActive = (int)($q['is_active'] ?? 1) === 1; ?>
+                            <span class="badge <?= $isActive ? 'bg-success' : 'bg-secondary' ?> mobile-status-badge"><?= $isActive ? 'Aktif' : 'Pasif' ?></span>
+                        </div>
                         <div><strong>Oluşturulma:</strong> <?= format_date($q['created_at']) ?></div>
                     </div>
 
@@ -144,6 +157,13 @@ include '../includes/sidebar.php';
                         <label class="form-label">Sıra</label>
                         <input type="number" class="form-control" name="order_index" value="0">
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">Durum</label>
+                        <select class="form-select" name="is_active">
+                            <option value="1" selected>Aktif</option>
+                            <option value="0">Pasif</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
@@ -175,6 +195,13 @@ include '../includes/sidebar.php';
                     <div class="mb-3">
                         <label class="form-label">Sıra</label>
                         <input type="number" class="form-control" name="order_index" id="edit_order_index">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Durum</label>
+                        <select class="form-select" name="is_active" id="edit_is_active">
+                            <option value="1">Aktif</option>
+                            <option value="0">Pasif</option>
+                        </select>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -307,6 +334,7 @@ $(document).ready(function() {
         $('#edit_name').val(response.data.name);
         $('#edit_description').val(response.data.description || '');
         $('#edit_order_index').val(response.data.order_index || 0);
+        $('#edit_is_active').val((parseInt(response.data.is_active ?? 1, 10) === 1) ? '1' : '0');
 
         const editModal = new bootstrap.Modal(document.getElementById('editModal'));
         editModal.show();
@@ -349,6 +377,29 @@ $(document).ready(function() {
             return;
         }
         await appAlert('Hata', response.message || 'Silme başarısız', 'error');
+    });
+
+    $('.active-toggle').on('change', async function() {
+        const $toggle = $(this);
+        const id = $toggle.data('id');
+        const isActive = $toggle.is(':checked') ? 1 : 0;
+        const previous = isActive === 1 ? 0 : 1;
+
+        $toggle.prop('disabled', true);
+        const response = await api('toggle_active', 'POST', { id, is_active: isActive });
+        $toggle.prop('disabled', false);
+
+        if (!response.success) {
+            $toggle.prop('checked', previous === 1);
+            await appAlert('Hata', response.message || 'Durum güncellenemedi.', 'error');
+            return;
+        }
+
+        const finalActive = parseInt(response.is_active ?? isActive, 10) === 1;
+        $toggle.prop('checked', finalActive);
+        const $badge = $toggle.closest('td, .form-check').find('.status-badge');
+        $badge.removeClass('bg-success bg-secondary').addClass(finalActive ? 'bg-success' : 'bg-secondary').text(finalActive ? 'Aktif' : 'Pasif');
+        await appAlert('Başarılı', response.message || 'Durum güncellendi.', 'success');
     });
 });
 </script>
