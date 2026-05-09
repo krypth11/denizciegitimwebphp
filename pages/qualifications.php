@@ -8,11 +8,10 @@ $current_page = 'qualifications';
 $page_title = 'Yeterlilikler';
 
 $qualifications = $pdo->query(
-    'SELECT q.*, COALESCE(COUNT(qq.id), 0) AS total_question_count
+    'SELECT q.*, COALESCE(COUNT(DISTINCT qq.id), 0) AS total_question_count
      FROM qualifications q
      LEFT JOIN courses c ON c.qualification_id = q.id
-     LEFT JOIN topics t ON t.course_id = c.id
-     LEFT JOIN questions qq ON qq.topic_id = t.id
+     LEFT JOIN questions qq ON qq.course_id = c.id
      GROUP BY q.id
      ORDER BY q.order_index, q.name'
 )->fetchAll();
@@ -440,12 +439,28 @@ $(document).ready(function() {
         `;
     };
 
+    const unassignedTopicHtml = (count) => `
+        <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+            <span class="text-muted">Konuya bağlanmamış sorular</span>
+            <span class="badge ${countBadgeClass(count)}">${count}</span>
+        </li>
+    `;
+
     const courseHtml = (course) => {
         const count = parseInt(course.question_count || 0, 10);
+        const unassignedCount = parseInt(course.unassigned_question_count || 0, 10);
         const topics = Array.isArray(course.topics) ? course.topics : [];
+        const shouldShowUnassigned = unassignedCount > 0;
+        const topicItems = [
+            ...(shouldShowUnassigned ? [unassignedTopicHtml(unassignedCount)] : []),
+            ...topics.map(topicHtml)
+        ].join('');
+
         const topicsContent = topics.length
-            ? `<ul class="list-group list-group-flush mt-2 d-none course-topics">${topics.map(topicHtml).join('')}</ul>`
-            : '<div class="text-muted small mt-2 d-none course-topics">Bu ders için konu bulunamadı.</div>';
+            ? `<ul class="list-group list-group-flush mt-2 d-none course-topics">${topicItems}</ul>`
+            : (shouldShowUnassigned
+                ? `<ul class="list-group list-group-flush mt-2 d-none course-topics">${topicItems}</ul>`
+                : '<div class="text-muted small mt-2 d-none course-topics">Bu ders için konu bulunamadı.</div>');
 
         return `
             <div class="border rounded p-2 mb-2 bg-light-subtle">

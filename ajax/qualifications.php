@@ -22,11 +22,10 @@ $action = $_GET['action'] ?? $_POST['action'] ?? '';
 try {
     switch ($action) {
         case 'list':
-            $sql = 'SELECT q.*, COALESCE(COUNT(qq.id), 0) AS total_question_count
+            $sql = 'SELECT q.*, COALESCE(COUNT(DISTINCT qq.id), 0) AS total_question_count
                     FROM qualifications q
                     LEFT JOIN courses c ON c.qualification_id = q.id
-                    LEFT JOIN topics t ON t.course_id = c.id
-                    LEFT JOIN questions qq ON qq.topic_id = t.id
+                    LEFT JOIN questions qq ON qq.course_id = c.id
                     GROUP BY q.id
                     ORDER BY q.order_index, q.name';
             $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -50,7 +49,9 @@ try {
                 break;
             }
 
-            $courseStmt = $pdo->prepare('SELECT c.id, c.name, c.order_index, COALESCE(COUNT(qs.id),0) AS question_count
+            $courseStmt = $pdo->prepare('SELECT c.id, c.name, c.order_index,
+                                                COALESCE(COUNT(DISTINCT qs.id),0) AS question_count,
+                                                COALESCE(COUNT(DISTINCT CASE WHEN (qs.topic_id IS NULL OR qs.topic_id = \'\') THEN qs.id END),0) AS unassigned_question_count
                                          FROM courses c
                                          LEFT JOIN questions qs ON qs.course_id = c.id
                                          WHERE c.qualification_id = ?
@@ -59,7 +60,7 @@ try {
             $courseStmt->execute([$qualificationId]);
             $courses = $courseStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-            $topicStmt = $pdo->prepare('SELECT t.id, t.name, t.course_id, t.order_index, COALESCE(COUNT(q.id),0) AS question_count
+            $topicStmt = $pdo->prepare('SELECT t.id, t.name, t.course_id, t.order_index, COALESCE(COUNT(DISTINCT q.id),0) AS question_count
                                         FROM topics t
                                         LEFT JOIN questions q ON q.topic_id = t.id
                                         INNER JOIN courses c ON c.id = t.course_id
@@ -86,6 +87,7 @@ try {
                     'id' => $cid,
                     'name' => (string)$course['name'],
                     'question_count' => (int)$course['question_count'],
+                    'unassigned_question_count' => (int)$course['unassigned_question_count'],
                     'topics' => $topicsByCourse[$cid] ?? [],
                 ];
             }
