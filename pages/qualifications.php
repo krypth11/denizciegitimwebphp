@@ -7,7 +7,15 @@ $user = require_auth();
 $current_page = 'qualifications';
 $page_title = 'Yeterlilikler';
 
-$qualifications = $pdo->query('SELECT * FROM qualifications ORDER BY order_index, name')->fetchAll();
+$qualifications = $pdo->query(
+    'SELECT q.*, COALESCE(COUNT(qq.id), 0) AS total_question_count
+     FROM qualifications q
+     LEFT JOIN courses c ON c.qualification_id = q.id
+     LEFT JOIN topics t ON t.course_id = c.id
+     LEFT JOIN questions qq ON qq.topic_id = t.id
+     GROUP BY q.id
+     ORDER BY q.order_index, q.name'
+)->fetchAll();
 
 include '../includes/header.php';
 include '../includes/sidebar.php';
@@ -32,8 +40,10 @@ include '../includes/sidebar.php';
                 <table id="qualificationsTable" class="table table-hover align-middle mobile-card-table">
                     <thead>
                         <tr>
+                            <th style="width:40px;"></th>
                             <th class="mobile-hide">Sıra</th>
                             <th>İsim</th>
+                            <th class="mobile-hide">Soru Sayısı</th>
                             <th class="mobile-hide">Açıklama</th>
                             <th class="mobile-hide">Durum</th>
                             <th class="mobile-hide">Oluşturulma</th>
@@ -42,7 +52,12 @@ include '../includes/sidebar.php';
                     </thead>
                     <tbody>
                         <?php foreach ($qualifications as $q): ?>
-                            <tr class="mobile-card-row">
+                            <tr class="mobile-card-row qualification-row" data-qualification-id="<?= htmlspecialchars($q['id']) ?>">
+                                <td>
+                                    <button type="button" class="btn btn-sm btn-light qualification-expand-btn" data-id="<?= htmlspecialchars($q['id']) ?>" aria-expanded="false" title="Detayları aç/kapat">
+                                        <i class="bi bi-chevron-right"></i>
+                                    </button>
+                                </td>
                                 <td class="mobile-hide"><?= (int)$q['order_index'] ?></td>
                                 <td>
                                     <div class="mobile-card-head">
@@ -54,6 +69,10 @@ include '../includes/sidebar.php';
                                         <span>•</span>
                                         <span><?= format_date($q['created_at']) ?></span>
                                     </div>
+                                </td>
+                                <td class="mobile-hide">
+                                    <?php $qCount = (int)($q['total_question_count'] ?? 0); ?>
+                                    <span class="badge <?= $qCount > 0 ? 'bg-info-subtle text-info-emphasis' : 'bg-secondary' ?>"><?= $qCount ?></span>
                                 </td>
                                 <td class="mobile-hide"><?= htmlspecialchars($q['description'] ?? '-') ?></td>
                                 <td class="mobile-hide">
@@ -114,6 +133,11 @@ include '../includes/sidebar.php';
                         <?php if (!empty($q['description'])): ?>
                             <div><strong>Açıklama:</strong> <?= htmlspecialchars($q['description']) ?></div>
                         <?php endif; ?>
+                        <div>
+                            <strong>Soru Sayısı:</strong>
+                            <?php $qCount = (int)($q['total_question_count'] ?? 0); ?>
+                            <span class="badge <?= $qCount > 0 ? 'bg-info-subtle text-info-emphasis' : 'bg-secondary' ?>"><?= $qCount ?></span>
+                        </div>
                         <div>
                             <strong>Durum:</strong>
                             <?php $isActive = (int)($q['is_active'] ?? 1) === 1; ?>
@@ -400,6 +424,101 @@ $(document).ready(function() {
         const $badge = $toggle.closest('td, .form-check').find('.status-badge');
         $badge.removeClass('bg-success bg-secondary').addClass(finalActive ? 'bg-success' : 'bg-secondary').text(finalActive ? 'Aktif' : 'Pasif');
         await appAlert('Başarılı', response.message || 'Durum güncellendi.', 'success');
+    });
+
+    const breakdownCache = {};
+
+    const countBadgeClass = (count) => (count > 0 ? 'bg-info-subtle text-info-emphasis' : 'bg-secondary');
+
+    const topicHtml = (topic) => {
+        const count = parseInt(topic.question_count || 0, 10);
+        return `
+            <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+                <span>${$('<div>').text(topic.name || '-').html()}</span>
+                <span class="badge ${countBadgeClass(count)}">${count}</span>
+            </li>
+        `;
+    };
+
+    const courseHtml = (course) => {
+        const count = parseInt(course.question_count || 0, 10);
+        const topics = Array.isArray(course.topics) ? course.topics : [];
+        const topicsContent = topics.length
+            ? `<ul class="list-group list-group-flush mt-2 d-none course-topics">${topics.map(topicHtml).join('')}</ul>`
+            : '<div class="text-muted small mt-2 d-none course-topics">Bu ders için konu bulunamadı.</div>';
+
+        return `
+            <div class="border rounded p-2 mb-2 bg-light-subtle">
+                <div class="d-flex justify-content-between align-items-center">
+                    <button type="button" class="btn btn-sm btn-link text-decoration-none p-0 course-expand-btn" aria-expanded="false">
+                        <i class="bi bi-chevron-right me-1"></i>${$('<div>').text(course.name || '-').html()}
+                    </button>
+                    <span class="badge ${countBadgeClass(count)}">${count}</span>
+                </div>
+                ${topicsContent}
+            </div>
+        `;
+    };
+
+    const buildBreakdownHtml = (payload) => {
+        const courses = Array.isArray(payload.courses) ? payload.courses : [];
+        if (!courses.length) return '<div class="text-muted">Bu yeterlilik için ders bulunamadı.</div>';
+        return courses.map(courseHtml).join('');
+    };
+
+    $(document).on('click', '.qualification-expand-btn', async function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const $btn = $(this);
+        const id = $btn.data('id');
+        const $row = $btn.closest('tr.qualification-row');
+        const isOpen = $btn.attr('aria-expanded') === 'true';
+        const $icon = $btn.find('i');
+        const colCount = $row.children('td').length;
+        const detailId = `qualification-detail-${id}`;
+
+        if (isOpen) {
+            $('#' + detailId).remove();
+            $btn.attr('aria-expanded', 'false');
+            $icon.removeClass('bi-chevron-down').addClass('bi-chevron-right');
+            return;
+        }
+
+        $btn.attr('aria-expanded', 'true');
+        $icon.removeClass('bi-chevron-right').addClass('bi-chevron-down');
+
+        if (!breakdownCache[id]) {
+            $row.after(`<tr id="${detailId}" class="qualification-detail-row"><td colspan="${colCount}" class="text-muted">Yükleniyor...</td></tr>`);
+            const response = await api('get_breakdown', 'GET', { qualification_id: id });
+            if (!response.success) {
+                $('#' + detailId).remove();
+                $btn.attr('aria-expanded', 'false');
+                $icon.removeClass('bi-chevron-down').addClass('bi-chevron-right');
+                await appAlert('Hata', response.message || 'Detay yüklenemedi.', 'error');
+                return;
+            }
+            breakdownCache[id] = response;
+        }
+
+        const html = buildBreakdownHtml(breakdownCache[id]);
+        if (!$('#' + detailId).length) {
+            $row.after(`<tr id="${detailId}" class="qualification-detail-row"><td colspan="${colCount}"><div class="p-2">${html}</div></td></tr>`);
+        } else {
+            $('#' + detailId + ' td').html(`<div class="p-2">${html}</div>`);
+        }
+    });
+
+    $(document).on('click', '.course-expand-btn', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const $btn = $(this);
+        const isOpen = $btn.attr('aria-expanded') === 'true';
+        const $icon = $btn.find('i');
+        const $topics = $btn.closest('.border').find('.course-topics').first();
+        $btn.attr('aria-expanded', isOpen ? 'false' : 'true');
+        $icon.toggleClass('bi-chevron-right', isOpen).toggleClass('bi-chevron-down', !isOpen);
+        $topics.toggleClass('d-none', isOpen);
     });
 });
 </script>

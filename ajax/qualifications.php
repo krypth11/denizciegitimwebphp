@@ -21,6 +21,82 @@ $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
 try {
     switch ($action) {
+        case 'list':
+            $sql = 'SELECT q.*, COALESCE(COUNT(qq.id), 0) AS total_question_count
+                    FROM qualifications q
+                    LEFT JOIN courses c ON c.qualification_id = q.id
+                    LEFT JOIN topics t ON t.course_id = c.id
+                    LEFT JOIN questions qq ON qq.topic_id = t.id
+                    GROUP BY q.id
+                    ORDER BY q.order_index, q.name';
+            $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            echo json_encode([
+                'success' => true,
+                'data' => $rows,
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
+        case 'get_breakdown':
+            $qualificationId = trim((string)($_GET['qualification_id'] ?? ''));
+            if ($qualificationId === '') {
+                echo json_encode(['success' => false, 'message' => 'qualification_id gerekli!'], JSON_UNESCAPED_UNICODE);
+                break;
+            }
+
+            $qStmt = $pdo->prepare('SELECT id FROM qualifications WHERE id = ? LIMIT 1');
+            $qStmt->execute([$qualificationId]);
+            if (!$qStmt->fetchColumn()) {
+                echo json_encode(['success' => false, 'message' => 'Yeterlilik bulunamadı!'], JSON_UNESCAPED_UNICODE);
+                break;
+            }
+
+            $courseStmt = $pdo->prepare('SELECT c.id, c.name, c.order_index, COALESCE(COUNT(qs.id),0) AS question_count
+                                         FROM courses c
+                                         LEFT JOIN questions qs ON qs.course_id = c.id
+                                         WHERE c.qualification_id = ?
+                                         GROUP BY c.id
+                                         ORDER BY c.order_index ASC, c.name ASC');
+            $courseStmt->execute([$qualificationId]);
+            $courses = $courseStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            $topicStmt = $pdo->prepare('SELECT t.id, t.name, t.course_id, t.order_index, COALESCE(COUNT(q.id),0) AS question_count
+                                        FROM topics t
+                                        LEFT JOIN questions q ON q.topic_id = t.id
+                                        INNER JOIN courses c ON c.id = t.course_id
+                                        WHERE c.qualification_id = ?
+                                        GROUP BY t.id
+                                        ORDER BY t.order_index ASC, t.name ASC');
+            $topicStmt->execute([$qualificationId]);
+            $topics = $topicStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            $topicsByCourse = [];
+            foreach ($topics as $topic) {
+                $cid = (string)$topic['course_id'];
+                $topicsByCourse[$cid][] = [
+                    'id' => (string)$topic['id'],
+                    'name' => (string)$topic['name'],
+                    'question_count' => (int)$topic['question_count'],
+                ];
+            }
+
+            $resultCourses = [];
+            foreach ($courses as $course) {
+                $cid = (string)$course['id'];
+                $resultCourses[] = [
+                    'id' => $cid,
+                    'name' => (string)$course['name'],
+                    'question_count' => (int)$course['question_count'],
+                    'topics' => $topicsByCourse[$cid] ?? [],
+                ];
+            }
+
+            echo json_encode([
+                'success' => true,
+                'qualification_id' => $qualificationId,
+                'courses' => $resultCourses,
+            ], JSON_UNESCAPED_UNICODE);
+            break;
+
         case 'add':
             $name = sanitize_input($_POST['name'] ?? '');
             $description = sanitize_input($_POST['description'] ?? '');
