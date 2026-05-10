@@ -414,6 +414,32 @@ function formatExplanationHtml(raw, formattedRaw) {
     return esc(source).replace(/\n/g, '<br>');
 }
 
+function normalizeExactSearchText(value) {
+    return String(value || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLocaleLowerCase('tr-TR');
+}
+
+function rowMatchesExactPhrase(row, search) {
+    const needle = normalizeExactSearchText(search);
+    if (!needle) return true;
+
+    const fields = [
+        row.question_text,
+        row.explanation,
+        row.option_a,
+        row.option_b,
+        row.option_c,
+        row.option_d,
+        row.option_e
+    ];
+
+    return fields.some((field) => {
+        return normalizeExactSearchText(field).includes(needle);
+    });
+}
+
 function normalizeCount(v) {
     const n = parseInt(v, 10);
     if (Number.isNaN(n) || n < 1 || n > 100) return null;
@@ -1959,6 +1985,7 @@ $(document).ready(function() {
     async function loadQuestions() {
         const params = new URLSearchParams({ action: 'list_questions' });
         Object.entries(qState.filters).forEach(([k, v]) => { if (v) params.append(k, v); });
+        params.append('_ts', Date.now().toString());
         const res = await window.appAjax({ url: `../ajax/questions.php?${params.toString()}` });
         console.debug('question search debug', res.data?.meta?.search_debug);
         if (!res.success) {
@@ -1968,11 +1995,14 @@ $(document).ready(function() {
             return;
         }
         qState.meta = { ...qState.meta, ...(res.data?.meta || {}) };
-        updateFilteredCountDisplay(res.data?.total_count ?? null);
         renderStatusOptions();
-        const rows = res.data?.questions || [];
+        let rows = res.data?.questions || [];
+        if (qState.filters.search) {
+            rows = rows.filter((row) => rowMatchesExactPhrase(row, qState.filters.search));
+        }
         renderDesktopRows(rows);
         renderMobileRows(rows);
+        updateFilteredCountDisplay(rows.length);
         $('#selectAll').prop('checked', false);
         toggleBulk();
     }
