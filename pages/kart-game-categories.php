@@ -100,6 +100,35 @@ include '../includes/sidebar.php';
                             </div>
                         </div>
                     </div>
+
+                    <hr>
+                    <h6 class="mb-3">XP Kuralları</h6>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Doğru XP</label>
+                            <input type="number" class="form-control" name="correct_xp" id="cat_correct_xp" value="10" min="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Yanlış Penaltı</label>
+                            <input type="number" class="form-control" name="wrong_penalty" id="cat_wrong_penalty" value="3" min="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Combo Her</label>
+                            <input type="number" class="form-control" name="combo_bonus_every" id="cat_combo_bonus_every" value="3" min="1">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Combo Bonus XP</label>
+                            <input type="number" class="form-control" name="combo_bonus_xp" id="cat_combo_bonus_xp" value="5" min="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Perfect Game Bonus</label>
+                            <input type="number" class="form-control" name="perfect_game_bonus" id="cat_perfect_game_bonus" value="20" min="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Endless Multiplier</label>
+                            <input type="number" class="form-control" name="endless_multiplier" id="cat_endless_multiplier" value="1.2" min="0.1" step="0.01">
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
@@ -133,6 +162,12 @@ $(function () {
         $('#cat_id').val('');
         $('#cat_sort_order').val('0');
         $('#cat_is_active').prop('checked', true);
+        $('#cat_correct_xp').val('10');
+        $('#cat_wrong_penalty').val('3');
+        $('#cat_combo_bonus_every').val('3');
+        $('#cat_combo_bonus_xp').val('5');
+        $('#cat_perfect_game_bonus').val('20');
+        $('#cat_endless_multiplier').val('1.2');
     }
 
     function render() {
@@ -238,6 +273,13 @@ $(function () {
         $('#cat_slug').val(item.slug || '');
         $('#cat_sort_order').val(item.sort_order || 0);
         $('#cat_is_active').prop('checked', Number(item.is_active) === 1);
+        const xp = res.data?.xp_rule || {};
+        $('#cat_correct_xp').val(xp.correct_xp ?? 10);
+        $('#cat_wrong_penalty').val(xp.wrong_penalty ?? 3);
+        $('#cat_combo_bonus_every').val(xp.combo_bonus_every ?? 3);
+        $('#cat_combo_bonus_xp').val(xp.combo_bonus_xp ?? 5);
+        $('#cat_perfect_game_bonus').val(xp.perfect_game_bonus ?? 20);
+        $('#cat_endless_multiplier').val(xp.endless_multiplier ?? 1.2);
         modal.show();
     });
 

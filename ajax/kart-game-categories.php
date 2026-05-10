@@ -47,7 +47,8 @@ try {
                 kg_cat_json(false, 'Kayıt bulunamadı.', [], 404);
             }
             $counts = kg_category_relation_counts($pdo, $id);
-            kg_cat_json(true, '', ['item' => $item, 'relation_counts' => $counts]);
+            $xpRule = kg_get_xp_rule($pdo, $id);
+            kg_cat_json(true, '', ['item' => $item, 'relation_counts' => $counts, 'xp_rule' => $xpRule]);
             break;
 
         case 'create':
@@ -56,6 +57,12 @@ try {
                 'slug' => $_POST['slug'] ?? '',
                 'is_active' => $_POST['is_active'] ?? 0,
                 'sort_order' => $_POST['sort_order'] ?? 0,
+                'correct_xp' => $_POST['correct_xp'] ?? null,
+                'wrong_penalty' => $_POST['wrong_penalty'] ?? null,
+                'combo_bonus_every' => $_POST['combo_bonus_every'] ?? null,
+                'combo_bonus_xp' => $_POST['combo_bonus_xp'] ?? null,
+                'perfect_game_bonus' => $_POST['perfect_game_bonus'] ?? null,
+                'endless_multiplier' => $_POST['endless_multiplier'] ?? null,
             ]);
             if (!($res['success'] ?? false)) {
                 kg_cat_json(false, (string)($res['message'] ?? 'Kayıt başarısız.'), ['errors' => $res['errors'] ?? []], 422);
@@ -73,6 +80,12 @@ try {
                 'slug' => $_POST['slug'] ?? '',
                 'is_active' => $_POST['is_active'] ?? 0,
                 'sort_order' => $_POST['sort_order'] ?? 0,
+                'correct_xp' => $_POST['correct_xp'] ?? null,
+                'wrong_penalty' => $_POST['wrong_penalty'] ?? null,
+                'combo_bonus_every' => $_POST['combo_bonus_every'] ?? null,
+                'combo_bonus_xp' => $_POST['combo_bonus_xp'] ?? null,
+                'perfect_game_bonus' => $_POST['perfect_game_bonus'] ?? null,
+                'endless_multiplier' => $_POST['endless_multiplier'] ?? null,
             ]);
             if (!($res['success'] ?? false)) {
                 $status = isset($res['errors']['id']) ? 404 : 422;

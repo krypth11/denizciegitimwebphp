@@ -19,8 +19,10 @@ $menuGroups = [
             'label' => 'Kart Oyunu',
             'children' => [
                 ['slug' => 'kart-game-categories', 'url' => '/pages/kart-game-categories.php', 'icon' => 'bi-collection', 'label' => 'Başlıklar'],
-                ['slug' => 'kart-game-mappings', 'url' => '/pages/kart-game-mappings.php', 'icon' => 'bi-diagram-2', 'label' => 'Başlık - Yeterlilik Eşleştirme'],
+                ['slug' => 'kart-game-mappings', 'url' => '/pages/kart-game-mappings.php', 'icon' => 'bi-diagram-2', 'label' => 'Eşleştirmeler'],
                 ['slug' => 'kart-game-questions', 'url' => '/pages/kart-game-questions.php', 'icon' => 'bi-card-image', 'label' => 'Sorular'],
+                ['slug' => 'kart-game-levels', 'url' => '/pages/kart-game-levels.php', 'icon' => 'bi-bar-chart-steps', 'label' => 'Level Sistemi'],
+                ['slug' => 'kart-game-leaderboard', 'url' => '/pages/kart-game-leaderboard.php', 'icon' => 'bi-trophy', 'label' => 'Leaderboard'],
             ],
         ],
         ['slug' => 'ai-question-review', 'url' => '/pages/ai-question-review.php', 'icon' => 'bi-robot', 'label' => 'AI Soru Kontrol'],
@@ -193,6 +195,7 @@ function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
 
 
 
