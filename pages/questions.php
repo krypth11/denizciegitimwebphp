@@ -82,7 +82,7 @@ include '../includes/sidebar.php';
                 </div>
                 <div class="col-md-10">
                     <label class="form-label">Arama</label>
-                    <input type="search" class="form-control" id="filterSearch" placeholder="Soru metni / şık / açıklama ara...">
+                    <input type="search" class="form-control" id="filterSearch" placeholder="Tam ifade ara: soru metni / şık / açıklama">
                 </div>
                 <div class="col-md-2 d-flex align-items-end">
                     <button class="btn btn-secondary w-100" id="clearFiltersBtn"><i class="bi bi-x-circle"></i> Filtreyi Temizle</button>

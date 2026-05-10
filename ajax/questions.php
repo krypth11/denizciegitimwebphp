@@ -75,6 +75,7 @@ try {
             $questionType = trim((string)($_GET['question_type'] ?? ''));
             $statusFilter = trim((string)($_GET['status'] ?? ''));
             $search = trim((string)($_GET['search'] ?? ''));
+            $search = preg_replace('/\s+/u', ' ', $search);
 
             $select = 'q.*, c.name AS course_name, qual.name AS qualification_name';
             $join = ' FROM questions q
