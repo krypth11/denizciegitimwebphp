@@ -594,11 +594,11 @@ function kg_default_xp_rule_payload(): array
 {
     return [
         'correct_xp' => 10,
-        'wrong_penalty' => 3,
-        'combo_bonus_every' => 3,
-        'combo_bonus_xp' => 5,
-        'perfect_game_bonus' => 20,
-        'endless_multiplier' => 1.20,
+        'wrong_penalty' => 0,
+        'combo_bonus_every' => 5,
+        'combo_bonus_xp' => 20,
+        'perfect_game_bonus' => 100,
+        'endless_multiplier' => 1.00,
     ];
 }
 
@@ -834,17 +834,32 @@ function kg_update_user_progress_after_run(PDO $pdo, string $userId, string $cat
     $bestCombo = max((int)($existing['best_combo'] ?? 0), (int)$runInput['max_combo']);
     $bestScore = max((int)($existing['best_score'] ?? 0), (int)$runInput['score']);
     $totalGames = (int)($existing['total_games'] ?? 0) + 1;
+    $levelInfo = kg_resolve_level_from_total_xp($pdo, $totalXp);
+    $currentLevel = (int)($levelInfo['current_level'] ?? 1);
+    $progressCols = kg_table_columns($pdo, 'kart_game_user_progress');
+    $hasCurrentLevel = in_array('current_level', $progressCols, true);
 
     if ($existing) {
-        $stmt = $pdo->prepare('UPDATE kart_game_user_progress SET total_xp=?, total_correct=?, total_wrong=?, best_combo=?, best_score=?, total_games=?, updated_at=NOW() WHERE id=?');
-        $stmt->execute([$totalXp, $totalCorrect, $totalWrong, $bestCombo, $bestScore, $totalGames, $existing['id']]);
+        if ($hasCurrentLevel) {
+            $stmt = $pdo->prepare('UPDATE kart_game_user_progress SET total_xp=?, current_level=?, total_correct=?, total_wrong=?, best_combo=?, best_score=?, total_games=?, updated_at=NOW() WHERE id=?');
+            $stmt->execute([$totalXp, $currentLevel, $totalCorrect, $totalWrong, $bestCombo, $bestScore, $totalGames, $existing['id']]);
+        } else {
+            $stmt = $pdo->prepare('UPDATE kart_game_user_progress SET total_xp=?, total_correct=?, total_wrong=?, best_combo=?, best_score=?, total_games=?, updated_at=NOW() WHERE id=?');
+            $stmt->execute([$totalXp, $totalCorrect, $totalWrong, $bestCombo, $bestScore, $totalGames, $existing['id']]);
+        }
     } else {
-        $stmt = $pdo->prepare('INSERT INTO kart_game_user_progress (id, user_id, category_id, total_xp, total_correct, total_wrong, best_combo, best_score, total_games, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
-        $stmt->execute([generate_uuid(), $userId, $categoryId, $totalXp, $totalCorrect, $totalWrong, $bestCombo, $bestScore, $totalGames]);
+        if ($hasCurrentLevel) {
+            $stmt = $pdo->prepare('INSERT INTO kart_game_user_progress (id, user_id, category_id, total_xp, current_level, total_correct, total_wrong, best_combo, best_score, total_games, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
+            $stmt->execute([generate_uuid(), $userId, $categoryId, $totalXp, $currentLevel, $totalCorrect, $totalWrong, $bestCombo, $bestScore, $totalGames]);
+        } else {
+            $stmt = $pdo->prepare('INSERT INTO kart_game_user_progress (id, user_id, category_id, total_xp, total_correct, total_wrong, best_combo, best_score, total_games, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
+            $stmt->execute([generate_uuid(), $userId, $categoryId, $totalXp, $totalCorrect, $totalWrong, $bestCombo, $bestScore, $totalGames]);
+        }
     }
 
     return [
         'total_xp' => $totalXp,
+        'current_level' => $currentLevel,
         'total_correct' => $totalCorrect,
         'total_wrong' => $totalWrong,
         'best_combo' => $bestCombo,
@@ -932,6 +947,7 @@ function kg_get_leaderboard(PDO $pdo, string $categoryId, int $limit = 50): arra
 
     return $rows;
 }
+
 
 
 
