@@ -119,9 +119,27 @@ try {
                 }
             }
 
+            $like = '';
             if ($search !== '') {
-                $where[] = '(q.question_text LIKE ? OR q.explanation LIKE ? OR q.option_a LIKE ? OR q.option_b LIKE ? OR q.option_c LIKE ? OR q.option_d LIKE ?' . ($hasOptionE ? ' OR q.option_e LIKE ?' : '') . ')';
-                $like = '%' . $search . '%';
+                $needle = mb_strtolower($search, 'UTF-8');
+                $like = '%' . $needle . '%';
+
+                $normExpr = "LOWER(REPLACE(REPLACE(REPLACE(COALESCE(%s, ''), '\\r', ' '), '\\n', ' '), '\\t', ' '))";
+
+                $searchWhere = [
+                    sprintf($normExpr, 'q.question_text') . ' LIKE ?',
+                    sprintf($normExpr, 'q.explanation') . ' LIKE ?',
+                    sprintf($normExpr, 'q.option_a') . ' LIKE ?',
+                    sprintf($normExpr, 'q.option_b') . ' LIKE ?',
+                    sprintf($normExpr, 'q.option_c') . ' LIKE ?',
+                    sprintf($normExpr, 'q.option_d') . ' LIKE ?',
+                ];
+                if ($hasOptionE) {
+                    $searchWhere[] = sprintf($normExpr, 'q.option_e') . ' LIKE ?';
+                }
+
+                $where[] = '(' . implode(' OR ', $searchWhere) . ')';
+
                 $params[] = $like;
                 $params[] = $like;
                 $params[] = $like;
@@ -142,6 +160,70 @@ try {
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if ($search !== '') {
+                $rows = array_values(array_filter($rows, static function ($row) use ($search, $hasOptionE) {
+                    $matchedFields = [];
+                    $fieldsToCheck = [
+                        'question_text' => (string)($row['question_text'] ?? ''),
+                        'explanation' => (string)($row['explanation'] ?? ''),
+                        'option_a' => (string)($row['option_a'] ?? ''),
+                        'option_b' => (string)($row['option_b'] ?? ''),
+                        'option_c' => (string)($row['option_c'] ?? ''),
+                        'option_d' => (string)($row['option_d'] ?? ''),
+                    ];
+                    if ($hasOptionE) {
+                        $fieldsToCheck['option_e'] = (string)($row['option_e'] ?? '');
+                    }
+
+                    $normalizedNeedle = mb_strtolower(preg_replace('/\s+/u', ' ', trim($search)), 'UTF-8');
+
+                    foreach ($fieldsToCheck as $fieldName => $value) {
+                        $normalizedHaystack = mb_strtolower(
+                            preg_replace('/\s+/u', ' ', str_replace(["\r", "\n", "\t"], ' ', $value)),
+                            'UTF-8'
+                        );
+
+                        if ($normalizedNeedle !== '' && mb_stripos($normalizedHaystack, $normalizedNeedle, 0, 'UTF-8') !== false) {
+                            $matchedFields[] = $fieldName;
+                        }
+                    }
+
+                    $row['matched_fields'] = $matchedFields;
+
+                    return !empty($matchedFields);
+                }));
+
+                foreach ($rows as &$row) {
+                    $matchedFields = [];
+                    $fieldsToCheck = [
+                        'question_text' => (string)($row['question_text'] ?? ''),
+                        'explanation' => (string)($row['explanation'] ?? ''),
+                        'option_a' => (string)($row['option_a'] ?? ''),
+                        'option_b' => (string)($row['option_b'] ?? ''),
+                        'option_c' => (string)($row['option_c'] ?? ''),
+                        'option_d' => (string)($row['option_d'] ?? ''),
+                    ];
+                    if ($hasOptionE) {
+                        $fieldsToCheck['option_e'] = (string)($row['option_e'] ?? '');
+                    }
+
+                    $normalizedNeedle = mb_strtolower($search, 'UTF-8');
+                    foreach ($fieldsToCheck as $fieldName => $value) {
+                        $normalizedHaystack = mb_strtolower(
+                            preg_replace('/\s+/u', ' ', str_replace(["\r", "\n", "\t"], ' ', $value)),
+                            'UTF-8'
+                        );
+                        if ($normalizedNeedle !== '' && mb_stripos($normalizedHaystack, $normalizedNeedle, 0, 'UTF-8') !== false) {
+                            $matchedFields[] = $fieldName;
+                        }
+                    }
+                    $row['matched_fields'] = $matchedFields;
+                }
+                unset($row);
+
+                $totalCount = count($rows);
+            }
 
             foreach ($rows as &$row) {
                 $row['formatted_explanation'] = format_explanation_text($row['explanation'] ?? '');
@@ -166,6 +248,12 @@ try {
                     'has_topic_filter' => $hasTopicId,
                     'has_status_filter' => ($hasStatus || $hasIsActive),
                     'status_options' => $statusOptions,
+                    'search_debug' => [
+                        'raw' => $_GET['search'] ?? '',
+                        'normalized' => $search,
+                        'mode' => 'exact_phrase',
+                        'like' => $like,
+                    ],
                 ],
             ]);
             break;

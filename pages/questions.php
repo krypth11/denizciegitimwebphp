@@ -1960,6 +1960,7 @@ $(document).ready(function() {
         const params = new URLSearchParams({ action: 'list_questions' });
         Object.entries(qState.filters).forEach(([k, v]) => { if (v) params.append(k, v); });
         const res = await window.appAjax({ url: `../ajax/questions.php?${params.toString()}` });
+        console.debug('question search debug', res.data?.meta?.search_debug);
         if (!res.success) {
             updateFilteredCountDisplay(null);
             renderDesktopRows([]);
