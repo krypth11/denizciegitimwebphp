@@ -109,8 +109,19 @@ try {
 
     api_send_json([
         'success' => true,
+        'data' => [
+            'earned_xp' => $earnedXp,
+            'total_xp' => (int)$progress['total_xp'],
+            'level' => (int)$lvl['current_level'],
+            'current_level' => (int)$lvl['current_level'],
+            'next_level_xp' => $nextLevelXp,
+            'progress_percent' => $progressPercent,
+            'level_up' => $levelUp,
+        ],
+        // Backward compatibility (legacy clients reading top-level fields)
         'earned_xp' => $earnedXp,
         'total_xp' => (int)$progress['total_xp'],
+        'level' => (int)$lvl['current_level'],
         'current_level' => (int)$lvl['current_level'],
         'next_level_xp' => $nextLevelXp,
         'progress_percent' => $progressPercent,
