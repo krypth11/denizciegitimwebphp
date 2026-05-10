@@ -82,7 +82,14 @@ include '../includes/sidebar.php';
                 </div>
                 <div class="col-md-10">
                     <label class="form-label">Arama</label>
-                    <input type="search" class="form-control" id="filterSearch" placeholder="Tam ifade ara: soru metni / şık / açıklama">
+                    <input type="search" class="form-control" id="filterSearch" placeholder="Tam ifade ara: soru metni / şıklar / açıklama">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Arama kapsamı</label>
+                    <select class="form-select" id="filterSearchScope">
+                        <option value="all">Tüm soru arama</option>
+                        <option value="visible">Sadece soru ve şıklarda arama</option>
+                    </select>
                 </div>
                 <div class="col-md-2 d-flex align-items-end">
                     <button class="btn btn-secondary w-100" id="clearFiltersBtn"><i class="bi bi-x-circle"></i> Filtreyi Temizle</button>
@@ -421,19 +428,22 @@ function normalizeExactSearchText(value) {
         .toLocaleLowerCase('tr-TR');
 }
 
-function rowMatchesExactPhrase(row, search) {
+function rowMatchesExactPhrase(row, search, scope = 'all') {
     const needle = normalizeExactSearchText(search);
     if (!needle) return true;
 
+    const normalizedScope = scope === 'visible' ? 'visible' : 'all';
     const fields = [
         row.question_text,
-        row.explanation,
         row.option_a,
         row.option_b,
         row.option_c,
         row.option_d,
         row.option_e
     ];
+    if (normalizedScope === 'all') {
+        fields.push(row.explanation);
+    }
 
     return fields.some((field) => {
         return normalizeExactSearchText(field).includes(needle);
@@ -1385,6 +1395,7 @@ $(document).ready(function() {
     let isSavingAiQuestions = false;
     const QUESTIONS_FILTERS_STORAGE_KEY = 'questions_filters_v1';
     const BULK_UPLOAD_PREFS_STORAGE_KEY = 'questions_bulk_upload_prefs_v1';
+    const SEARCH_SCOPE_STORAGE_KEY = 'admin_questions_search_scope';
     const LATEX_BULK_UPLOAD_PREFS_STORAGE_KEY = 'questions_latex_bulk_upload_prefs_v1';
 
     const appAlert = (title, message, type = 'info') => {
@@ -1434,7 +1445,8 @@ $(document).ready(function() {
             topic_id: '',
             question_type: '',
             status: '',
-            search: ''
+            search: '',
+            search_scope: 'all'
         },
         meta: {
             has_topic_filter: false,
@@ -1575,6 +1587,38 @@ $(document).ready(function() {
         } catch (e) {
             // noop
         }
+    }
+
+    function normalizeSearchScope(scope) {
+        return scope === 'visible' ? 'visible' : 'all';
+    }
+
+    function getSavedSearchScope() {
+        try {
+            const savedScope = localStorage.getItem(SEARCH_SCOPE_STORAGE_KEY) || 'all';
+            return normalizeSearchScope(savedScope);
+        } catch (e) {
+            return 'all';
+        }
+    }
+
+    function saveSearchScope(scope) {
+        try {
+            localStorage.setItem(SEARCH_SCOPE_STORAGE_KEY, normalizeSearchScope(scope));
+        } catch (e) {
+            // noop
+        }
+    }
+
+    function applySearchScopeUi(scope) {
+        const normalizedScope = normalizeSearchScope(scope);
+        qState.filters.search_scope = normalizedScope;
+        $('#filterSearchScope').val(normalizedScope);
+
+        const placeholder = normalizedScope === 'visible'
+            ? 'Tam ifade ara: soru metni / şıklar'
+            : 'Tam ifade ara: soru metni / şıklar / açıklama';
+        $('#filterSearch').attr('placeholder', placeholder);
     }
 
     function getSavedBulkUploadPrefs() {
@@ -1984,6 +2028,7 @@ $(document).ready(function() {
 
     async function loadQuestions() {
         const params = new URLSearchParams({ action: 'list_questions' });
+        params.append('search_scope', qState.filters.search_scope || 'all');
         Object.entries(qState.filters).forEach(([k, v]) => { if (v) params.append(k, v); });
         params.append('_ts', Date.now().toString());
         const res = await window.appAjax({ url: `../ajax/questions.php?${params.toString()}` });
@@ -1995,10 +2040,13 @@ $(document).ready(function() {
             return;
         }
         qState.meta = { ...qState.meta, ...(res.data?.meta || {}) };
+        if (qState.meta.search_scope) {
+            applySearchScopeUi(qState.meta.search_scope);
+        }
         renderStatusOptions();
         let rows = res.data?.questions || [];
         if (qState.filters.search) {
-            rows = rows.filter((row) => rowMatchesExactPhrase(row, qState.filters.search));
+            rows = rows.filter((row) => rowMatchesExactPhrase(row, qState.filters.search, qState.filters.search_scope));
         }
         renderDesktopRows(rows);
         renderMobileRows(rows);
@@ -2055,15 +2103,32 @@ $(document).ready(function() {
         debouncedLoad();
     });
 
+    $('#filterSearchScope').on('change', function () {
+        const selectedScope = normalizeSearchScope($(this).val() || 'all');
+        qState.filters.search_scope = selectedScope;
+        saveSearchScope(selectedScope);
+        applySearchScopeUi(selectedScope);
+        loadQuestions();
+    });
+
     $('#clearFiltersBtn').on('click', async function (e) {
         e.preventDefault();
-        qState.filters = { qualification_id: '', course_id: '', topic_id: '', question_type: '', status: '', search: '' };
+        qState.filters = {
+            qualification_id: '',
+            course_id: '',
+            topic_id: '',
+            question_type: '',
+            status: '',
+            search: '',
+            search_scope: qState.filters.search_scope || 'all'
+        };
         clearSavedQuestionFilters();
         $('#filterQualification').val('');
         $('#filterCourse').val('');
         $('#filterType').val('');
         $('#filterStatus').val('');
         $('#filterSearch').val('');
+        applySearchScopeUi(qState.filters.search_scope);
         await loadCourses();
         await loadTopics();
         await loadQuestions();
@@ -2590,7 +2655,11 @@ $(document).ready(function() {
 
     (async function initQuestionsPage() {
         const savedFilters = getSavedQuestionFilters();
+        const savedScope = getSavedSearchScope();
         console.log('questions filters restore', savedFilters);
+
+        qState.filters.search_scope = savedScope;
+        applySearchScopeUi(savedScope);
 
         await loadQualifications();
         await applySavedQuestionFilters(savedFilters);

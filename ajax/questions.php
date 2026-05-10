@@ -76,6 +76,8 @@ try {
             $statusFilter = trim((string)($_GET['status'] ?? ''));
             $search = trim((string)($_GET['search'] ?? ''));
             $search = preg_replace('/\s+/u', ' ', $search);
+            $searchScope = (string)($_GET['search_scope'] ?? 'all');
+            $searchScope = in_array($searchScope, ['all', 'visible'], true) ? $searchScope : 'all';
 
             $select = 'q.*, c.name AS course_name, qual.name AS qualification_name';
             $join = ' FROM questions q
@@ -126,27 +128,27 @@ try {
 
                 $normExpr = "LOWER(REPLACE(REPLACE(REPLACE(COALESCE(%s, ''), '\\r', ' '), '\\n', ' '), '\\t', ' '))";
 
-                $searchWhere = [
-                    sprintf($normExpr, 'q.question_text') . ' LIKE ?',
-                    sprintf($normExpr, 'q.explanation') . ' LIKE ?',
-                    sprintf($normExpr, 'q.option_a') . ' LIKE ?',
-                    sprintf($normExpr, 'q.option_b') . ' LIKE ?',
-                    sprintf($normExpr, 'q.option_c') . ' LIKE ?',
-                    sprintf($normExpr, 'q.option_d') . ' LIKE ?',
+                $searchColumns = [
+                    'q.question_text',
+                    'q.option_a',
+                    'q.option_b',
+                    'q.option_c',
+                    'q.option_d',
                 ];
                 if ($hasOptionE) {
-                    $searchWhere[] = sprintf($normExpr, 'q.option_e') . ' LIKE ?';
+                    $searchColumns[] = 'q.option_e';
                 }
+                if ($searchScope === 'all') {
+                    $searchColumns[] = 'q.explanation';
+                }
+
+                $searchWhere = array_map(static function ($col) use ($normExpr) {
+                    return sprintf($normExpr, $col) . ' LIKE ?';
+                }, $searchColumns);
 
                 $where[] = '(' . implode(' OR ', $searchWhere) . ')';
 
-                $params[] = $like;
-                $params[] = $like;
-                $params[] = $like;
-                $params[] = $like;
-                $params[] = $like;
-                $params[] = $like;
-                if ($hasOptionE) {
+                foreach ($searchColumns as $_unused) {
                     $params[] = $like;
                 }
             }
@@ -162,11 +164,10 @@ try {
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             if ($search !== '') {
-                $rows = array_values(array_filter($rows, static function ($row) use ($search, $hasOptionE) {
+                $rows = array_values(array_filter($rows, static function ($row) use ($search, $hasOptionE, $searchScope) {
                     $matchedFields = [];
                     $fieldsToCheck = [
                         'question_text' => (string)($row['question_text'] ?? ''),
-                        'explanation' => (string)($row['explanation'] ?? ''),
                         'option_a' => (string)($row['option_a'] ?? ''),
                         'option_b' => (string)($row['option_b'] ?? ''),
                         'option_c' => (string)($row['option_c'] ?? ''),
@@ -174,6 +175,9 @@ try {
                     ];
                     if ($hasOptionE) {
                         $fieldsToCheck['option_e'] = (string)($row['option_e'] ?? '');
+                    }
+                    if ($searchScope === 'all') {
+                        $fieldsToCheck['explanation'] = (string)($row['explanation'] ?? '');
                     }
 
                     $normalizedNeedle = mb_strtolower(preg_replace('/\s+/u', ' ', trim($search)), 'UTF-8');
@@ -198,7 +202,6 @@ try {
                     $matchedFields = [];
                     $fieldsToCheck = [
                         'question_text' => (string)($row['question_text'] ?? ''),
-                        'explanation' => (string)($row['explanation'] ?? ''),
                         'option_a' => (string)($row['option_a'] ?? ''),
                         'option_b' => (string)($row['option_b'] ?? ''),
                         'option_c' => (string)($row['option_c'] ?? ''),
@@ -206,6 +209,9 @@ try {
                     ];
                     if ($hasOptionE) {
                         $fieldsToCheck['option_e'] = (string)($row['option_e'] ?? '');
+                    }
+                    if ($searchScope === 'all') {
+                        $fieldsToCheck['explanation'] = (string)($row['explanation'] ?? '');
                     }
 
                     $normalizedNeedle = mb_strtolower($search, 'UTF-8');
@@ -253,7 +259,9 @@ try {
                         'normalized' => $search,
                         'mode' => 'exact_phrase',
                         'like' => $like,
+                        'search_scope' => $searchScope,
                     ],
+                    'search_scope' => $searchScope,
                 ],
             ]);
             break;
