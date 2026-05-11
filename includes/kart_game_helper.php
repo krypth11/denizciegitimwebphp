@@ -938,7 +938,8 @@ function kg_get_leaderboard(PDO $pdo, string $categoryId, int $limit = 50): arra
     $stmt->execute([$categoryId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-    foreach ($rows as &$row) {
+    foreach ($rows as $idx => &$row) {
+        $row['rank'] = $idx + 1;
         $lvl = kg_resolve_level_from_total_xp($pdo, (int)$row['total_xp']);
         $row['current_level'] = $lvl['current_level'];
         $row['avatar'] = upload_build_public_url((string)($row['avatar'] ?? ''));
@@ -947,6 +948,61 @@ function kg_get_leaderboard(PDO $pdo, string $categoryId, int $limit = 50): arra
 
     return $rows;
 }
+
+function kg_get_leaderboard_entry(PDO $pdo, string $categoryId, string $userId): ?array
+{
+    $userId = trim($userId);
+    if ($userId === '') {
+        return null;
+    }
+
+    $profile = kg_profile_schema($pdo);
+    $nameExpr = $profile['full_name'] ? 'NULLIF(TRIM(u.`' . $profile['full_name'] . '`), \'\')' : 'NULL';
+    $emailExpr = $profile['email'] ? 'u.`' . $profile['email'] . '`' : '\'\'';
+    $avatarExpr = $profile['profile_photo_url'] ? 'COALESCE(NULLIF(TRIM(u.`' . $profile['profile_photo_url'] . '`), \'\'), \'\')' : '\'\'';
+
+    $sql = 'SELECT p.user_id, p.total_xp, p.best_score, p.best_combo, '
+        . 'COALESCE(' . $nameExpr . ', ' . $emailExpr . ', p.user_id) AS username, '
+        . $avatarExpr . ' AS avatar '
+        . 'FROM kart_game_user_progress p '
+        . 'LEFT JOIN `' . $profile['table'] . '` u ON u.`' . $profile['id'] . '` = p.user_id '
+        . 'WHERE p.category_id = ? AND p.user_id = ? '
+        . 'LIMIT 1';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$categoryId, $userId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+
+    $rankStmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM kart_game_user_progress p '
+        . 'WHERE p.category_id = ? AND ('
+        . 'p.total_xp > ? '
+        . 'OR (p.total_xp = ? AND p.best_score > ?) '
+        . 'OR (p.total_xp = ? AND p.best_score = ? AND p.best_combo > ?))'
+    );
+    $rankStmt->execute([
+        $categoryId,
+        (int)$row['total_xp'],
+        (int)$row['total_xp'],
+        (int)$row['best_score'],
+        (int)$row['total_xp'],
+        (int)$row['best_score'],
+        (int)$row['best_combo'],
+    ]);
+
+    $higherCount = (int)$rankStmt->fetchColumn();
+    $row['rank'] = $higherCount + 1;
+
+    $lvl = kg_resolve_level_from_total_xp($pdo, (int)$row['total_xp']);
+    $row['current_level'] = $lvl['current_level'];
+    $row['avatar'] = upload_build_public_url((string)($row['avatar'] ?? ''));
+
+    return $row;
+}
+
 
 
 
