@@ -11,12 +11,15 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
+    $isPremium = usage_limits_is_user_pro($pdo, $userId);
+    $dailyUsage = kg_get_daily_usage_status($pdo, $userId, $isPremium);
 
     if (api_is_guest_user($pdo, $userId)) {
         api_send_json([
             'success' => false,
             'error_code' => 'AUTH_REQUIRED',
             'message' => 'Kart oyununu oynamak için kayıt olmalısın.',
+            'daily_usage' => $dailyUsage,
         ], 401);
     }
 
@@ -40,16 +43,17 @@ try {
         api_error('Kategori bulunamadı.', 404);
     }
 
-    $isPremium = usage_limits_is_user_pro($pdo, $userId);
     $consume = kg_consume_start_run_right($pdo, $userId, $gameMode, $isPremium, $usedRewarded);
 
     if (empty($consume['success'])) {
         $errorCode = (string)($consume['error_code'] ?? 'LIMIT_REACHED');
         $status = in_array($errorCode, ['VALIDATION_GAME_MODE_INVALID'], true) ? 422 : 429;
+        $errorDailyUsage = $consume['daily_usage'] ?? kg_get_daily_usage_status($pdo, $userId, $isPremium);
         api_send_json([
             'success' => false,
             'error_code' => $errorCode,
             'message' => (string)($consume['message'] ?? 'Oyun hakkın doldu.'),
+            'daily_usage' => $errorDailyUsage,
         ], $status);
     }
 
@@ -65,6 +69,8 @@ try {
     } else {
         $response['remaining'] = (int)($consume['remaining'] ?? 0);
     }
+
+    $response['daily_usage'] = $consume['daily_usage'] ?? kg_get_daily_usage_status($pdo, $userId, $isPremium);
 
     api_send_json([
         'success' => true,

@@ -958,6 +958,7 @@ function kg_get_daily_usage_status(PDO $pdo, string $userId, bool $isPremium): a
     $rankedTotalUsed = $rankedFreeUsed + $rankedRewardedUsed;
 
     $practiceRemaining = max(0, $practiceLimit - $practiceUsed);
+    $practiceIsAvailable = $isPremium || ($practiceRemaining > 0);
 
     if ($isPremium) {
         $rankedRemaining = max(0, $rankedDailyLimit - $rankedTotalUsed);
@@ -967,17 +968,20 @@ function kg_get_daily_usage_status(PDO $pdo, string $userId, bool $isPremium): a
                 'limit' => null,
                 'used' => 0,
                 'remaining' => null,
+                'is_available' => true,
             ],
             'ranked' => [
                 'unlimited' => false,
                 'limit' => $rankedDailyLimit,
                 'used' => $rankedTotalUsed,
                 'remaining' => $rankedRemaining,
-                'free_limit' => null,
-                'free_used' => 0,
-                'rewarded_limit' => null,
+                'is_available' => ($rankedRemaining > 0),
+                'free_limit' => $rankedDailyLimit,
+                'free_used' => $rankedTotalUsed,
+                'rewarded_limit' => 0,
                 'rewarded_used' => 0,
                 'remaining_total' => $rankedRemaining,
+                'reward_required' => false,
             ],
         ];
     }
@@ -985,6 +989,14 @@ function kg_get_daily_usage_status(PDO $pdo, string $userId, bool $isPremium): a
     $rankedRemainingByDailyCap = max(0, $rankedDailyLimit - $rankedTotalUsed);
     $rankedRemainingBySlots = max(0, ($rankedFreeLimit + $rankedRewardedLimit) - $rankedTotalUsed);
     $rankedRemainingTotal = min($rankedRemainingByDailyCap, $rankedRemainingBySlots);
+    $freeRemaining = max(0, $rankedFreeLimit - $rankedFreeUsed);
+    $rewardedRemaining = max(0, $rankedRewardedLimit - $rankedRewardedUsed);
+    $rewardRequired = (
+        $freeRemaining <= 0
+        && $rewardedRemaining > 0
+        && $rankedRemainingByDailyCap > 0
+        && $rankedRemainingTotal > 0
+    );
 
     return [
         'practice' => [
@@ -992,17 +1004,20 @@ function kg_get_daily_usage_status(PDO $pdo, string $userId, bool $isPremium): a
             'limit' => $practiceLimit,
             'used' => $practiceUsed,
             'remaining' => $practiceRemaining,
+            'is_available' => $practiceIsAvailable,
         ],
         'ranked' => [
             'unlimited' => false,
             'limit' => $rankedDailyLimit,
             'used' => $rankedTotalUsed,
             'remaining' => $rankedRemainingByDailyCap,
+            'is_available' => ($rankedRemainingTotal > 0),
             'free_limit' => $rankedFreeLimit,
             'free_used' => $rankedFreeUsed,
             'rewarded_limit' => $rankedRewardedLimit,
             'rewarded_used' => $rankedRewardedUsed,
             'remaining_total' => $rankedRemainingTotal,
+            'reward_required' => $rewardRequired,
         ],
     ];
 }
@@ -1019,17 +1034,6 @@ function kg_consume_start_run_right(PDO $pdo, string $userId, string $gameMode, 
             'success' => false,
             'error_code' => 'VALIDATION_GAME_MODE_INVALID',
             'message' => 'Geçersiz game_mode.',
-        ];
-    }
-
-    if ($isPremium && $isPracticeMode) {
-        return [
-            'success' => true,
-            'granted' => true,
-            'unlimited' => true,
-            'used_rewarded' => false,
-            'remaining' => -999,
-            'remaining_total' => -999,
         ];
     }
 
@@ -1060,6 +1064,7 @@ function kg_consume_start_run_right(PDO $pdo, string $userId, string $gameMode, 
                     'success' => false,
                     'error_code' => 'PRACTICE_LIMIT_REACHED',
                     'message' => 'Bugünkü pratik mod hakkın doldu.',
+                    'daily_usage' => kg_get_daily_usage_status($pdo, $userId, $isPremium),
                 ];
             }
             $practiceUsed++;
@@ -1071,6 +1076,7 @@ function kg_consume_start_run_right(PDO $pdo, string $userId, string $gameMode, 
                     'success' => false,
                     'error_code' => 'RANKED_LIMIT_REACHED',
                     'message' => 'Bugünkü sıralı mod hakkın doldu.',
+                    'daily_usage' => kg_get_daily_usage_status($pdo, $userId, $isPremium),
                 ];
             }
 
@@ -1087,6 +1093,7 @@ function kg_consume_start_run_right(PDO $pdo, string $userId, string $gameMode, 
                         'success' => false,
                         'error_code' => 'RANKED_FREE_PLAY_REQUIRED',
                         'message' => 'Önce ücretsiz sıralı mod hakkını kullanmalısın.',
+                        'daily_usage' => kg_get_daily_usage_status($pdo, $userId, $isPremium),
                     ];
                 }
                 $rankedFreeUsed++;
@@ -1096,7 +1103,8 @@ function kg_consume_start_run_right(PDO $pdo, string $userId, string $gameMode, 
                     return [
                         'success' => false,
                         'error_code' => 'RANKED_REWARDED_REQUIRED',
-                        'message' => 'Ücretsiz hak bitti. Devam etmek için reklamlı hak kullanılmalı.',
+                        'message' => 'Sıralı moda devam etmek için reklam izlemelisin.',
+                        'daily_usage' => kg_get_daily_usage_status($pdo, $userId, $isPremium),
                     ];
                 }
                 if ($rewardedRemaining <= 0) {
@@ -1105,6 +1113,7 @@ function kg_consume_start_run_right(PDO $pdo, string $userId, string $gameMode, 
                         'success' => false,
                         'error_code' => 'RANKED_LIMIT_REACHED',
                         'message' => 'Bugünkü sıralı mod hakkın doldu.',
+                        'daily_usage' => kg_get_daily_usage_status($pdo, $userId, $isPremium),
                     ];
                 }
                 $rankedRewardedUsed++;
@@ -1146,24 +1155,29 @@ function kg_consume_start_run_right(PDO $pdo, string $userId, string $gameMode, 
         return [
             'success' => true,
             'granted' => true,
-            'unlimited' => false,
+            'unlimited' => ($isPremium && $isPracticeMode),
             'used_rewarded' => $isRankedMode ? $consumedRewarded : false,
             'remaining' => $practiceRemaining,
             'remaining_total' => $remainingTotal,
             'daily_usage' => [
                 'practice' => [
-                    'limit' => $practiceLimit,
-                    'used' => $practiceUsed,
-                    'remaining' => $practiceRemaining,
+                    'unlimited' => $isPremium,
+                    'is_available' => $isPremium ? true : ($practiceRemaining > 0),
+                    'limit' => $isPremium ? null : $practiceLimit,
+                    'used' => $isPremium ? 0 : $practiceUsed,
+                    'remaining' => $isPremium ? null : $practiceRemaining,
                 ],
                 'ranked' => [
+                    'unlimited' => false,
+                    'is_available' => ($remainingTotal > 0),
                     'limit' => $rankedDailyLimit,
                     'used' => $rankedTotalUsed,
                     'remaining' => $rankedRemainingByDailyCap,
-                    'free_limit' => $rankedFreeLimit,
+                    'free_limit' => $isPremium ? $rankedDailyLimit : $rankedFreeLimit,
                     'free_used' => $rankedFreeUsed,
-                    'rewarded_limit' => $rankedRewardedLimit,
-                    'rewarded_used' => $rankedRewardedUsed,
+                    'reward_required' => (!$isPremium && max(0, $rankedFreeLimit - $rankedFreeUsed) <= 0 && max(0, $rankedRewardedLimit - $rankedRewardedUsed) > 0 && $remainingTotal > 0 && $rankedRemainingByDailyCap > 0),
+                    'rewarded_limit' => $isPremium ? 0 : $rankedRewardedLimit,
+                    'rewarded_used' => $isPremium ? 0 : $rankedRewardedUsed,
                     'remaining_total' => $remainingTotal,
                 ],
             ],
@@ -1426,6 +1440,8 @@ function kg_get_leaderboard_rewards(PDO $pdo, string $seasonId): array
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
+
+
 
 
 
