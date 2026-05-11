@@ -59,7 +59,8 @@ try {
     ];
 
     if ($gameMode === 'daily') {
-        $response['used_rewarded'] = !empty($consume['used_rewarded']);
+        // Ranked (daily): premium kullanıcıda reklam akışı yoktur.
+        $response['used_rewarded'] = $isPremium ? false : !empty($consume['used_rewarded']);
         $response['remaining_total'] = (int)($consume['remaining_total'] ?? 0);
     } else {
         $response['remaining'] = (int)($consume['remaining'] ?? 0);

@@ -73,7 +73,7 @@ include '../includes/sidebar.php';
                     <div class="col-12 col-lg-6">
                         <label class="form-label" for="kart_game_daily_attempt_limit">Kart oyunu günlük görev oynama hakkı</label>
                         <input type="number" class="form-control" id="kart_game_daily_attempt_limit" name="kart_game_daily_attempt_limit" min="0" max="100" step="1" value="5" required>
-                        <div class="form-text">Kullanıcı bir günde Günlük Görev modunu bu kadar kez leaderboard/XP etkili oynayabilir. 0 = kapalı.</div>
+                        <div class="form-text">Sıralı Mod için tüm kullanıcıların günlük leaderboard/XP etkili oynama hakkı. Premium kullanıcılar da bu limite tabidir. 0 = kapalı.</div>
                     </div>
                     <div class="col-12 col-lg-6">
                         <label class="form-label" for="kart_game_practice_daily_limit">Kart oyunu pratik mod günlük hak</label>
@@ -83,12 +83,12 @@ include '../includes/sidebar.php';
                     <div class="col-12 col-lg-6">
                         <label class="form-label" for="kart_game_ranked_free_plays">Kart oyunu sıralı mod ücretsiz hak</label>
                         <input type="number" class="form-control" id="kart_game_ranked_free_plays" name="kart_game_ranked_free_plays" min="0" max="999" step="1" value="1" required>
-                        <div class="form-text">Premium olmayan kullanıcıların reklamsız günlük sıralı mod hakkı.</div>
+                        <div class="form-text">Premium olmayan kullanıcıların reklamsız sıralı mod hakkı. Toplam sıralı mod hakkı genel sıralı mod limitini aşamaz.</div>
                     </div>
                     <div class="col-12 col-lg-6">
                         <label class="form-label" for="kart_game_ranked_rewarded_plays">Kart oyunu sıralı mod reklamlı ekstra hak</label>
                         <input type="number" class="form-control" id="kart_game_ranked_rewarded_plays" name="kart_game_ranked_rewarded_plays" min="0" max="999" step="1" value="4" required>
-                        <div class="form-text">Premium olmayan kullanıcıların reklam izleyerek kazanabileceği ekstra sıralı mod hakkı.</div>
+                        <div class="form-text">Premium olmayan kullanıcıların reklam izleyerek kullanabileceği ekstra sıralı mod hakkı. Toplam sıralı mod hakkı genel sıralı mod limitini aşamaz.</div>
                     </div>
                 </div>
             </form>

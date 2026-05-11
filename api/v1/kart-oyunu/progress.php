@@ -18,6 +18,7 @@ try {
 
     $summary = kg_get_progress_summary($pdo, $userId, $categoryId);
     $summary['daily_attempt'] = kg_get_daily_attempt_status($pdo, $userId, $categoryId);
+    // daily_usage yapısı helper tarafından premium/non-premium kurallarına göre hazırlanır.
     $summary['daily_usage'] = [
         'practice' => $dailyUsage['practice'],
         'ranked' => $dailyUsage['ranked'],
