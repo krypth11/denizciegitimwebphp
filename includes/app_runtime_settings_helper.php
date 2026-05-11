@@ -25,6 +25,9 @@ function app_runtime_settings_defaults(): array
         'rewarded_study_daily_ad_limit' => 3,
         'rewarded_mock_exam_daily_ad_limit' => 1,
         'kart_game_daily_attempt_limit' => 5,
+        'kart_game_practice_daily_limit' => 20,
+        'kart_game_ranked_free_plays' => 1,
+        'kart_game_ranked_rewarded_plays' => 4,
     ];
 }
 
@@ -42,6 +45,9 @@ function app_runtime_settings_rules(): array
         'rewarded_study_daily_ad_limit' => ['min' => 0, 'max' => 20],
         'rewarded_mock_exam_daily_ad_limit' => ['min' => 0, 'max' => 10],
         'kart_game_daily_attempt_limit' => ['min' => 0, 'max' => 100],
+        'kart_game_practice_daily_limit' => ['min' => 0, 'max' => 999],
+        'kart_game_ranked_free_plays' => ['min' => 0, 'max' => 999],
+        'kart_game_ranked_rewarded_plays' => ['min' => 0, 'max' => 999],
     ];
 }
 

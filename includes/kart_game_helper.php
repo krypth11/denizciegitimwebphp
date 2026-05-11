@@ -922,6 +922,223 @@ function kg_today(): string
     return date('Y-m-d');
 }
 
+function kg_get_practice_daily_limit(PDO $pdo): int
+{
+    $settings = app_runtime_settings_get($pdo);
+    return app_runtime_settings_int($settings, 'kart_game_practice_daily_limit', 20);
+}
+
+function kg_get_ranked_free_daily_limit(PDO $pdo): int
+{
+    $settings = app_runtime_settings_get($pdo);
+    return app_runtime_settings_int($settings, 'kart_game_ranked_free_plays', 1);
+}
+
+function kg_get_ranked_rewarded_daily_limit(PDO $pdo): int
+{
+    $settings = app_runtime_settings_get($pdo);
+    return app_runtime_settings_int($settings, 'kart_game_ranked_rewarded_plays', 4);
+}
+
+function kg_get_daily_usage_status(PDO $pdo, string $userId, bool $isPremium): array
+{
+    if ($isPremium) {
+        return [
+            'practice' => [
+                'limit' => -999,
+                'used' => 0,
+                'remaining' => -999,
+            ],
+            'ranked' => [
+                'free_limit' => -999,
+                'free_used' => 0,
+                'rewarded_limit' => -999,
+                'rewarded_used' => 0,
+                'remaining_total' => -999,
+            ],
+        ];
+    }
+
+    $today = kg_today();
+    $practiceLimit = max(0, kg_get_practice_daily_limit($pdo));
+    $rankedFreeLimit = max(0, kg_get_ranked_free_daily_limit($pdo));
+    $rankedRewardedLimit = max(0, kg_get_ranked_rewarded_daily_limit($pdo));
+
+    $stmt = $pdo->prepare('SELECT practice_used, ranked_free_used, ranked_rewarded_used FROM kart_game_daily_usage WHERE user_id = ? AND usage_date = ? LIMIT 1');
+    $stmt->execute([$userId, $today]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $practiceUsed = max(0, (int)($row['practice_used'] ?? 0));
+    $rankedFreeUsed = max(0, (int)($row['ranked_free_used'] ?? 0));
+    $rankedRewardedUsed = max(0, (int)($row['ranked_rewarded_used'] ?? 0));
+
+    $practiceRemaining = max(0, $practiceLimit - $practiceUsed);
+    $rankedRemainingTotal = max(0, ($rankedFreeLimit - $rankedFreeUsed)) + max(0, ($rankedRewardedLimit - $rankedRewardedUsed));
+
+    return [
+        'practice' => [
+            'limit' => $practiceLimit,
+            'used' => $practiceUsed,
+            'remaining' => $practiceRemaining,
+        ],
+        'ranked' => [
+            'free_limit' => $rankedFreeLimit,
+            'free_used' => $rankedFreeUsed,
+            'rewarded_limit' => $rankedRewardedLimit,
+            'rewarded_used' => $rankedRewardedUsed,
+            'remaining_total' => $rankedRemainingTotal,
+        ],
+    ];
+}
+
+function kg_consume_start_run_right(PDO $pdo, string $userId, string $gameMode, bool $isPremium, bool $usedRewarded): array
+{
+    if ($isPremium) {
+        return [
+            'success' => true,
+            'granted' => true,
+            'unlimited' => true,
+            'used_rewarded' => false,
+            'remaining' => -999,
+            'remaining_total' => -999,
+        ];
+    }
+
+    $today = kg_today();
+    $practiceModes = ['quick', 'long', 'endless'];
+    $isPracticeMode = in_array($gameMode, $practiceModes, true);
+    $isRankedMode = ($gameMode === 'daily');
+
+    if (!$isPracticeMode && !$isRankedMode) {
+        return [
+            'success' => false,
+            'error_code' => 'VALIDATION_GAME_MODE_INVALID',
+            'message' => 'Geçersiz game_mode.',
+        ];
+    }
+
+    $ownTx = !$pdo->inTransaction();
+    $consumedRewarded = false;
+    if ($ownTx) {
+        $pdo->beginTransaction();
+    }
+
+    try {
+        $select = $pdo->prepare('SELECT id, practice_used, ranked_free_used, ranked_rewarded_used FROM kart_game_daily_usage WHERE user_id = ? AND usage_date = ? LIMIT 1 FOR UPDATE');
+        $select->execute([$userId, $today]);
+        $row = $select->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        $practiceUsed = max(0, (int)($row['practice_used'] ?? 0));
+        $rankedFreeUsed = max(0, (int)($row['ranked_free_used'] ?? 0));
+        $rankedRewardedUsed = max(0, (int)($row['ranked_rewarded_used'] ?? 0));
+
+        $practiceLimit = max(0, kg_get_practice_daily_limit($pdo));
+        $rankedFreeLimit = max(0, kg_get_ranked_free_daily_limit($pdo));
+        $rankedRewardedLimit = max(0, kg_get_ranked_rewarded_daily_limit($pdo));
+
+        if ($isPracticeMode) {
+            if ($practiceUsed >= $practiceLimit) {
+                if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+                return [
+                    'success' => false,
+                    'error_code' => 'PRACTICE_LIMIT_REACHED',
+                    'message' => 'Bugünkü pratik mod hakkın doldu.',
+                ];
+            }
+            $practiceUsed++;
+        } else {
+            $freeRemaining = max(0, $rankedFreeLimit - $rankedFreeUsed);
+            $rewardedRemaining = max(0, $rankedRewardedLimit - $rankedRewardedUsed);
+
+            if ($freeRemaining > 0) {
+                if ($usedRewarded) {
+                    if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+                    return [
+                        'success' => false,
+                        'error_code' => 'RANKED_FREE_PLAY_REQUIRED',
+                        'message' => 'Önce ücretsiz sıralı mod hakkını kullanmalısın.',
+                    ];
+                }
+                $rankedFreeUsed++;
+            } else {
+                if (!$usedRewarded) {
+                    if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+                    return [
+                        'success' => false,
+                        'error_code' => 'RANKED_REWARDED_REQUIRED',
+                        'message' => 'Ücretsiz hak bitti. Devam etmek için reklamlı hak kullanılmalı.',
+                    ];
+                }
+                if ($rewardedRemaining <= 0) {
+                    if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+                    return [
+                        'success' => false,
+                        'error_code' => 'LIMIT_REACHED',
+                        'message' => 'Bugünkü sıralı mod hakkın doldu.',
+                    ];
+                }
+                $rankedRewardedUsed++;
+                $consumedRewarded = true;
+            }
+        }
+
+        if (!$row) {
+            $insert = $pdo->prepare('INSERT INTO kart_game_daily_usage (id, user_id, usage_date, practice_used, ranked_free_used, ranked_rewarded_used, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())');
+            $insert->execute([
+                generate_uuid(),
+                $userId,
+                $today,
+                $practiceUsed,
+                $rankedFreeUsed,
+                $rankedRewardedUsed,
+            ]);
+        } else {
+            $update = $pdo->prepare('UPDATE kart_game_daily_usage SET practice_used = ?, ranked_free_used = ?, ranked_rewarded_used = ?, updated_at = NOW() WHERE id = ?');
+            $update->execute([
+                $practiceUsed,
+                $rankedFreeUsed,
+                $rankedRewardedUsed,
+                (string)$row['id'],
+            ]);
+        }
+
+        $practiceRemaining = max(0, $practiceLimit - $practiceUsed);
+        $remainingTotal = max(0, ($rankedFreeLimit - $rankedFreeUsed)) + max(0, ($rankedRewardedLimit - $rankedRewardedUsed));
+
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->commit();
+        }
+
+        return [
+            'success' => true,
+            'granted' => true,
+            'unlimited' => false,
+            'used_rewarded' => $isRankedMode ? $consumedRewarded : false,
+            'remaining' => $practiceRemaining,
+            'remaining_total' => $remainingTotal,
+            'daily_usage' => [
+                'practice' => [
+                    'limit' => $practiceLimit,
+                    'used' => $practiceUsed,
+                    'remaining' => $practiceRemaining,
+                ],
+                'ranked' => [
+                    'free_limit' => $rankedFreeLimit,
+                    'free_used' => $rankedFreeUsed,
+                    'rewarded_limit' => $rankedRewardedLimit,
+                    'rewarded_used' => $rankedRewardedUsed,
+                    'remaining_total' => $remainingTotal,
+                ],
+            ],
+        ];
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
 function kg_get_daily_attempt_limit(PDO $pdo): int
 {
     $settings = app_runtime_settings_get($pdo);
@@ -1172,6 +1389,8 @@ function kg_get_leaderboard_rewards(PDO $pdo, string $seasonId): array
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
+
+
 
 
 

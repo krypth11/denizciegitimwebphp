@@ -19,6 +19,15 @@ function kg_submit_error(string $message, string $errorCode, int $status = 422):
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
+
+    if (api_is_guest_user($pdo, $userId)) {
+        api_send_json([
+            'success' => false,
+            'error_code' => 'AUTH_REQUIRED',
+            'message' => 'Kart oyununu oynamak için kayıt olmalısın.',
+        ], 401);
+    }
+
     $payload = api_get_request_data();
 
     // Legacy client compatibility: mode -> game_mode
@@ -69,8 +78,6 @@ try {
         kg_submit_error('correct_count + wrong_count total_questions değerini aşamaz.', 'VALIDATION_COUNTS_INCONSISTENT', 422);
     }
 
-    $dailyAttemptStatus = kg_get_daily_attempt_status($pdo, $userId, $categoryId);
-
     if ($gameMode !== 'daily') {
         $progress = kg_get_progress_summary($pdo, $userId, $categoryId);
         $lvl = kg_resolve_level_from_total_xp($pdo, (int)$progress['total_xp']);
@@ -104,7 +111,6 @@ try {
                 'level_up' => false,
                 'is_practice' => true,
                 'leaderboard_eligible' => false,
-                'daily_attempt' => $dailyAttemptStatus,
                 'message' => 'Bu mod pratik içindir. XP ve leaderboard puanı vermez.',
             ],
             'earned_xp' => 0,
@@ -115,15 +121,6 @@ try {
             'progress_percent' => (int)$progress['progress_percent'],
             'level_up' => false,
         ]);
-    }
-
-    if (empty($dailyAttemptStatus['is_available'])) {
-        api_send_json([
-            'success' => false,
-            'error_code' => 'DAILY_ATTEMPT_LIMIT_REACHED',
-            'message' => 'Günlük görev hakkın doldu.',
-            'daily_attempt' => $dailyAttemptStatus,
-        ], 429);
     }
 
     $xpRule = kg_get_xp_rule($pdo, $categoryId);
@@ -159,18 +156,6 @@ try {
             (int)$lvl['current_level']
         );
 
-        $attemptResult = kg_increment_daily_attempt($pdo, $userId, $categoryId);
-        if (empty($attemptResult['success'])) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-            api_send_json([
-                'success' => false,
-                'error_code' => 'DAILY_ATTEMPT_LIMIT_REACHED',
-                'message' => 'Günlük görev hakkın doldu.',
-                'daily_attempt' => $attemptResult['status'] ?? kg_get_daily_attempt_status($pdo, $userId, $categoryId),
-            ], 429);
-        }
-
-        $dailyAttemptStatus = $attemptResult['status'] ?? kg_get_daily_attempt_status($pdo, $userId, $categoryId);
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -189,9 +174,7 @@ try {
             'level_up' => $levelUp,
             'is_practice' => false,
             'leaderboard_eligible' => true,
-            'daily_attempt' => $dailyAttemptStatus,
         ],
-        // Backward compatibility (legacy clients reading top-level fields)
         'earned_xp' => $earnedXp,
         'total_xp' => (int)$progress['total_xp'],
         'level' => (int)$lvl['current_level'],
