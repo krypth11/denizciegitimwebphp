@@ -70,6 +70,11 @@ include '../includes/sidebar.php';
                         <input type="number" class="form-control" id="rewarded_mock_exam_daily_ad_limit" name="rewarded_mock_exam_daily_ad_limit" min="0" max="10" step="1" value="1" required>
                         <div class="form-text">Ücretsiz/guest kullanıcı bir günde deneme hakkı için en fazla kaç reklam izleyebilir. 0 = kapalı.</div>
                     </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label" for="kart_game_daily_attempt_limit">Kart oyunu günlük görev oynama hakkı</label>
+                        <input type="number" class="form-control" id="kart_game_daily_attempt_limit" name="kart_game_daily_attempt_limit" min="0" max="100" step="1" value="5" required>
+                        <div class="form-text">Kullanıcı bir günde Günlük Görev modunu bu kadar kez leaderboard/XP etkili oynayabilir. 0 = kapalı.</div>
+                    </div>
                 </div>
             </form>
         </div>
@@ -93,7 +98,8 @@ $(function () {
         rewarded_study_bonus: { min: 1, max: 100 },
         rewarded_mock_exam_bonus: { min: 1, max: 10 },
         rewarded_study_daily_ad_limit: { min: 0, max: 20 },
-        rewarded_mock_exam_daily_ad_limit: { min: 0, max: 10 }
+        rewarded_mock_exam_daily_ad_limit: { min: 0, max: 10 },
+        kart_game_daily_attempt_limit: { min: 0, max: 100 }
     };
 
     function clampInt(value, min, max, fallback) {

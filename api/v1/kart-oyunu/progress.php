@@ -13,9 +13,12 @@ try {
     $categoryId = api_require_query_param('category_id');
     if (!kg_get_category($pdo, $categoryId)) api_error('Kategori bulunamadı.', 404);
 
+    $summary = kg_get_progress_summary($pdo, $userId, $categoryId);
+    $summary['daily_attempt'] = kg_get_daily_attempt_status($pdo, $userId, $categoryId);
+
     api_send_json([
         'success' => true,
-        'data' => kg_get_progress_summary($pdo, $userId, $categoryId),
+        'data' => $summary,
     ]);
 } catch (Throwable $e) {
     api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);

@@ -24,6 +24,7 @@ function app_runtime_settings_defaults(): array
         'rewarded_mock_exam_bonus' => 1,
         'rewarded_study_daily_ad_limit' => 3,
         'rewarded_mock_exam_daily_ad_limit' => 1,
+        'kart_game_daily_attempt_limit' => 5,
     ];
 }
 
@@ -40,6 +41,7 @@ function app_runtime_settings_rules(): array
         'rewarded_mock_exam_bonus' => ['min' => 1, 'max' => 10],
         'rewarded_study_daily_ad_limit' => ['min' => 0, 'max' => 20],
         'rewarded_mock_exam_daily_ad_limit' => ['min' => 0, 'max' => 10],
+        'kart_game_daily_attempt_limit' => ['min' => 0, 'max' => 100],
     ];
 }
 

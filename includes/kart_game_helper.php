@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/upload_helper.php';
+require_once __DIR__ . '/app_runtime_settings_helper.php';
 
 function kg_slugify(string $value): string
 {
@@ -916,6 +917,137 @@ function kg_get_progress_summary(PDO $pdo, string $userId, string $categoryId): 
     ];
 }
 
+function kg_today(): string
+{
+    return date('Y-m-d');
+}
+
+function kg_get_daily_attempt_limit(PDO $pdo): int
+{
+    $settings = app_runtime_settings_get($pdo);
+    return app_runtime_settings_int($settings, 'kart_game_daily_attempt_limit', 5);
+}
+
+function kg_get_daily_attempt_status(PDO $pdo, string $userId, string $categoryId): array
+{
+    $limit = max(0, kg_get_daily_attempt_limit($pdo));
+    $used = 0;
+    $today = kg_today();
+
+    $stmt = $pdo->prepare(
+        'SELECT attempts_used FROM kart_game_daily_attempts WHERE user_id = ? AND category_id = ? AND play_date = ? LIMIT 1'
+    );
+    $stmt->execute([$userId, $categoryId, $today]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    if ($row) {
+        $used = max(0, (int)($row['attempts_used'] ?? 0));
+    }
+
+    $remaining = max(0, $limit - $used);
+
+    return [
+        'limit' => $limit,
+        'used' => $used,
+        'remaining' => $remaining,
+        'date' => $today,
+        'is_available' => ($limit > 0 && $remaining > 0),
+    ];
+}
+
+function kg_increment_daily_attempt(PDO $pdo, string $userId, string $categoryId): array
+{
+    $limit = max(0, kg_get_daily_attempt_limit($pdo));
+    $today = kg_today();
+
+    if ($limit <= 0) {
+        return [
+            'success' => false,
+            'error_code' => 'DAILY_ATTEMPT_LIMIT_REACHED',
+            'status' => kg_get_daily_attempt_status($pdo, $userId, $categoryId),
+        ];
+    }
+
+    $ownTx = !$pdo->inTransaction();
+    if ($ownTx) {
+        $pdo->beginTransaction();
+    }
+
+    try {
+        $select = $pdo->prepare(
+            'SELECT id, attempts_used FROM kart_game_daily_attempts WHERE user_id = ? AND category_id = ? AND play_date = ? LIMIT 1 FOR UPDATE'
+        );
+        $select->execute([$userId, $categoryId, $today]);
+        $row = $select->fetch(PDO::FETCH_ASSOC) ?: null;
+
+        if (!$row) {
+            $newUsed = 1;
+            if ($newUsed > $limit) {
+                if ($ownTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return [
+                    'success' => false,
+                    'error_code' => 'DAILY_ATTEMPT_LIMIT_REACHED',
+                    'status' => kg_get_daily_attempt_status($pdo, $userId, $categoryId),
+                ];
+            }
+
+            $insert = $pdo->prepare(
+                'INSERT INTO kart_game_daily_attempts (id, user_id, category_id, play_date, attempts_used, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())'
+            );
+            $insert->execute([generate_uuid(), $userId, $categoryId, $today, $newUsed]);
+        } else {
+            $used = max(0, (int)($row['attempts_used'] ?? 0));
+            if ($used >= $limit) {
+                if ($ownTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return [
+                    'success' => false,
+                    'error_code' => 'DAILY_ATTEMPT_LIMIT_REACHED',
+                    'status' => [
+                        'limit' => $limit,
+                        'used' => $used,
+                        'remaining' => 0,
+                        'date' => $today,
+                        'is_available' => false,
+                    ],
+                ];
+            }
+
+            $update = $pdo->prepare('UPDATE kart_game_daily_attempts SET attempts_used = attempts_used + 1, updated_at = NOW() WHERE id = ?');
+            $update->execute([(string)$row['id']]);
+        }
+
+        $statusStmt = $pdo->prepare(
+            'SELECT attempts_used FROM kart_game_daily_attempts WHERE user_id = ? AND category_id = ? AND play_date = ? LIMIT 1'
+        );
+        $statusStmt->execute([$userId, $categoryId, $today]);
+        $usedNow = (int)($statusStmt->fetchColumn() ?: 0);
+        $status = [
+            'limit' => $limit,
+            'used' => max(0, $usedNow),
+            'remaining' => max(0, $limit - $usedNow),
+            'date' => $today,
+            'is_available' => (($limit - $usedNow) > 0),
+        ];
+
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->commit();
+        }
+
+        return [
+            'success' => true,
+            'status' => $status,
+        ];
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
 function kg_get_leaderboard(PDO $pdo, string $categoryId, int $limit = 50): array
 {
     $limit = max(1, min(100, $limit));
@@ -1040,6 +1172,7 @@ function kg_get_leaderboard_rewards(PDO $pdo, string $seasonId): array
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
+
 
 
 
