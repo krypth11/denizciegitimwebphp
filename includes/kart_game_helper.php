@@ -1003,6 +1003,45 @@ function kg_get_leaderboard_entry(PDO $pdo, string $categoryId, string $userId):
     return $row;
 }
 
+function kg_get_active_leaderboard_season(PDO $pdo, string $categoryId): ?array
+{
+    $categoryId = trim($categoryId);
+    if ($categoryId === '') {
+        return null;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT id, category_id, title, reset_at, is_active '
+        . 'FROM kart_game_leaderboard_seasons '
+        . 'WHERE category_id = ? AND is_active = 1 '
+        . 'ORDER BY reset_at ASC, created_at DESC '
+        . 'LIMIT 1'
+    );
+    $stmt->execute([$categoryId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $row ?: null;
+}
+
+function kg_get_leaderboard_rewards(PDO $pdo, string $seasonId): array
+{
+    $seasonId = trim($seasonId);
+    if ($seasonId === '') {
+        return [];
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT id, season_id, rank_start, rank_end, reward_title, reward_description, is_active, sort_order '
+        . 'FROM kart_game_leaderboard_rewards '
+        . 'WHERE season_id = ? AND is_active = 1 '
+        . 'ORDER BY rank_start ASC, rank_end ASC, sort_order ASC'
+    );
+    $stmt->execute([$seasonId]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+
 
 
 
