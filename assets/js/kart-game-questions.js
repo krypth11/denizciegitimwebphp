@@ -124,8 +124,9 @@
                 ? '<span class="badge text-bg-success">Aktif</span>'
                 : '<span class="badge text-bg-secondary">Pasif</span>';
 
-            const thumb = r.image_url
-                ? `<img src="${esc(r.image_url)}" alt="thumb" class="kgq-thumb">`
+            const listImage = r.image_thumb_url || r.image_large_url || r.image_url || '';
+            const thumb = listImage
+                ? `<img src="${esc(listImage)}" alt="thumb" class="kgq-thumb">`
                 : '<span class="text-muted small">Yok</span>';
 
             $tb.append(`
@@ -333,12 +334,15 @@
             return;
         }
 
-        let exportWidth = Math.max(minCropWidth, Math.min(1800, naturalCropW));
+        let exportWidth = Math.max(minCropWidth, Math.min(900, naturalCropW));
         let exportHeight = Math.round(exportWidth / cropAspectRatio);
         if (exportHeight < minCropHeight) {
             exportHeight = minCropHeight;
             exportWidth = Math.round(exportHeight * cropAspectRatio);
         }
+
+        exportHeight = Math.min(1125, exportHeight);
+        exportWidth = Math.round(exportHeight * cropAspectRatio);
 
         const canvas = cropper.getCroppedCanvas({
             width: exportWidth,
@@ -372,7 +376,7 @@
             const previewUrl = URL.createObjectURL(blob);
             setPreview(previewUrl, false, true);
             bootstrap.Modal.getOrCreateInstance(document.getElementById('kgqCropModal')).hide();
-        }, 'image/jpeg', 0.94);
+        }, 'image/jpeg', 0.85);
     });
 
     $('#kgqCropModal').on('shown.bs.modal', function () {
@@ -443,7 +447,7 @@
         $('#kgq_correct_answer').val(item.correct_answer || '');
         $('#kgq_sort_order').val(item.sort_order || 0);
         $('#kgq_is_active').prop('checked', Number(item.is_active) === 1);
-        setPreview(item.image_url || '', true);
+        setPreview(item.image_large_url || item.image_url || '', true);
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('kgqModal')).show();
     });

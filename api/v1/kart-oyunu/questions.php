@@ -20,7 +20,9 @@ try {
             'category_name' => (string)($row['category_name'] ?? ''),
             'question_text' => (string)($row['question_text'] ?? ''),
             'correct_answer' => (string)($row['correct_answer'] ?? ''),
-            'image_url' => (string)($row['image_url'] ?? ''),
+            'image_url' => (string)($row['image_large_url'] ?? $row['image_url'] ?? ''),
+            'image_large_url' => (string)($row['image_large_url'] ?? ''),
+            'image_thumb_url' => (string)($row['image_thumb_url'] ?? ''),
         ];
     }, $questions);
 

@@ -208,7 +208,7 @@ function kg_delete_category(PDO $pdo, string $categoryId): bool
     try {
         $pdo->prepare('DELETE FROM kart_game_category_qualifications WHERE category_id = ?')->execute([$categoryId]);
 
-        $qStmt = $pdo->prepare('SELECT image_path, image_url FROM kart_game_questions WHERE category_id = ?');
+        $qStmt = $pdo->prepare('SELECT image_path, image_url, image_large_path, image_large_url, image_thumb_path, image_thumb_url FROM kart_game_questions WHERE category_id = ?');
         $qStmt->execute([$categoryId]);
         $images = $qStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
@@ -217,8 +217,7 @@ function kg_delete_category(PDO $pdo, string $categoryId): bool
         $deleted->execute([$categoryId]);
 
         foreach ($images as $img) {
-            upload_safe_delete((string)($img['image_path'] ?? ''), 'kart-oyunu');
-            upload_safe_delete((string)($img['image_url'] ?? ''), 'kart-oyunu');
+            kg_safe_delete_question_images($img);
         }
 
         $pdo->commit();
@@ -335,6 +334,10 @@ function kg_list_questions(PDO $pdo, array $filters, int $page = 1, int $perPage
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    foreach ($rows as &$row) {
+        $row = kg_normalize_question_image_urls($row);
+    }
+    unset($row);
 
     return [
         'items' => $rows,
@@ -352,38 +355,119 @@ function kg_get_question(PDO $pdo, string $id): ?array
     $stmt = $pdo->prepare('SELECT q.*, c.title AS category_title FROM kart_game_questions q LEFT JOIN kart_game_categories c ON c.id = q.category_id WHERE q.id = ? LIMIT 1');
     $stmt->execute([$id]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $row ?: null;
+    if (!$row) {
+        return null;
+    }
+
+    return kg_normalize_question_image_urls($row);
+}
+
+function kg_public_url_from_path_or_url(?string $pathOrUrl): string
+{
+    $value = trim((string)$pathOrUrl);
+    if ($value === '') {
+        return '';
+    }
+    if (preg_match('#^https?://#i', $value)) {
+        return $value;
+    }
+    $relative = upload_extract_relative_path_from_url_or_path($value);
+    if ($relative === '') {
+        return '';
+    }
+    return upload_build_public_url($relative);
+}
+
+function kg_normalize_question_image_urls(array $row): array
+{
+    $imagePath = (string)($row['image_path'] ?? '');
+    $imageUrl = (string)($row['image_url'] ?? '');
+    $largePath = (string)($row['image_large_path'] ?? '');
+    $largeUrl = (string)($row['image_large_url'] ?? '');
+    $thumbPath = (string)($row['image_thumb_path'] ?? '');
+    $thumbUrl = (string)($row['image_thumb_url'] ?? '');
+
+    if ($largeUrl === '' && $largePath !== '') {
+        $largeUrl = kg_public_url_from_path_or_url($largePath);
+    }
+    if ($thumbUrl === '' && $thumbPath !== '') {
+        $thumbUrl = kg_public_url_from_path_or_url($thumbPath);
+    }
+    if ($imageUrl === '' && $imagePath !== '') {
+        $imageUrl = kg_public_url_from_path_or_url($imagePath);
+    }
+
+    if ($largeUrl === '') {
+        $largeUrl = $imageUrl;
+    }
+    if ($imageUrl === '') {
+        $imageUrl = $largeUrl;
+    }
+
+    $row['image_large_url'] = $largeUrl;
+    $row['image_thumb_url'] = $thumbUrl;
+    $row['image_url'] = $imageUrl;
+
+    return $row;
+}
+
+function kg_safe_delete_question_images(array $row): void
+{
+    $candidates = [
+        (string)($row['image_path'] ?? ''),
+        (string)($row['image_url'] ?? ''),
+        (string)($row['image_large_path'] ?? ''),
+        (string)($row['image_large_url'] ?? ''),
+        (string)($row['image_thumb_path'] ?? ''),
+        (string)($row['image_thumb_url'] ?? ''),
+    ];
+
+    $seen = [];
+    foreach ($candidates as $candidate) {
+        $key = upload_extract_relative_path_from_url_or_path($candidate);
+        if ($key === '') {
+            continue;
+        }
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        upload_safe_delete($candidate, 'kart-oyunu');
+    }
 }
 
 function kg_store_question_image(array $file): array
 {
-    $stored = upload_store_image_file('kart-oyunu', 'images', $file, [
-        'max_bytes' => 6 * 1024 * 1024,
-        'filename_prefix' => 'kart-game',
-    ]);
-
-    $dim = @getimagesize($stored['abs_path']);
-    if (!is_array($dim)) {
-        upload_safe_delete($stored['relative_path'], 'kart-oyunu');
-        throw new RuntimeException('Kaydedilen görsel doğrulanamadı.');
-    }
-
-    $width = (int)($dim[0] ?? 0);
-    $height = (int)($dim[1] ?? 0);
+    $validated = upload_validate_image_file($file, 6 * 1024 * 1024);
+    $width = (int)($validated['width'] ?? 0);
+    $height = (int)($validated['height'] ?? 0);
     if ($width < 320 || $height < 400) {
-        upload_safe_delete($stored['relative_path'], 'kart-oyunu');
         throw new RuntimeException('Crop sonucu görsel çok küçük. Minimum 320x400 olmalı.');
     }
 
     $ratio = $width / max(1, $height);
     if (abs($ratio - (4 / 5)) > 0.06) {
-        upload_safe_delete($stored['relative_path'], 'kart-oyunu');
         throw new RuntimeException('Görsel oranı 4:5 olmalıdır.');
     }
 
+    $variants = upload_store_image_variants('kart-oyunu', 'images', $file, [
+        'large' => ['width' => 800, 'height' => 1000, 'quality' => 82],
+        'thumb' => ['width' => 320, 'height' => 400, 'quality' => 74],
+    ]);
+
+    $large = $variants['large'] ?? null;
+    $thumb = $variants['thumb'] ?? null;
+    if (!is_array($large) || !is_array($thumb)) {
+        throw new RuntimeException('Görsel varyantları oluşturulamadı.');
+    }
+
     return [
-        'image_path' => $stored['relative_path'],
-        'image_url' => $stored['public_url'],
+        'image_large_path' => (string)$large['relative_path'],
+        'image_large_url' => (string)$large['public_url'],
+        'image_thumb_path' => (string)$thumb['relative_path'],
+        'image_thumb_url' => (string)$thumb['public_url'],
+        'image_path' => (string)$large['relative_path'],
+        'image_url' => (string)$large['public_url'],
     ];
 }
 
@@ -443,7 +527,7 @@ function kg_create_question(PDO $pdo, array $payload): array
         $id = generate_uuid();
         $d = $validation['data'];
 
-        $stmt = $pdo->prepare('INSERT INTO kart_game_questions (id, category_id, question_text, correct_answer, image_url, image_path, is_active, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
+        $stmt = $pdo->prepare('INSERT INTO kart_game_questions (id, category_id, question_text, correct_answer, image_url, image_path, image_large_url, image_large_path, image_thumb_url, image_thumb_path, is_active, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
         $stmt->execute([
             $id,
             $d['category_id'],
@@ -451,13 +535,17 @@ function kg_create_question(PDO $pdo, array $payload): array
             $d['correct_answer'],
             $image['image_url'],
             $image['image_path'],
+            $image['image_large_url'],
+            $image['image_large_path'],
+            $image['image_thumb_url'],
+            $image['image_thumb_path'],
             $d['is_active'],
             $d['sort_order'],
         ]);
 
         return ['success' => true, 'id' => $id, 'item' => kg_get_question($pdo, $id)];
     } catch (Throwable $e) {
-        upload_safe_delete($image['image_path'] ?? '', 'kart-oyunu');
+        kg_safe_delete_question_images($image);
         throw $e;
     }
 }
@@ -482,27 +570,30 @@ function kg_update_question(PDO $pdo, string $id, array $payload): array
 
     try {
         $d = $validation['data'];
-        $stmt = $pdo->prepare('UPDATE kart_game_questions SET category_id = ?, question_text = ?, correct_answer = ?, image_url = ?, image_path = ?, is_active = ?, sort_order = ?, updated_at = NOW() WHERE id = ?');
+        $stmt = $pdo->prepare('UPDATE kart_game_questions SET category_id = ?, question_text = ?, correct_answer = ?, image_url = ?, image_path = ?, image_large_url = ?, image_large_path = ?, image_thumb_url = ?, image_thumb_path = ?, is_active = ?, sort_order = ?, updated_at = NOW() WHERE id = ?');
         $stmt->execute([
             $d['category_id'],
             $d['question_text'],
             $d['correct_answer'],
             $newImage['image_url'] ?? (string)$existing['image_url'],
             $newImage['image_path'] ?? (string)$existing['image_path'],
+            $newImage['image_large_url'] ?? (string)($existing['image_large_url'] ?? ''),
+            $newImage['image_large_path'] ?? (string)($existing['image_large_path'] ?? ''),
+            $newImage['image_thumb_url'] ?? (string)($existing['image_thumb_url'] ?? ''),
+            $newImage['image_thumb_path'] ?? (string)($existing['image_thumb_path'] ?? ''),
             $d['is_active'],
             $d['sort_order'],
             $id,
         ]);
 
         if ($newImage) {
-            upload_safe_delete((string)($existing['image_path'] ?? ''), 'kart-oyunu');
-            upload_safe_delete((string)($existing['image_url'] ?? ''), 'kart-oyunu');
+            kg_safe_delete_question_images($existing);
         }
 
         return ['success' => true, 'item' => kg_get_question($pdo, $id)];
     } catch (Throwable $e) {
         if ($newImage) {
-            upload_safe_delete($newImage['image_path'], 'kart-oyunu');
+            kg_safe_delete_question_images($newImage);
         }
         throw $e;
     }
@@ -518,8 +609,7 @@ function kg_delete_question(PDO $pdo, string $id): bool
     $stmt = $pdo->prepare('DELETE FROM kart_game_questions WHERE id = ?');
     $stmt->execute([$id]);
     if ($stmt->rowCount() > 0) {
-        upload_safe_delete((string)($existing['image_path'] ?? ''), 'kart-oyunu');
-        upload_safe_delete((string)($existing['image_url'] ?? ''), 'kart-oyunu');
+        kg_safe_delete_question_images($existing);
         return true;
     }
 
@@ -533,7 +623,7 @@ function kg_get_active_questions_for_qualification(PDO $pdo, string $qualificati
         return [];
     }
 
-    $sql = 'SELECT q.id, q.category_id, c.title AS category_name, q.question_text, q.correct_answer, q.image_url, q.image_path '
+    $sql = 'SELECT q.id, q.category_id, c.title AS category_name, q.question_text, q.correct_answer, q.image_url, q.image_path, q.image_large_url, q.image_large_path, q.image_thumb_url, q.image_thumb_path '
         . 'FROM kart_game_questions q '
         . 'INNER JOIN kart_game_categories c ON c.id = q.category_id '
         . 'INNER JOIN kart_game_category_qualifications m ON m.category_id = c.id '
@@ -545,7 +635,8 @@ function kg_get_active_questions_for_qualification(PDO $pdo, string $qualificati
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     foreach ($rows as &$row) {
-        $row['image_url'] = upload_build_public_url((string)($row['image_path'] ?? $row['image_url'] ?? ''));
+        $row = kg_normalize_question_image_urls($row);
+        $row['image_url'] = (string)($row['image_large_url'] ?? $row['image_url'] ?? '');
     }
     unset($row);
 
@@ -1440,6 +1531,7 @@ function kg_get_leaderboard_rewards(PDO $pdo, string $seasonId): array
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
+
 
 
 

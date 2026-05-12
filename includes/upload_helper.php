@@ -251,3 +251,114 @@ function upload_store_image_file(string $module, string $subDir, array $file, ar
         'height' => $validated['height'],
     ];
 }
+
+function upload_create_webp_variant(
+    string $sourceAbs,
+    string $targetAbs,
+    int $targetWidth,
+    int $targetHeight,
+    int $quality = 82
+): void {
+    if (!function_exists('imagewebp')) {
+        throw new RuntimeException('Sunucuda WebP üretimi desteklenmiyor.');
+    }
+
+    $dim = @getimagesize($sourceAbs);
+    if (!is_array($dim) || empty($dim['mime'])) {
+        throw new RuntimeException('Kaynak görsel doğrulanamadı.');
+    }
+
+    $mime = (string)$dim['mime'];
+    if ($mime === 'image/jpeg') {
+        $src = @imagecreatefromjpeg($sourceAbs);
+    } elseif ($mime === 'image/png') {
+        $src = @imagecreatefrompng($sourceAbs);
+    } elseif ($mime === 'image/webp') {
+        if (!function_exists('imagecreatefromwebp')) {
+            throw new RuntimeException('Sunucuda WebP üretimi desteklenmiyor.');
+        }
+        $src = @imagecreatefromwebp($sourceAbs);
+    } else {
+        throw new RuntimeException('Desteklenmeyen kaynak görsel türü.');
+    }
+
+    if (!$src) {
+        throw new RuntimeException('Kaynak görsel açılamadı.');
+    }
+
+    $target = imagecreatetruecolor($targetWidth, $targetHeight);
+    if (!$target) {
+        imagedestroy($src);
+        throw new RuntimeException('Hedef görsel oluşturulamadı.');
+    }
+
+    imagealphablending($target, true);
+    imagesavealpha($target, false);
+    $white = imagecolorallocate($target, 255, 255, 255);
+    imagefilledrectangle($target, 0, 0, $targetWidth, $targetHeight, $white);
+
+    $srcW = (int)imagesx($src);
+    $srcH = (int)imagesy($src);
+    imagecopyresampled($target, $src, 0, 0, 0, 0, $targetWidth, $targetHeight, $srcW, $srcH);
+
+    $dir = dirname($targetAbs);
+    upload_ensure_directory_ready($dir);
+
+    $ok = @imagewebp($target, $targetAbs, max(0, min(100, $quality)));
+    imagedestroy($target);
+    imagedestroy($src);
+
+    if (!$ok) {
+        throw new RuntimeException('WebP dosyası kaydedilemedi.');
+    }
+}
+
+function upload_store_image_variants(
+    string $module,
+    string $subDir,
+    array $file,
+    array $variants
+): array {
+    $paths = upload_module_base_paths($module);
+    $safeSubDir = upload_sanitize_relative_path($subDir);
+    $targetAbsDir = $paths['base_abs'] . ($safeSubDir !== '' ? DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $safeSubDir) : '');
+    upload_ensure_directory_ready($targetAbsDir);
+
+    $validated = upload_validate_image_file($file, 6 * 1024 * 1024);
+
+    $uuid = function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16));
+    $uuid = str_replace('-', '', (string)$uuid);
+
+    $saved = [];
+    try {
+        foreach ($variants as $name => $spec) {
+            $width = (int)($spec['width'] ?? 0);
+            $height = (int)($spec['height'] ?? 0);
+            $quality = (int)($spec['quality'] ?? 82);
+            if ($width < 1 || $height < 1) {
+                throw new RuntimeException('Variant ölçüleri geçersiz.');
+            }
+
+            $filename = 'kart-game-' . $uuid . '-' . preg_replace('/[^a-z0-9\-]+/i', '-', (string)$name) . '.webp';
+            $targetAbs = $targetAbsDir . DIRECTORY_SEPARATOR . $filename;
+
+            upload_create_webp_variant($validated['tmp'], $targetAbs, $width, $height, $quality);
+
+            $relativeDir = $paths['base_rel'] . ($safeSubDir !== '' ? '/' . $safeSubDir : '');
+            $relativePath = upload_sanitize_relative_path($relativeDir . '/' . $filename);
+            $saved[$name] = [
+                'public_url' => upload_build_public_url($relativePath),
+                'relative_path' => $relativePath,
+                'abs_path' => $targetAbs,
+            ];
+        }
+    } catch (Throwable $e) {
+        foreach ($saved as $item) {
+            upload_safe_delete((string)($item['relative_path'] ?? ''), $module);
+            upload_safe_delete((string)($item['public_url'] ?? ''), $module);
+        }
+        throw $e;
+    }
+
+    return $saved;
+}
