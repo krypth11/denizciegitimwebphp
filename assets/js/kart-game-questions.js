@@ -402,7 +402,9 @@
         fd.append('id', id);
         fd.append('category_id', $('#kgq_category_id').val() || '');
         fd.append('question_text', $('#kgq_question_text').val() || '');
+        fd.append('question_text_en', $('#kgq_question_text_en').val() || '');
         fd.append('correct_answer', $('#kgq_correct_answer').val() || '');
+        fd.append('correct_answer_en', $('#kgq_correct_answer_en').val() || '');
         fd.append('sort_order', $('#kgq_sort_order').val() || '0');
         fd.append('is_active', $('#kgq_is_active').is(':checked') ? '1' : '0');
 
@@ -444,7 +446,9 @@
         $('#kgq_id').val(item.id || '');
         $('#kgq_category_id').val(item.category_id || '');
         $('#kgq_question_text').val(item.question_text || '');
+        $('#kgq_question_text_en').val(item.question_text_en || '');
         $('#kgq_correct_answer').val(item.correct_answer || '');
+        $('#kgq_correct_answer_en').val(item.correct_answer_en || '');
         $('#kgq_sort_order').val(item.sort_order || 0);
         $('#kgq_is_active').prop('checked', Number(item.is_active) === 1);
         setPreview(item.image_large_url || item.image_url || '', true);

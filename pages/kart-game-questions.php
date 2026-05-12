@@ -115,12 +115,20 @@ include '../includes/sidebar.php';
                             </div>
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Soru Metni *</label>
+                            <label class="form-label">🇹🇷 Soru Metni *</label>
                             <textarea class="form-control" name="question_text" id="kgq_question_text" rows="3" required></textarea>
                         </div>
                         <div class="col-12">
-                            <label class="form-label">Doğru Cevap *</label>
+                            <label class="form-label">🇬🇧 Question Text</label>
+                            <textarea class="form-control" name="question_text_en" id="kgq_question_text_en" rows="3"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">🇹🇷 Doğru Cevap *</label>
                             <input type="text" class="form-control" name="correct_answer" id="kgq_correct_answer" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">🇬🇧 Correct Answer</label>
+                            <input type="text" class="form-control" name="correct_answer_en" id="kgq_correct_answer_en">
                         </div>
                         <div class="col-12">
                             <label class="form-label">Görsel * <small class="text-muted">(4:5 zorunlu crop)</small></label>

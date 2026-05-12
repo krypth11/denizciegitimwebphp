@@ -61,7 +61,9 @@ try {
             $res = kg_create_question($pdo, [
                 'category_id' => $_POST['category_id'] ?? '',
                 'question_text' => $_POST['question_text'] ?? '',
+                'question_text_en' => $_POST['question_text_en'] ?? '',
                 'correct_answer' => $_POST['correct_answer'] ?? '',
+                'correct_answer_en' => $_POST['correct_answer_en'] ?? '',
                 'is_active' => $_POST['is_active'] ?? 0,
                 'sort_order' => $_POST['sort_order'] ?? 0,
             ]);
@@ -79,7 +81,9 @@ try {
             $res = kg_update_question($pdo, $id, [
                 'category_id' => $_POST['category_id'] ?? '',
                 'question_text' => $_POST['question_text'] ?? '',
+                'question_text_en' => $_POST['question_text_en'] ?? '',
                 'correct_answer' => $_POST['correct_answer'] ?? '',
+                'correct_answer_en' => $_POST['correct_answer_en'] ?? '',
                 'is_active' => $_POST['is_active'] ?? 0,
                 'sort_order' => $_POST['sort_order'] ?? 0,
             ]);

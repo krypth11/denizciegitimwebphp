@@ -477,7 +477,9 @@ function kg_validate_question_input(PDO $pdo, array $payload, bool $imageRequire
 
     $categoryId = trim((string)($payload['category_id'] ?? ''));
     $questionText = trim((string)($payload['question_text'] ?? ''));
+    $questionTextEn = trim((string)($payload['question_text_en'] ?? ''));
     $correctAnswer = trim((string)($payload['correct_answer'] ?? ''));
+    $correctAnswerEn = trim((string)($payload['correct_answer_en'] ?? ''));
     $sortOrder = filter_var($payload['sort_order'] ?? 0, FILTER_VALIDATE_INT);
     $isActive = in_array((string)($payload['is_active'] ?? '0'), ['1', 'true', 'on'], true) ? 1 : 0;
 
@@ -508,7 +510,9 @@ function kg_validate_question_input(PDO $pdo, array $payload, bool $imageRequire
         'data' => [
             'category_id' => $categoryId,
             'question_text' => $questionText,
+            'question_text_en' => ($questionTextEn === '' ? null : $questionTextEn),
             'correct_answer' => $correctAnswer,
+            'correct_answer_en' => ($correctAnswerEn === '' ? null : $correctAnswerEn),
             'sort_order' => ($sortOrder === false ? 0 : (int)$sortOrder),
             'is_active' => $isActive,
         ],
@@ -527,12 +531,14 @@ function kg_create_question(PDO $pdo, array $payload): array
         $id = generate_uuid();
         $d = $validation['data'];
 
-        $stmt = $pdo->prepare('INSERT INTO kart_game_questions (id, category_id, question_text, correct_answer, image_url, image_path, image_large_url, image_large_path, image_thumb_url, image_thumb_path, is_active, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
+        $stmt = $pdo->prepare('INSERT INTO kart_game_questions (id, category_id, question_text, question_text_en, correct_answer, correct_answer_en, image_url, image_path, image_large_url, image_large_path, image_thumb_url, image_thumb_path, is_active, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())');
         $stmt->execute([
             $id,
             $d['category_id'],
             $d['question_text'],
+            $d['question_text_en'],
             $d['correct_answer'],
+            $d['correct_answer_en'],
             $image['image_url'],
             $image['image_path'],
             $image['image_large_url'],
@@ -570,11 +576,13 @@ function kg_update_question(PDO $pdo, string $id, array $payload): array
 
     try {
         $d = $validation['data'];
-        $stmt = $pdo->prepare('UPDATE kart_game_questions SET category_id = ?, question_text = ?, correct_answer = ?, image_url = ?, image_path = ?, image_large_url = ?, image_large_path = ?, image_thumb_url = ?, image_thumb_path = ?, is_active = ?, sort_order = ?, updated_at = NOW() WHERE id = ?');
+        $stmt = $pdo->prepare('UPDATE kart_game_questions SET category_id = ?, question_text = ?, question_text_en = ?, correct_answer = ?, correct_answer_en = ?, image_url = ?, image_path = ?, image_large_url = ?, image_large_path = ?, image_thumb_url = ?, image_thumb_path = ?, is_active = ?, sort_order = ?, updated_at = NOW() WHERE id = ?');
         $stmt->execute([
             $d['category_id'],
             $d['question_text'],
+            $d['question_text_en'],
             $d['correct_answer'],
+            $d['correct_answer_en'],
             $newImage['image_url'] ?? (string)$existing['image_url'],
             $newImage['image_path'] ?? (string)$existing['image_path'],
             $newImage['image_large_url'] ?? (string)($existing['image_large_url'] ?? ''),
@@ -1531,6 +1539,7 @@ function kg_get_leaderboard_rewards(PDO $pdo, string $seasonId): array
 
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
+
 
 
 
