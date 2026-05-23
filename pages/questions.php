@@ -434,6 +434,10 @@ const questionSourceLabels = {
     gasm: String(window.__QUESTION_SOURCE_LABELS__?.gasm || 'GASM')
 };
 
+function normalizeSourceType(v) {
+    return (v === 'gasm') ? 'gasm' : 'scenario';
+}
+
 let generatedQuestions = [];
 let coursesData = JSON.parse(document.getElementById('courses-data-json').textContent);
 let generationMeta = null;
@@ -1939,10 +1943,6 @@ $(document).ready(function() {
         if (type === 'karışık') return '<span class="badge bg-warning text-dark">Karışık</span>';
         return '<span class="badge bg-info">Sözel</span>';
     };
-
-    function normalizeSourceType(v) {
-        return (v === 'gasm') ? 'gasm' : 'scenario';
-    }
 
     function renderSourceToggle(id, sourceType) {
         const active = normalizeSourceType(sourceType);
