@@ -430,8 +430,8 @@ $extra_js = <<<'JAVASCRIPT'
 window.__QUESTIONS_PAGE_VERSION__ = 'E-OPTION-FIX-1';
 console.log('QUESTIONS PAGE VERSION', window.__QUESTIONS_PAGE_VERSION__);
 const questionSourceLabels = {
-    scenario: String(window.__QUESTION_SOURCE_LABELS__?.scenario || 'Senaryo Tipi'),
-    gasm: String(window.__QUESTION_SOURCE_LABELS__?.gasm || 'GASM Tipi')
+    scenario: String(window.__QUESTION_SOURCE_LABELS__?.scenario || 'Senaryo'),
+    gasm: String(window.__QUESTION_SOURCE_LABELS__?.gasm || 'GASM')
 };
 
 let generatedQuestions = [];
@@ -640,7 +640,8 @@ function parseBulkQuestions(rawText, selectedType, selectedCourseId, selectedTop
             question_type: selectedType,
             course_id: selectedCourseId,
             topic_id: selectedTopicId || null,
-            status: 'pending'
+            status: 'pending',
+            source_type: 'scenario'
         });
     }
 
@@ -1176,7 +1177,8 @@ function parseLatexBulkQuestions(normalizedText, selectedType, selectedCourseId,
             question_type: selectedType,
             course_id: selectedCourseId,
             topic_id: selectedTopicId || null,
-            status: 'pending'
+            status: 'pending',
+            source_type: 'scenario'
         });
     }
 
@@ -1294,6 +1296,7 @@ function renderAiPreview() {
       </div>`;
 
     generatedQuestions.forEach((q, index) => {
+        const itemSourceType = normalizeSourceType(q.source_type || 'scenario');
         const cardClass = q.status === 'approved' ? 'approved' : (q.status === 'cancelled' ? 'cancelled' : '');
         const tag = q.status === 'approved' ? '<span class="badge bg-success">Onaylandı</span>' : (q.status === 'cancelled' ? '<span class="badge bg-danger">İptal</span>' : '<span class="badge bg-secondary">Bekleyen</span>');
 
@@ -1301,7 +1304,11 @@ function renderAiPreview() {
             html += `
             <div class="card mb-3 ai-card ${cardClass}">
               <div class="card-header d-flex justify-content-between align-items-center">
-                <strong>#${index + 1}</strong> ${tag}
+                <div class="d-flex align-items-center gap-2"><strong>#${index + 1}</strong> ${tag}</div>
+                <div class="ai-source-toggle btn-group btn-group-sm" role="group" aria-label="Kaynak Tipi">
+                  <button type="button" class="btn ${itemSourceType === 'scenario' ? 'btn-info' : 'btn-outline-secondary'} ai-source-type" data-index="${index}" data-source-type="scenario">${esc(questionSourceLabels.scenario)}</button>
+                  <button type="button" class="btn ${itemSourceType === 'gasm' ? 'btn-warning' : 'btn-outline-secondary'} ai-source-type" data-index="${index}" data-source-type="gasm">${esc(questionSourceLabels.gasm)}</button>
+                </div>
               </div>
               <div class="card-body">
                 <div class="mb-2"><label class="form-label">Soru</label><textarea class="form-control ai-draft-field" data-index="${index}" data-field="question_text" rows="2">${q._draft.question_text || ''}</textarea></div>
@@ -1328,11 +1335,17 @@ function renderAiPreview() {
             <div class="card mb-3 ai-card ${cardClass}">
               <div class="card-header d-flex justify-content-between align-items-center">
                 <div><strong>#${index + 1}</strong> ${tag}</div>
-                <div class="btn-group btn-group-sm">
-                  ${q.status === 'approved' || q.status === 'cancelled' ? `<button class="btn btn-outline-secondary ai-revert" data-index="${index}">Geri Al</button>` : ''}
-                  ${q.status !== 'approved' ? `<button class="btn btn-outline-success ai-approve" data-index="${index}">Onayla</button>` : ''}
-                  ${q.status !== 'cancelled' ? `<button class="btn btn-outline-danger ai-cancel" data-index="${index}">İptal</button>` : ''}
-                  <button class="btn btn-outline-warning ai-edit" data-index="${index}">Düzenle</button>
+                <div class="d-flex align-items-center gap-2">
+                  <div class="ai-source-toggle btn-group btn-group-sm" role="group" aria-label="Kaynak Tipi">
+                    <button type="button" class="btn ${itemSourceType === 'scenario' ? 'btn-info' : 'btn-outline-secondary'} ai-source-type" data-index="${index}" data-source-type="scenario">${esc(questionSourceLabels.scenario)}</button>
+                    <button type="button" class="btn ${itemSourceType === 'gasm' ? 'btn-warning' : 'btn-outline-secondary'} ai-source-type" data-index="${index}" data-source-type="gasm">${esc(questionSourceLabels.gasm)}</button>
+                  </div>
+                  <div class="btn-group btn-group-sm">
+                    ${q.status === 'approved' || q.status === 'cancelled' ? `<button class="btn btn-outline-secondary ai-revert" data-index="${index}">Geri Al</button>` : ''}
+                    ${q.status !== 'approved' ? `<button class="btn btn-outline-success ai-approve" data-index="${index}">Onayla</button>` : ''}
+                    ${q.status !== 'cancelled' ? `<button class="btn btn-outline-danger ai-cancel" data-index="${index}">İptal</button>` : ''}
+                    <button class="btn btn-outline-warning ai-edit" data-index="${index}">Düzenle</button>
+                  </div>
                 </div>
               </div>
               <div class="card-body">
@@ -2371,7 +2384,7 @@ $(document).ready(function() {
             return appAlert('Hata', 'Hiç soru ayrıştırılamadı. Format hatalı olabilir.', 'error');
         }
 
-        generatedQuestions = parsedResult.parsed;
+        generatedQuestions = parsedResult.parsed.map(q => ({ ...q, source_type: normalizeSourceType(q.source_type || 'scenario') }));
         generationMeta = {
             source: 'bulk',
             parsed_count: parsedResult.parsed_count,
@@ -2424,7 +2437,7 @@ $(document).ready(function() {
             return appAlert('Hata', buildLatexParseErrorMessage(parsedResult), 'error');
         }
 
-        generatedQuestions = parsedResult.parsed;
+        generatedQuestions = parsedResult.parsed.map(q => ({ ...q, source_type: normalizeSourceType(q.source_type || 'scenario') }));
         generationMeta = {
             source: 'latex_bulk',
             parsed_count: parsedResult.parsed_count,
@@ -2703,7 +2716,7 @@ $(document).ready(function() {
                 $('#aiProgress').addClass('d-none');
                 $('#aiGenerateBtn').prop('disabled', false).html('<i class="bi bi-stars"></i> Üret');
                 if(!(r.success && Array.isArray(r.questions))) return appAlert('Hata', (r.message||'Bilinmeyen hata'), 'error');
-                generatedQuestions = r.questions.map(q => ({ ...q, status:'pending' }));
+                generatedQuestions = r.questions.map(q => ({ ...q, status:'pending', source_type: normalizeSourceType(q.source_type || 'scenario') }));
                 generationMeta = {
                     requested_count: r.requested_count ?? count,
                     generated_count: r.generated_count ?? generatedQuestions.length,
@@ -2733,6 +2746,16 @@ $(document).ready(function() {
         });
     });
 
+    $(document).on('click', '.ai-source-type', function(){
+        const i = Number($(this).data('index'));
+        const sourceType = normalizeSourceType($(this).data('source-type') || 'scenario');
+        if (!generatedQuestions[i]) return;
+        generatedQuestions[i].source_type = sourceType;
+        if (generatedQuestions[i]._draft) {
+            generatedQuestions[i]._draft.source_type = sourceType;
+        }
+        renderAiPreview();
+    });
     $(document).on('click', '.ai-approve', function(){ generatedQuestions[$(this).data('index')].status='approved'; renderAiPreview(); });
     $(document).on('click', '.ai-cancel', function(){ generatedQuestions[$(this).data('index')].status='cancelled'; renderAiPreview(); });
     $(document).on('click', '.ai-revert', function(){ generatedQuestions[$(this).data('index')].status='pending'; renderAiPreview(); });
@@ -2767,6 +2790,7 @@ $(document).ready(function() {
             if (item.option_e === '') {
                 item.option_e = null;
             }
+            item.source_type = normalizeSourceType(item.source_type || 'scenario');
             return item;
         });
 
@@ -2784,7 +2808,7 @@ $(document).ready(function() {
         let shouldReload = false;
 
         $.ajax({
-            url: '../ajax/save-ai-questions.php',
+            url: '../ajax/questions.php?action=save_generated',
             method: 'POST',
             dataType: 'json',
             xhrFields: { withCredentials: true },

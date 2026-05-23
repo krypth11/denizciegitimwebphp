@@ -806,6 +806,169 @@ try {
             }
             break;
 
+        case 'save_generated':
+            $questions_json = $_POST['questions'] ?? '';
+            if ($questions_json === '') {
+                questions_json(false, 'Soru verisi gönderilmedi!', [], 422);
+            }
+
+            $questions = json_decode($questions_json, true);
+            if (!is_array($questions) || empty($questions)) {
+                questions_json(false, 'Geçersiz soru verisi!', [], 422);
+            }
+
+            $typeMap = [
+                'mixed' => 'karışık',
+                'verbal' => 'sözel',
+                'numerical' => 'sayısal',
+                'karışık' => 'karışık',
+                'sözel' => 'sözel',
+                'sayısal' => 'sayısal',
+            ];
+
+            if ($hasTopicId && $hasOptionE) {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO questions (
+                        id, course_id, topic_id, question_type, source_type, question_text,
+                        option_a, option_b, option_c, option_d, option_e,
+                        correct_answer, explanation, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                );
+            } elseif ($hasTopicId) {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO questions (
+                        id, course_id, topic_id, question_type, source_type, question_text,
+                        option_a, option_b, option_c, option_d,
+                        correct_answer, explanation, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                );
+            } elseif ($hasOptionE) {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO questions (
+                        id, course_id, question_type, source_type, question_text,
+                        option_a, option_b, option_c, option_d, option_e,
+                        correct_answer, explanation, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                );
+            } else {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO questions (
+                        id, course_id, question_type, source_type, question_text,
+                        option_a, option_b, option_c, option_d,
+                        correct_answer, explanation, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                );
+            }
+
+            $savedCount = 0;
+            $skippedCount = 0;
+            $skippedReasons = [];
+
+            foreach ($questions as $q) {
+                if (($q['status'] ?? 'pending') !== 'approved') {
+                    $skippedCount++;
+                    $skippedReasons['status_not_approved'] = (int)($skippedReasons['status_not_approved'] ?? 0) + 1;
+                    continue;
+                }
+
+                $questionText = sanitize_input($q['question_text'] ?? '');
+                $optionA = sanitize_input($q['option_a'] ?? '');
+                $optionB = sanitize_input($q['option_b'] ?? '');
+                $optionC = sanitize_input($q['option_c'] ?? '');
+                $optionD = sanitize_input($q['option_d'] ?? '');
+                $optionE = sanitize_input($q['option_e'] ?? '');
+                $correctAnswer = strtoupper(trim((string)($q['correct_answer'] ?? '')));
+                $courseId = trim((string)($q['course_id'] ?? ''));
+                $questionTypeRaw = trim((string)($q['question_type'] ?? ''));
+                $normalizedType = $typeMap[$questionTypeRaw] ?? null;
+                $topicId = normalize_optional_uuid($q['topic_id'] ?? null);
+                $sourceType = normalize_question_source_type($q['source_type'] ?? 'scenario');
+                $explanation = sanitize_input($q['explanation'] ?? '');
+
+                $isValid = $questionText !== ''
+                    && $optionA !== '' && $optionB !== '' && $optionC !== '' && $optionD !== ''
+                    && $courseId !== '' && $normalizedType !== null
+                    && in_array($correctAnswer, ['A', 'B', 'C', 'D', 'E'], true);
+
+                if (!$isValid) {
+                    $skippedCount++;
+                    $skippedReasons['invalid_or_missing_fields'] = (int)($skippedReasons['invalid_or_missing_fields'] ?? 0) + 1;
+                    continue;
+                }
+
+                if ($correctAnswer === 'E' && $optionE === '') {
+                    $skippedCount++;
+                    $skippedReasons['correct_answer_e_without_option_e'] = (int)($skippedReasons['correct_answer_e_without_option_e'] ?? 0) + 1;
+                    continue;
+                }
+
+                if (!$hasOptionE && $correctAnswer === 'E') {
+                    $skippedCount++;
+                    $skippedReasons['db_has_no_option_e_for_e_answer'] = (int)($skippedReasons['db_has_no_option_e_for_e_answer'] ?? 0) + 1;
+                    continue;
+                }
+
+                if ($hasTopicId && !validate_topic_belongs_to_course($pdo, $topicId, $courseId)) {
+                    $skippedCount++;
+                    $skippedReasons['topic_not_belongs_to_course'] = (int)($skippedReasons['topic_not_belongs_to_course'] ?? 0) + 1;
+                    continue;
+                }
+
+                $id = generate_uuid();
+                if ($hasTopicId && $hasOptionE) {
+                    $ok = $stmt->execute([
+                        $id, $courseId, $topicId, $normalizedType, $sourceType, $questionText,
+                        $optionA, $optionB, $optionC, $optionD, ($optionE !== '' ? $optionE : null),
+                        $correctAnswer, $explanation,
+                    ]);
+                } elseif ($hasTopicId) {
+                    $ok = $stmt->execute([
+                        $id, $courseId, $topicId, $normalizedType, $sourceType, $questionText,
+                        $optionA, $optionB, $optionC, $optionD,
+                        $correctAnswer, $explanation,
+                    ]);
+                } elseif ($hasOptionE) {
+                    $ok = $stmt->execute([
+                        $id, $courseId, $normalizedType, $sourceType, $questionText,
+                        $optionA, $optionB, $optionC, $optionD, ($optionE !== '' ? $optionE : null),
+                        $correctAnswer, $explanation,
+                    ]);
+                } else {
+                    $ok = $stmt->execute([
+                        $id, $courseId, $normalizedType, $sourceType, $questionText,
+                        $optionA, $optionB, $optionC, $optionD,
+                        $correctAnswer, $explanation,
+                    ]);
+                }
+
+                if (!$ok) {
+                    $skippedCount++;
+                    $skippedReasons['db_insert_failed'] = (int)($skippedReasons['db_insert_failed'] ?? 0) + 1;
+                    continue;
+                }
+
+                if (question_scope_has_links_table($pdo)) {
+                    question_scope_replace_primary_from_question($pdo, $id);
+                }
+
+                $savedCount++;
+            }
+
+            if ($savedCount > 0) {
+                questions_json(true, $savedCount . ' soru başarıyla kaydedildi!', [
+                    'saved_count' => $savedCount,
+                    'skipped_count' => $skippedCount,
+                    'skipped_reasons' => $skippedReasons,
+                ]);
+            }
+
+            questions_json(false, 'Hiçbir onaylı soru kaydedilemedi!', [
+                'saved_count' => 0,
+                'skipped_count' => $skippedCount,
+                'skipped_reasons' => $skippedReasons,
+            ], 422);
+            break;
+
         default:
             echo json_encode([
                 'success' => false,
