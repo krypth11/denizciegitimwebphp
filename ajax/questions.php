@@ -9,6 +9,12 @@ require_once '../includes/question_scope_helper.php';
 $user = require_admin();
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
 
+function normalize_question_source_type($value): string
+{
+    $sourceType = strtolower(trim((string)$value));
+    return in_array($sourceType, ['scenario', 'gasm'], true) ? $sourceType : 'scenario';
+}
+
 function questions_json($success, $message = '', $data = [], $status = 200)
 {
     http_response_code($status);
@@ -289,6 +295,7 @@ try {
             $course_id = $_POST['course_id'] ?? '';
             $topic_id = normalize_optional_uuid($_POST['topic_id'] ?? null);
             $question_type = $_POST['question_type'] ?? '';
+            $source_type = normalize_question_source_type($_POST['source_type'] ?? 'scenario');
             $question_text = sanitize_input($_POST['question_text'] ?? '');
             $option_a = sanitize_input($_POST['option_a'] ?? '');
             $option_b = sanitize_input($_POST['option_b'] ?? '');
@@ -331,52 +338,52 @@ try {
                 if ($hasTopicId && $hasOptionE) {
                     $stmt = $pdo->prepare(
                         'INSERT INTO questions (
-                            id, course_id, topic_id, question_type, question_text,
+                            id, course_id, topic_id, question_type, source_type, question_text,
                             option_a, option_b, option_c, option_d, option_e,
                             correct_answer, explanation, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
                     );
                     $ok = $stmt->execute([
-                        $id, $course_id, $topic_id, $question_type, $question_text,
+                        $id, $course_id, $topic_id, $question_type, $source_type, $question_text,
                         $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
                         $correct_answer, $explanation,
                     ]);
                 } elseif ($hasTopicId) {
                     $stmt = $pdo->prepare(
                         'INSERT INTO questions (
-                            id, course_id, topic_id, question_type, question_text,
+                            id, course_id, topic_id, question_type, source_type, question_text,
                             option_a, option_b, option_c, option_d,
                             correct_answer, explanation, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
                     );
                     $ok = $stmt->execute([
-                        $id, $course_id, $topic_id, $question_type, $question_text,
+                        $id, $course_id, $topic_id, $question_type, $source_type, $question_text,
                         $option_a, $option_b, $option_c, $option_d,
                         $correct_answer, $explanation,
                     ]);
                 } elseif ($hasOptionE) {
                     $stmt = $pdo->prepare(
                         'INSERT INTO questions (
-                            id, course_id, question_type, question_text,
+                            id, course_id, question_type, source_type, question_text,
                             option_a, option_b, option_c, option_d, option_e,
                             correct_answer, explanation, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
                     );
                     $ok = $stmt->execute([
-                        $id, $course_id, $question_type, $question_text,
+                        $id, $course_id, $question_type, $source_type, $question_text,
                         $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
                         $correct_answer, $explanation,
                     ]);
                 } else {
                     $stmt = $pdo->prepare(
                         'INSERT INTO questions (
-                            id, course_id, question_type, question_text,
+                            id, course_id, question_type, source_type, question_text,
                             option_a, option_b, option_c, option_d,
                             correct_answer, explanation, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
                     );
                     $ok = $stmt->execute([
-                        $id, $course_id, $question_type, $question_text,
+                        $id, $course_id, $question_type, $source_type, $question_text,
                         $option_a, $option_b, $option_c, $option_d,
                         $correct_answer, $explanation,
                     ]);
@@ -484,6 +491,9 @@ try {
             $course_id = $_POST['course_id'] ?? '';
             $topic_id = normalize_optional_uuid($_POST['topic_id'] ?? null);
             $question_type = $_POST['question_type'] ?? '';
+            $source_type = array_key_exists('source_type', $_POST)
+                ? normalize_question_source_type($_POST['source_type'])
+                : null;
             $question_text = sanitize_input($_POST['question_text'] ?? '');
             $option_a = sanitize_input($_POST['option_a'] ?? '');
             $option_b = sanitize_input($_POST['option_b'] ?? '');
@@ -554,12 +564,20 @@ try {
 
             $pdo->beginTransaction();
             try {
+                if ($source_type === null) {
+                    $stmtCurrent = $pdo->prepare('SELECT source_type FROM questions WHERE id = ? LIMIT 1');
+                    $stmtCurrent->execute([$id]);
+                    $currentRow = $stmtCurrent->fetch(PDO::FETCH_ASSOC);
+                    $source_type = normalize_question_source_type($currentRow['source_type'] ?? 'scenario');
+                }
+
                 if ($hasTopicId && $hasOptionE) {
                     $stmt = $pdo->prepare(
                         'UPDATE questions SET
                             course_id = ?,
                             topic_id = ?,
                             question_type = ?,
+                            source_type = ?,
                             question_text = ?,
                             option_a = ?,
                             option_b = ?,
@@ -571,7 +589,7 @@ try {
                         WHERE id = ?'
                     );
                     $ok = $stmt->execute([
-                        $course_id, $topic_id, $question_type, $question_text,
+                        $course_id, $topic_id, $question_type, $source_type, $question_text,
                         $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
                         $correct_answer, $explanation, $id,
                     ]);
@@ -581,6 +599,7 @@ try {
                             course_id = ?,
                             topic_id = ?,
                             question_type = ?,
+                            source_type = ?,
                             question_text = ?,
                             option_a = ?,
                             option_b = ?,
@@ -591,7 +610,7 @@ try {
                         WHERE id = ?'
                     );
                     $ok = $stmt->execute([
-                        $course_id, $topic_id, $question_type, $question_text,
+                        $course_id, $topic_id, $question_type, $source_type, $question_text,
                         $option_a, $option_b, $option_c, $option_d,
                         $correct_answer, $explanation, $id,
                     ]);
@@ -600,6 +619,7 @@ try {
                         'UPDATE questions SET
                             course_id = ?,
                             question_type = ?,
+                            source_type = ?,
                             question_text = ?,
                             option_a = ?,
                             option_b = ?,
@@ -611,7 +631,7 @@ try {
                         WHERE id = ?'
                     );
                     $ok = $stmt->execute([
-                        $course_id, $question_type, $question_text,
+                        $course_id, $question_type, $source_type, $question_text,
                         $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
                         $correct_answer, $explanation, $id,
                     ]);
@@ -620,6 +640,7 @@ try {
                         'UPDATE questions SET
                             course_id = ?,
                             question_type = ?,
+                            source_type = ?,
                             question_text = ?,
                             option_a = ?,
                             option_b = ?,
@@ -630,7 +651,7 @@ try {
                         WHERE id = ?'
                     );
                     $ok = $stmt->execute([
-                        $course_id, $question_type, $question_text,
+                        $course_id, $question_type, $source_type, $question_text,
                         $option_a, $option_b, $option_c, $option_d,
                         $correct_answer, $explanation, $id,
                     ]);
@@ -659,6 +680,26 @@ try {
                     'message' => 'Güncelleme başarısız!',
                 ], JSON_UNESCAPED_UNICODE);
             }
+            break;
+
+        case 'update_source_type':
+            $id = trim((string)($_POST['id'] ?? ''));
+            $sourceTypeRaw = $_POST['source_type'] ?? '';
+            if ($id === '') {
+                questions_json(false, 'ID gerekli!', [], 422);
+            }
+
+            $sourceType = strtolower(trim((string)$sourceTypeRaw));
+            if (!in_array($sourceType, ['scenario', 'gasm'], true)) {
+                questions_json(false, 'Geçersiz source_type!', [], 422);
+            }
+
+            $stmt = $pdo->prepare('UPDATE questions SET source_type = ?, updated_at = NOW() WHERE id = ?');
+            $ok = $stmt->execute([$sourceType, $id]);
+            if (!$ok) {
+                questions_json(false, 'Güncelleme başarısız!', [], 500);
+            }
+            questions_json(true, 'Soru kaynak tipi güncellendi.');
             break;
 
         case 'delete':

@@ -91,6 +91,20 @@ include '../includes/sidebar.php';
                         <div class="form-text">Premium olmayan kullanıcıların reklam izleyerek kullanabileceği ekstra sıralı mod hakkı. Toplam sıralı mod hakkı genel sıralı mod limitini aşamaz.</div>
                     </div>
                 </div>
+
+                <hr class="my-4">
+                <h5 class="mb-3">Soru Tipi Etiketleri</h5>
+                <p class="text-muted">Admin panelde Sorular listesindeki Senaryo/GASM geçişlerinde gösterilecek metinler.</p>
+                <div class="row g-3">
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label" for="question_source_scenario_label">Senaryo tipi etiketi</label>
+                        <input type="text" class="form-control" id="question_source_scenario_label" name="question_source_scenario_label" maxlength="100" required>
+                    </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label" for="question_source_gasm_label">GASM tipi etiketi</label>
+                        <input type="text" class="form-control" id="question_source_gasm_label" name="question_source_gasm_label" maxlength="100" required>
+                    </div>
+                </div>
             </form>
         </div>
     </div>
@@ -119,6 +133,10 @@ $(function () {
         kart_game_ranked_free_plays: { min: 0, max: 999 },
         kart_game_ranked_rewarded_plays: { min: 0, max: 999 }
     };
+    const textFieldRules = {
+        question_source_scenario_label: { fallback: 'Senaryo Tipi', max: 100 },
+        question_source_gasm_label: { fallback: 'GASM Tipi', max: 100 }
+    };
 
     function clampInt(value, min, max, fallback) {
         const num = Number(value);
@@ -134,6 +152,12 @@ $(function () {
             const safeValue = clampInt(settings?.[key], rule.min, rule.max, fallback);
             $('#' + key).val(safeValue);
         });
+        Object.keys(textFieldRules).forEach((key) => {
+            const rule = textFieldRules[key];
+            const raw = String(settings?.[key] ?? rule.fallback).trim();
+            const safe = (raw || rule.fallback).slice(0, rule.max);
+            $('#' + key).val(safe);
+        });
     }
 
     function collectPayload() {
@@ -145,6 +169,16 @@ $(function () {
                 return { error: key };
             }
             payload[key] = safeVal;
+        }
+        for (const [key, rule] of Object.entries(textFieldRules)) {
+            const rawVal = String($('#' + key).val() ?? '').trim();
+            if (!rawVal) {
+                return { error: key };
+            }
+            if (rawVal.length > rule.max) {
+                return { error: key };
+            }
+            payload[key] = rawVal;
         }
         return { payload };
     }
@@ -161,7 +195,7 @@ $(function () {
     async function saveSettings() {
         const result = collectPayload();
         if (result.error) {
-            await window.showAppAlert({ title: 'Geçersiz Değer', message: 'Lütfen tüm alanlara geçerli bir sayı girin.', type: 'warning' });
+                await window.showAppAlert({ title: 'Geçersiz Değer', message: 'Lütfen tüm alanlara geçerli değer girin.', type: 'warning' });
             return;
         }
 

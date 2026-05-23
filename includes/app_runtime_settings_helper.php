@@ -28,6 +28,16 @@ function app_runtime_settings_defaults(): array
         'kart_game_practice_daily_limit' => 20,
         'kart_game_ranked_free_plays' => 1,
         'kart_game_ranked_rewarded_plays' => 4,
+        'question_source_scenario_label' => 'Senaryo Tipi',
+        'question_source_gasm_label' => 'GASM Tipi',
+    ];
+}
+
+function app_runtime_settings_text_keys(): array
+{
+    return [
+        'question_source_scenario_label',
+        'question_source_gasm_label',
     ];
 }
 
@@ -97,7 +107,34 @@ function get_rewarded_mock_exam_daily_ad_limit() {
 
 function app_runtime_settings_allowed_keys(): array
 {
+    return array_merge(array_keys(app_runtime_settings_rules()), app_runtime_settings_text_keys());
+}
+
+function app_runtime_settings_numeric_keys(): array
+{
     return array_keys(app_runtime_settings_rules());
+}
+
+function app_runtime_settings_validate_text_value(string $key, $value): string
+{
+    $defaults = app_runtime_settings_defaults();
+    if (!in_array($key, app_runtime_settings_text_keys(), true)) {
+        throw new InvalidArgumentException('Geçersiz text ayar anahtarı: ' . $key);
+    }
+
+    $normalized = trim((string)$value);
+    if ($normalized === '') {
+        $normalized = (string)($defaults[$key] ?? '');
+    }
+    if ($normalized === '') {
+        throw new InvalidArgumentException($key . ' boş olamaz.');
+    }
+
+    if (mb_strlen($normalized, 'UTF-8') > 100) {
+        $normalized = mb_substr($normalized, 0, 100, 'UTF-8');
+    }
+
+    return $normalized;
 }
 
 function app_runtime_settings_table_columns(PDO $pdo): array
@@ -186,9 +223,13 @@ function app_runtime_settings_normalize(array $settings): array
 {
     $defaults = app_runtime_settings_defaults();
     $out = [];
-    foreach (app_runtime_settings_allowed_keys() as $key) {
+    foreach (app_runtime_settings_numeric_keys() as $key) {
         $value = array_key_exists($key, $settings) ? $settings[$key] : $defaults[$key];
         $out[$key] = app_runtime_settings_validate_value($key, $value);
+    }
+    foreach (app_runtime_settings_text_keys() as $key) {
+        $value = array_key_exists($key, $settings) ? $settings[$key] : ($defaults[$key] ?? '');
+        $out[$key] = app_runtime_settings_validate_text_value($key, $value);
     }
     return $out;
 }
@@ -214,13 +255,21 @@ function app_runtime_settings_try_insert_defaults(PDO $pdo, array $columns): boo
     $insertVals[] = '?';
     $params[] = 1;
 
-    foreach (app_runtime_settings_allowed_keys() as $key) {
+    foreach (app_runtime_settings_numeric_keys() as $key) {
         if (!in_array($key, $columns, true)) {
             continue;
         }
         $insertCols[] = app_runtime_settings_q($key);
         $insertVals[] = '?';
         $params[] = (int)$defaults[$key];
+    }
+    foreach (app_runtime_settings_text_keys() as $key) {
+        if (!in_array($key, $columns, true)) {
+            continue;
+        }
+        $insertCols[] = app_runtime_settings_q($key);
+        $insertVals[] = '?';
+        $params[] = app_runtime_settings_validate_text_value($key, $defaults[$key] ?? '');
     }
 
     if (in_array('created_at', $columns, true)) {
@@ -327,21 +376,34 @@ function app_runtime_settings_update(PDO $pdo, array $input): array
     $current = app_runtime_settings_get($pdo);
     $next = $current;
 
-    foreach (app_runtime_settings_allowed_keys() as $key) {
+    foreach (app_runtime_settings_numeric_keys() as $key) {
         if (!array_key_exists($key, $input)) {
             continue;
         }
         $next[$key] = app_runtime_settings_validate_value($key, $input[$key]);
     }
+    foreach (app_runtime_settings_text_keys() as $key) {
+        if (!array_key_exists($key, $input)) {
+            continue;
+        }
+        $next[$key] = app_runtime_settings_validate_text_value($key, $input[$key]);
+    }
 
     $set = [];
     $params = [];
-    foreach (app_runtime_settings_allowed_keys() as $key) {
+    foreach (app_runtime_settings_numeric_keys() as $key) {
         if (!in_array($key, $columns, true)) {
             continue;
         }
         $set[] = app_runtime_settings_q($key) . ' = ?';
         $params[] = (int)$next[$key];
+    }
+    foreach (app_runtime_settings_text_keys() as $key) {
+        if (!in_array($key, $columns, true)) {
+            continue;
+        }
+        $set[] = app_runtime_settings_q($key) . ' = ?';
+        $params[] = (string)$next[$key];
     }
 
     if (in_array('updated_at', $columns, true)) {
@@ -362,12 +424,19 @@ function app_runtime_settings_update(PDO $pdo, array $input): array
 
                 $setFallback = [];
                 $fallbackParams = [];
-                foreach (app_runtime_settings_allowed_keys() as $key) {
+                foreach (app_runtime_settings_numeric_keys() as $key) {
                     if (!in_array($key, $columns, true)) {
                         continue;
                     }
                     $setFallback[] = app_runtime_settings_q($key) . ' = ?';
                     $fallbackParams[] = (int)$next[$key];
+                }
+                foreach (app_runtime_settings_text_keys() as $key) {
+                    if (!in_array($key, $columns, true)) {
+                        continue;
+                    }
+                    $setFallback[] = app_runtime_settings_q($key) . ' = ?';
+                    $fallbackParams[] = (string)$next[$key];
                 }
                 if (in_array('updated_at', $columns, true)) {
                     $setFallback[] = app_runtime_settings_q('updated_at') . ' = NOW()';

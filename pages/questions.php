@@ -18,6 +18,9 @@ $courses = $pdo->query(
 $total_questions = $pdo->query('SELECT COUNT(*) FROM questions')->fetchColumn();
 $sayisal_count = $pdo->query("SELECT COUNT(*) FROM questions WHERE question_type = 'sayısal'")->fetchColumn();
 $sozel_count = $pdo->query("SELECT COUNT(*) FROM questions WHERE question_type = 'sözel'")->fetchColumn();
+$runtimeSettingsRow = $pdo->query('SELECT question_source_scenario_label, question_source_gasm_label FROM app_runtime_settings WHERE id = 1 LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+$question_source_scenario_label = trim((string)($runtimeSettingsRow['question_source_scenario_label'] ?? '')) ?: 'Senaryo Tipi';
+$question_source_gasm_label = trim((string)($runtimeSettingsRow['question_source_gasm_label'] ?? '')) ?: 'GASM Tipi';
 
 include '../includes/header.php';
 include '../includes/sidebar.php';
@@ -160,6 +163,7 @@ include '../includes/sidebar.php';
             <div class="row">
                 <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="add_course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" required><option value="">Seçiniz...</option><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Soru Kaynak Tipi</label><select class="form-select" name="source_type"><option value="scenario"><?= htmlspecialchars($question_source_scenario_label) ?></option><option value="gasm"><?= htmlspecialchars($question_source_gasm_label) ?></option></select></div>
             </div>
             <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="add_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Konu seçmeden devam edebilirsiniz.</small></div>
             <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" rows="3" required></textarea></div>
@@ -176,6 +180,7 @@ include '../includes/sidebar.php';
             <div class="row">
                 <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="edit_course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" id="edit_question_type" required><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Soru Kaynak Tipi</label><select class="form-select" name="source_type" id="edit_source_type"><option value="scenario"><?= htmlspecialchars($question_source_scenario_label) ?></option><option value="gasm"><?= htmlspecialchars($question_source_gasm_label) ?></option></select></div>
             </div>
             <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="edit_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Konu alanı zorunlu değildir.</small></div>
             <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" id="edit_question_text" rows="3" required></textarea></div>
@@ -412,11 +417,22 @@ Doğru Cevap: C)
     </div></div>
 </div>
 
+<script>
+window.__QUESTION_SOURCE_LABELS__ = {
+    scenario: <?= json_encode($question_source_scenario_label, JSON_UNESCAPED_UNICODE) ?>,
+    gasm: <?= json_encode($question_source_gasm_label, JSON_UNESCAPED_UNICODE) ?>
+};
+</script>
+
 <?php
 $extra_js = <<<'JAVASCRIPT'
 <script>
 window.__QUESTIONS_PAGE_VERSION__ = 'E-OPTION-FIX-1';
 console.log('QUESTIONS PAGE VERSION', window.__QUESTIONS_PAGE_VERSION__);
+const questionSourceLabels = {
+    scenario: String(window.__QUESTION_SOURCE_LABELS__?.scenario || 'Senaryo Tipi'),
+    gasm: String(window.__QUESTION_SOURCE_LABELS__?.gasm || 'GASM Tipi')
+};
 
 let generatedQuestions = [];
 let coursesData = JSON.parse(document.getElementById('courses-data-json').textContent);
@@ -1911,6 +1927,22 @@ $(document).ready(function() {
         return '<span class="badge bg-info">Sözel</span>';
     };
 
+    function normalizeSourceType(v) {
+        return (v === 'gasm') ? 'gasm' : 'scenario';
+    }
+
+    function renderSourceToggle(id, sourceType) {
+        const active = normalizeSourceType(sourceType);
+        const scenarioActive = active === 'scenario' ? 'active' : '';
+        const gasmActive = active === 'gasm' ? 'active' : '';
+        return `
+            <div class="btn-group btn-group-sm source-type-toggle" role="group" aria-label="source type">
+                <button type="button" class="btn btn-outline-secondary source-type-btn ${scenarioActive}" data-id="${esc(id)}" data-source-type="scenario">${esc(questionSourceLabels.scenario || 'Senaryo Tipi')}</button>
+                <button type="button" class="btn btn-outline-secondary source-type-btn ${gasmActive}" data-id="${esc(id)}" data-source-type="gasm">${esc(questionSourceLabels.gasm || 'GASM Tipi')}</button>
+            </div>
+        `;
+    }
+
     function renderDesktopRows(rows) {
         const $tb = $('#questionsTable tbody');
         if (!rows.length) {
@@ -1919,6 +1951,7 @@ $(document).ready(function() {
         }
 
         const html = rows.map((q) => {
+            const sourceType = normalizeSourceType(q.source_type || 'scenario');
             const optE = q.option_e ? `<div class="meq-option ${q.correct_answer === 'E' ? 'meq-option-correct' : ''}">E) ${esc(shortText(q.option_e))}</div>` : '';
             return `
                 <tr class="question-row-card desktop-question-row">
@@ -1945,6 +1978,7 @@ $(document).ready(function() {
                     </td>
                     <td class="questions-actions-cell">
                         <div class="table-actions questions-actions-wrap">
+                            ${renderSourceToggle(q.id, sourceType)}
                             <button class="btn btn-sm btn-warning edit-btn" data-id="${esc(q.id)}" title="Düzenle"><i class="bi bi-pencil"></i></button>
                             <button class="btn btn-sm btn-danger delete-btn" data-id="${esc(q.id)}" title="Sil"><i class="bi bi-trash"></i></button>
                         </div>
@@ -1965,6 +1999,7 @@ $(document).ready(function() {
         $('#questionsMobileEmpty').addClass('d-none');
 
         const html = rows.map((q) => {
+            const sourceType = normalizeSourceType(q.source_type || 'scenario');
             const optE = q.option_e ? `<div class="meq-option ${q.correct_answer === 'E' ? 'meq-option-correct' : ''}">E) ${esc(shortText(q.option_e))}</div>` : '';
             return `
                 <div class="card mb-3 meq-mobile-card">
@@ -1985,6 +2020,7 @@ $(document).ready(function() {
                             ${optE}
                         </div>
                         <div class="d-flex justify-content-end gap-2 mt-3">
+                            ${renderSourceToggle(q.id, sourceType)}
                             <button class="btn btn-sm btn-warning edit-btn" data-id="${esc(q.id)}"><i class="bi bi-pencil"></i> Düzenle</button>
                             <button class="btn btn-sm btn-danger delete-btn" data-id="${esc(q.id)}"><i class="bi bi-trash"></i> Sil</button>
                         </div>
@@ -2517,6 +2553,7 @@ $(document).ready(function() {
             if(!r.success) return appAlert('Hata', r.message, 'error');
             const q=r.data;
             $('#edit_id').val(q.id); $('#edit_course_id').val(q.course_id); $('#edit_question_type').val(q.question_type);
+            $('#edit_source_type').val(normalizeSourceType(q.source_type || 'scenario'));
             $('#edit_question_text').val(q.question_text); $('#edit_option_a').val(q.option_a); $('#edit_option_b').val(q.option_b);
             $('#edit_option_c').val(q.option_c); $('#edit_option_d').val(q.option_d); $('#edit_option_e').val(q.option_e || ''); $('#edit_correct_answer').val((q.correct_answer || '').toUpperCase()); $('#edit_explanation').val(q.explanation||'');
             loadTopicsByCourse(q.course_id || '', $('#edit_topic_id'), {
@@ -2621,6 +2658,36 @@ $(document).ready(function() {
                 appAlert('Hata', r.message, 'error');
             }
         }, 'json');
+    });
+
+    $(document).on('click', '.source-type-btn', async function() {
+        const $btn = $(this);
+        const id = String($btn.data('id') || '');
+        const sourceType = normalizeSourceType(String($btn.data('source-type') || 'scenario'));
+        if (!id) return;
+
+        const $group = $btn.closest('.source-type-toggle');
+        $group.find('.source-type-btn').prop('disabled', true);
+
+        try {
+            const res = await window.appAjax({
+                url: '../ajax/questions.php?action=update_source_type',
+                method: 'POST',
+                dataType: 'json',
+                data: { id, source_type: sourceType }
+            });
+            if (!res.success) {
+                appAlert('Hata', res.message || 'Kaynak tipi güncellenemedi.', 'error');
+                return;
+            }
+
+            $group.find('.source-type-btn').removeClass('active');
+            $group.find(`.source-type-btn[data-source-type="${sourceType}"]`).addClass('active');
+        } catch (err) {
+            appAlert('Hata', err?.message || 'Kaynak tipi güncellenemedi.', 'error');
+        } finally {
+            $group.find('.source-type-btn').prop('disabled', false);
+        }
     });
 
     $('#aiForm').on('submit', function(e){

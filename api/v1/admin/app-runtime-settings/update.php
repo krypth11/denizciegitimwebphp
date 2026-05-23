@@ -19,7 +19,7 @@ try {
 
     $input = [];
     $rules = app_runtime_settings_rules();
-    foreach (app_runtime_settings_allowed_keys() as $key) {
+    foreach (app_runtime_settings_numeric_keys() as $key) {
         if (array_key_exists($key, $payload)) {
             $rawValue = $payload[$key];
             if (is_string($rawValue)) {
@@ -39,6 +39,23 @@ try {
 
             $input[$key] = $intValue;
         }
+    }
+
+    foreach (app_runtime_settings_text_keys() as $key) {
+        if (!array_key_exists($key, $payload)) {
+            continue;
+        }
+
+        $rawValue = $payload[$key];
+        $normalized = trim((string)$rawValue);
+        if ($normalized === '') {
+            api_error($key . ' alanı boş olamaz.', 422);
+        }
+        if (mb_strlen($normalized, 'UTF-8') > 100) {
+            api_error($key . ' alanı en fazla 100 karakter olabilir.', 422);
+        }
+
+        $input[$key] = $normalized;
     }
 
     $updated = app_runtime_settings_update($pdo, $input);
