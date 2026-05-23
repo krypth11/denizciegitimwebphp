@@ -79,6 +79,10 @@ try {
             $courseId = trim((string)($_GET['course_id'] ?? ''));
             $topicId = trim((string)($_GET['topic_id'] ?? ''));
             $questionType = trim((string)($_GET['question_type'] ?? ''));
+            $sourceTypeFilter = strtolower(trim((string)($_GET['source_type'] ?? 'all')));
+            if (!in_array($sourceTypeFilter, ['', 'all', 'scenario', 'gasm'], true)) {
+                $sourceTypeFilter = 'all';
+            }
             $statusFilter = trim((string)($_GET['status'] ?? ''));
             $search = trim((string)($_GET['search'] ?? ''));
             $search = preg_replace('/\s+/u', ' ', $search);
@@ -121,6 +125,13 @@ try {
             if ($questionType !== '') {
                 $where[] = 'q.question_type = ?';
                 $params[] = $questionType;
+            }
+            if ($sourceTypeFilter === 'scenario') {
+                $where[] = 'q.source_type = ?';
+                $params[] = 'scenario';
+            } elseif ($sourceTypeFilter === 'gasm') {
+                $where[] = 'q.source_type = ?';
+                $params[] = 'gasm';
             }
 
             if ($hasStatus && $statusFilter !== '') {

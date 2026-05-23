@@ -83,6 +83,14 @@ include '../includes/sidebar.php';
                         <option value="">Tümü</option>
                     </select>
                 </div>
+                <div class="col-md-2">
+                    <label class="form-label">Kaynak Tipi</label>
+                    <select class="form-select" id="filterSourceType">
+                        <option value="all">Tümü</option>
+                        <option value="scenario"><?= htmlspecialchars($question_source_scenario_label) ?></option>
+                        <option value="gasm"><?= htmlspecialchars($question_source_gasm_label) ?></option>
+                    </select>
+                </div>
                 <div class="col-md-10">
                     <label class="form-label">Arama</label>
                     <input type="search" class="form-control" id="filterSearch" placeholder="Tam ifade ara: soru metni / şıklar / açıklama">
@@ -1501,6 +1509,7 @@ $(document).ready(function() {
             course_id: '',
             topic_id: '',
             question_type: '',
+            source_type: 'all',
             status: '',
             search: '',
             search_scope: 'all'
@@ -1635,7 +1644,8 @@ $(document).ready(function() {
                 qualification_id: $('#filterQualification').val() || '',
                 course_id: $('#filterCourse').val() || '',
                 topic_id: $('#filterTopic').val() || '',
-                question_type: $('#filterType').val() || ''
+                question_type: $('#filterType').val() || '',
+                source_type: $('#filterSourceType').val() || 'all'
             };
             console.log('questions filters save', payload);
             localStorage.setItem(QUESTIONS_FILTERS_STORAGE_KEY, JSON.stringify(payload));
@@ -1921,6 +1931,7 @@ $(document).ready(function() {
         }
 
         const savedQuestionType = String(saved?.question_type || '');
+        const savedSourceType = String(saved?.source_type || 'all');
         const savedTopicId = String(saved?.topic_id || '');
         if (savedQuestionType && $('#filterType option[value="' + savedQuestionType + '"]').length) {
             qState.filters.question_type = savedQuestionType;
@@ -1928,6 +1939,14 @@ $(document).ready(function() {
         } else {
             qState.filters.question_type = '';
             $('#filterType').val('');
+        }
+
+        if (['all', 'scenario', 'gasm'].includes(savedSourceType) && $('#filterSourceType option[value="' + savedSourceType + '"]').length) {
+            qState.filters.source_type = savedSourceType;
+            $('#filterSourceType').val(savedSourceType);
+        } else {
+            qState.filters.source_type = 'all';
+            $('#filterSourceType').val('all');
         }
 
         qState.filters.topic_id = savedTopicId;
@@ -2148,6 +2167,7 @@ $(document).ready(function() {
     async function loadQuestions() {
         const params = new URLSearchParams({ action: 'list_questions' });
         params.append('search_scope', qState.filters.search_scope || 'all');
+        params.append('source_type', qState.filters.source_type || 'all');
         params.append('page', qState.pagination.page || 1);
         params.append('per_page', qState.pagination.per_page || 25);
         Object.entries(qState.filters).forEach(([k, v]) => { if (v) params.append(k, v); });
@@ -2224,6 +2244,14 @@ $(document).ready(function() {
         loadQuestions();
     });
 
+    $('#filterSourceType').on('change', function () {
+        const v = String($(this).val() || 'all');
+        qState.filters.source_type = ['all', 'scenario', 'gasm'].includes(v) ? v : 'all';
+        qState.pagination.page = 1;
+        saveQuestionFilters();
+        loadQuestions();
+    });
+
     $('#filterStatus').on('change', function () {
         qState.filters.status = $(this).val() || '';
         qState.pagination.page = 1;
@@ -2251,6 +2279,7 @@ $(document).ready(function() {
             course_id: '',
             topic_id: '',
             question_type: '',
+            source_type: 'all',
             status: '',
             search: '',
             search_scope: qState.filters.search_scope || 'all'
@@ -2260,6 +2289,7 @@ $(document).ready(function() {
         $('#filterQualification').val('');
         $('#filterCourse').val('');
         $('#filterType').val('');
+        $('#filterSourceType').val('all');
         $('#filterStatus').val('');
         $('#filterSearch').val('');
         applySearchScopeUi(qState.filters.search_scope);
@@ -2696,6 +2726,7 @@ $(document).ready(function() {
 
             $group.find('.source-type-btn').removeClass('active');
             $group.find(`.source-type-btn[data-source-type="${sourceType}"]`).addClass('active');
+            await loadQuestions();
         } catch (err) {
             appAlert('Hata', err?.message || 'Kaynak tipi güncellenemedi.', 'error');
         } finally {
