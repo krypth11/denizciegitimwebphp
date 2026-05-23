@@ -78,6 +78,13 @@ try {
             $search = preg_replace('/\s+/u', ' ', $search);
             $searchScope = (string)($_GET['search_scope'] ?? 'all');
             $searchScope = in_array($searchScope, ['all', 'visible'], true) ? $searchScope : 'all';
+            $page = max(1, (int)($_GET['page'] ?? 1));
+            $allowedPerPage = [25, 50, 100, 500];
+            $perPage = (int)($_GET['per_page'] ?? 25);
+            if (!in_array($perPage, $allowedPerPage, true)) {
+                $perPage = 25;
+            }
+            $offset = ($page - 1) * $perPage;
 
             $select = 'q.*, c.name AS course_name, qual.name AS qualification_name';
             $join = ' FROM questions q
@@ -158,9 +165,16 @@ try {
             $countStmt->execute($params);
             $totalCount = (int)$countStmt->fetchColumn();
 
-            $sql = 'SELECT ' . $select . $join . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY q.created_at DESC, q.id DESC LIMIT 500';
+            $sql = 'SELECT ' . $select . $join . ' WHERE ' . implode(' AND ', $where) . ' ORDER BY q.created_at DESC, q.id DESC LIMIT ? OFFSET ?';
             $stmt = $pdo->prepare($sql);
-            $stmt->execute($params);
+            $queryParams = $params;
+            $queryParams[] = $perPage;
+            $queryParams[] = $offset;
+            foreach ($queryParams as $idx => $value) {
+                $paramType = is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR;
+                $stmt->bindValue($idx + 1, $value, $paramType);
+            }
+            $stmt->execute();
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             if ($search !== '') {
@@ -228,7 +242,6 @@ try {
                 }
                 unset($row);
 
-                $totalCount = count($rows);
             }
 
             foreach ($rows as &$row) {
@@ -250,6 +263,12 @@ try {
             questions_json(true, '', [
                 'questions' => $rows,
                 'total_count' => $totalCount,
+                'pagination' => [
+                    'page' => $page,
+                    'per_page' => $perPage,
+                    'total_count' => $totalCount,
+                    'total_pages' => max(1, (int)ceil($totalCount / $perPage)),
+                ],
                 'meta' => [
                     'has_topic_filter' => $hasTopicId,
                     'has_status_filter' => ($hasStatus || $hasIsActive),

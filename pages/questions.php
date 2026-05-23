@@ -127,6 +127,30 @@ include '../includes/sidebar.php';
 
     <div class="d-md-none" id="questionsMobileList"></div>
     <div class="alert alert-light text-muted d-none mt-2" id="questionsMobileEmpty">Kayıt bulunamadı.</div>
+
+    <div class="card mt-3" id="questionsPaginationWrap">
+        <div class="card-body py-2">
+            <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-md-between gap-2">
+                <div class="d-flex align-items-center gap-2">
+                    <label for="questionsPerPageSelect" class="small text-muted mb-0">Sayfa başına</label>
+                    <select class="form-select form-select-sm" id="questionsPerPageSelect" style="width:auto;">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="500">500</option>
+                    </select>
+                </div>
+                <div class="small text-muted" id="questionsPaginationInfo">Sayfa 1 / 1</div>
+                <div class="d-flex align-items-center gap-1 flex-wrap justify-content-start justify-content-md-end">
+                    <button class="btn btn-sm btn-outline-secondary" id="questionsFirstPageBtn" type="button">İlk</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="questionsPrevPageBtn" type="button">Önceki</button>
+                    <div class="d-flex align-items-center gap-1 flex-wrap" id="questionsPaginationNumbers"></div>
+                    <button class="btn btn-sm btn-outline-secondary" id="questionsNextPageBtn" type="button">Sonraki</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="questionsLastPageBtn" type="button">Son</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Add / Edit modalları -->
@@ -1452,6 +1476,12 @@ $(document).ready(function() {
             has_topic_filter: false,
             has_status_filter: false,
             status_options: []
+        },
+        pagination: {
+            page: 1,
+            per_page: 25,
+            total_count: 0,
+            total_pages: 1
         }
     };
 
@@ -1978,6 +2008,46 @@ $(document).ready(function() {
         $status.prop('disabled', false).val(qState.filters.status || '');
     }
 
+    function renderQuestionsPagination() {
+        const page = Math.max(1, Number(qState.pagination.page || 1));
+        const perPage = Number(qState.pagination.per_page || 25);
+        const totalPages = Math.max(1, Number(qState.pagination.total_pages || 1));
+
+        $('#questionsPerPageSelect').val(String(perPage));
+        $('#questionsPaginationInfo').text(`Sayfa ${page} / ${totalPages}`);
+
+        const isFirst = page <= 1;
+        const isLast = page >= totalPages;
+        $('#questionsFirstPageBtn, #questionsPrevPageBtn').prop('disabled', isFirst);
+        $('#questionsNextPageBtn, #questionsLastPageBtn').prop('disabled', isLast);
+
+        const $numbers = $('#questionsPaginationNumbers');
+        $numbers.empty();
+
+        const addPageBtn = (p, active = false) => {
+            const cls = active ? 'btn-primary' : 'btn-outline-secondary';
+            const disabled = active ? 'disabled' : '';
+            $numbers.append(`<button type="button" class="btn btn-sm ${cls} question-page-btn" data-page="${p}" ${disabled}>${p}</button>`);
+        };
+        const addEllipsis = () => {
+            $numbers.append('<span class="px-1 text-muted">...</span>');
+        };
+
+        if (totalPages <= 7) {
+            for (let i = 1; i <= totalPages; i++) addPageBtn(i, i === page);
+            return;
+        }
+
+        addPageBtn(1, page === 1);
+        const start = Math.max(2, page - 2);
+        const end = Math.min(totalPages - 1, page + 2);
+
+        if (start > 2) addEllipsis();
+        for (let i = start; i <= end; i++) addPageBtn(i, i === page);
+        if (end < totalPages - 1) addEllipsis();
+        addPageBtn(totalPages, page === totalPages);
+    }
+
     async function loadQualifications() {
         const res = await window.appAjax({ url: '../ajax/questions.php?action=list_qualifications' });
         if (!res.success) return;
@@ -2029,6 +2099,8 @@ $(document).ready(function() {
     async function loadQuestions() {
         const params = new URLSearchParams({ action: 'list_questions' });
         params.append('search_scope', qState.filters.search_scope || 'all');
+        params.append('page', qState.pagination.page || 1);
+        params.append('per_page', qState.pagination.per_page || 25);
         Object.entries(qState.filters).forEach(([k, v]) => { if (v) params.append(k, v); });
         params.append('_ts', Date.now().toString());
         const res = await window.appAjax({ url: `../ajax/questions.php?${params.toString()}` });
@@ -2040,17 +2112,20 @@ $(document).ready(function() {
             return;
         }
         qState.meta = { ...qState.meta, ...(res.data?.meta || {}) };
+        const pagination = res.data?.pagination || {};
+        qState.pagination.page = Math.max(1, Number(pagination.page || qState.pagination.page || 1));
+        qState.pagination.per_page = Number(pagination.per_page || qState.pagination.per_page || 25);
+        qState.pagination.total_count = Math.max(0, Number(pagination.total_count ?? res.data?.total_count ?? 0));
+        qState.pagination.total_pages = Math.max(1, Number(pagination.total_pages || 1));
         if (qState.meta.search_scope) {
             applySearchScopeUi(qState.meta.search_scope);
         }
         renderStatusOptions();
-        let rows = res.data?.questions || [];
-        if (qState.filters.search) {
-            rows = rows.filter((row) => rowMatchesExactPhrase(row, qState.filters.search, qState.filters.search_scope));
-        }
+        const rows = res.data?.questions || [];
         renderDesktopRows(rows);
         renderMobileRows(rows);
-        updateFilteredCountDisplay(rows.length);
+        updateFilteredCountDisplay(res.data?.total_count ?? 0);
+        renderQuestionsPagination();
         $('#selectAll').prop('checked', false);
         toggleBulk();
     }
@@ -2059,7 +2134,10 @@ $(document).ready(function() {
         let timer = null;
         return () => {
             clearTimeout(timer);
-            timer = setTimeout(() => loadQuestions(), 280);
+            timer = setTimeout(() => {
+                qState.pagination.page = 1;
+                loadQuestions();
+            }, 280);
         };
     })();
 
@@ -2067,6 +2145,7 @@ $(document).ready(function() {
         qState.filters.qualification_id = $(this).val() || '';
         qState.filters.course_id = '';
         qState.filters.topic_id = '';
+        qState.pagination.page = 1;
         saveQuestionFilters();
         await loadCourses();
         await loadTopics();
@@ -2076,6 +2155,7 @@ $(document).ready(function() {
     $('#filterCourse').on('change', async function () {
         qState.filters.course_id = $(this).val() || '';
         qState.filters.topic_id = '';
+        qState.pagination.page = 1;
         saveQuestionFilters();
         await loadTopics();
         await loadQuestions();
@@ -2083,18 +2163,21 @@ $(document).ready(function() {
 
     $('#filterTopic').on('change', function () {
         qState.filters.topic_id = $(this).val() || '';
+        qState.pagination.page = 1;
         saveQuestionFilters();
         loadQuestions();
     });
 
     $('#filterType').on('change', function () {
         qState.filters.question_type = $(this).val() || '';
+        qState.pagination.page = 1;
         saveQuestionFilters();
         loadQuestions();
     });
 
     $('#filterStatus').on('change', function () {
         qState.filters.status = $(this).val() || '';
+        qState.pagination.page = 1;
         loadQuestions();
     });
 
@@ -2106,6 +2189,7 @@ $(document).ready(function() {
     $('#filterSearchScope').on('change', function () {
         const selectedScope = normalizeSearchScope($(this).val() || 'all');
         qState.filters.search_scope = selectedScope;
+        qState.pagination.page = 1;
         saveSearchScope(selectedScope);
         applySearchScopeUi(selectedScope);
         loadQuestions();
@@ -2122,6 +2206,7 @@ $(document).ready(function() {
             search: '',
             search_scope: qState.filters.search_scope || 'all'
         };
+        qState.pagination.page = 1;
         clearSavedQuestionFilters();
         $('#filterQualification').val('');
         $('#filterCourse').val('');
@@ -2344,6 +2429,45 @@ $(document).ready(function() {
     $('#selectAll').on('change', function() {
         $('.question-checkbox').prop('checked', this.checked);
         toggleBulk();
+    });
+
+    $('#questionsPerPageSelect').on('change', function () {
+        const allowed = [25, 50, 100, 500];
+        const selected = Number($(this).val() || 25);
+        qState.pagination.per_page = allowed.includes(selected) ? selected : 25;
+        qState.pagination.page = 1;
+        loadQuestions();
+    });
+
+    $(document).on('click', '.question-page-btn', function () {
+        const page = Math.max(1, Number($(this).data('page') || 1));
+        if (page === qState.pagination.page) return;
+        qState.pagination.page = page;
+        loadQuestions();
+    });
+
+    $('#questionsFirstPageBtn').on('click', function () {
+        if (qState.pagination.page <= 1) return;
+        qState.pagination.page = 1;
+        loadQuestions();
+    });
+
+    $('#questionsPrevPageBtn').on('click', function () {
+        if (qState.pagination.page <= 1) return;
+        qState.pagination.page = Math.max(1, qState.pagination.page - 1);
+        loadQuestions();
+    });
+
+    $('#questionsNextPageBtn').on('click', function () {
+        if (qState.pagination.page >= qState.pagination.total_pages) return;
+        qState.pagination.page = Math.min(qState.pagination.total_pages, qState.pagination.page + 1);
+        loadQuestions();
+    });
+
+    $('#questionsLastPageBtn').on('click', function () {
+        if (qState.pagination.page >= qState.pagination.total_pages) return;
+        qState.pagination.page = qState.pagination.total_pages;
+        loadQuestions();
     });
     $(document).on('change', '.question-checkbox', toggleBulk);
     function toggleBulk() {
