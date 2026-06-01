@@ -153,6 +153,7 @@ function word_game_questions_schema(PDO $pdo): array
         'table' => 'word_game_questions',
         'id' => word_game_pick_column($columns, ['id']),
         'qualification_id' => word_game_pick_column($columns, ['qualification_id']),
+        'category_id' => word_game_pick_column($columns, ['category_id'], false),
         'question_text' => word_game_pick_column($columns, ['question_text']),
         'answer_text' => word_game_pick_column($columns, ['answer_text']),
         'answer_normalized' => word_game_pick_column($columns, ['answer_normalized']),
@@ -399,9 +400,114 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
     return $selected;
 }
 
-function word_game_question_max_score(int $answerLength): int
+function word_game_question_max_score(int $answerLength, int $pointsPerChar = 10): int
 {
-    return max(0, $answerLength * 10);
+    return max(0, $answerLength * max(1, $pointsPerChar));
+}
+
+function word_game_get_runtime_settings(PDO $pdo): array
+{
+    if (function_exists('word_game_get_settings')) {
+        return word_game_get_settings($pdo);
+    }
+
+    return [
+        'target_score' => 10000,
+        'points_per_char' => 100,
+        'min_questions' => 8,
+        'max_questions' => 14,
+        'duration_seconds' => 400,
+        'allowed_lengths' => range(3, 24),
+    ];
+}
+
+function word_game_pick_questions_for_category(PDO $pdo, string $userId, string $qualificationId, string $categoryId): array
+{
+    $qSchema = word_game_questions_schema($pdo);
+    if (empty($qSchema['category_id'])) {
+        throw new RuntimeException('WORD_GAME_SCHEMA|category_id kolonu bulunamadı.');
+    }
+
+    $settings = word_game_get_runtime_settings($pdo);
+    $pointsPerChar = max(1, (int)($settings['points_per_char'] ?? 100));
+    $targetChars = (int)floor(max(1, (int)($settings['target_score'] ?? 10000)) / $pointsPerChar);
+    $minQ = max(1, (int)($settings['min_questions'] ?? 8));
+    $maxQ = max($minQ, (int)($settings['max_questions'] ?? 14));
+    $allowed = array_values(array_map('intval', (array)($settings['allowed_lengths'] ?? [])));
+    if (empty($allowed)) {
+        throw new RuntimeException('Bu ayarlara uygun kelime oyunu oluşturulamadı.');
+    }
+
+    $in = implode(',', array_fill(0, count($allowed), '?'));
+    $sql = 'SELECT q.`' . $qSchema['id'] . '` AS id,
+                   q.`' . $qSchema['qualification_id'] . '` AS qualification_id,
+                   q.`' . $qSchema['question_text'] . '` AS question_text,
+                   q.`' . $qSchema['answer_text'] . '` AS answer_text,
+                   q.`' . $qSchema['answer_normalized'] . '` AS answer_normalized,
+                   q.`' . $qSchema['answer_length'] . '` AS answer_length,
+                   h.seen_count,
+                   h.last_seen_at
+            FROM `' . $qSchema['table'] . '` q
+            LEFT JOIN word_game_user_question_history h
+              ON h.user_id = ? AND h.word_game_question_id = q.`' . $qSchema['id'] . '` 
+            WHERE q.`' . $qSchema['category_id'] . '` = ?
+              AND q.`' . $qSchema['is_active'] . '` = 1
+              AND q.`' . $qSchema['answer_length'] . '` IN (' . $in . ')
+            ORDER BY (h.word_game_question_id IS NULL) DESC, h.last_seen_at ASC, RAND()';
+
+    $params = array_merge([$userId, $categoryId], $allowed);
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $pool = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    if (empty($pool)) {
+        throw new RuntimeException('Bu ayarlara uygun kelime oyunu oluşturulamadı.');
+    }
+
+    $best = [];
+    for ($try = 0; $try < 500; $try++) {
+        $selected = [];
+        $sum = 0;
+        $used = [];
+        $candidates = $pool;
+        shuffle($candidates);
+
+        foreach ($candidates as $row) {
+            $id = (string)$row['id'];
+            $len = (int)$row['answer_length'];
+            if (isset($used[$id])) continue;
+            if ($sum + $len > $targetChars) continue;
+            $selected[] = $row;
+            $used[$id] = true;
+            $sum += $len;
+
+            if ($sum === $targetChars && count($selected) >= $minQ && count($selected) <= $maxQ) {
+                break;
+            }
+            if (count($selected) >= $maxQ) {
+                break;
+            }
+        }
+
+        if ($sum === $targetChars && count($selected) >= $minQ && count($selected) <= $maxQ) {
+            $best = $selected;
+            break;
+        }
+    }
+
+    if (empty($best)) {
+        throw new RuntimeException('Bu ayarlara uygun kelime oyunu oluşturulamadı.');
+    }
+
+    return array_map(static function (array $row) use ($qualificationId): array {
+        return [
+            'id' => (string)$row['id'],
+            'qualification_id' => (string)($row['qualification_id'] ?: $qualificationId),
+            'question_text' => (string)$row['question_text'],
+            'answer_text' => (string)$row['answer_text'],
+            'answer_normalized' => (string)$row['answer_normalized'],
+            'answer_length' => (int)$row['answer_length'],
+        ];
+    }, $best);
 }
 
 function word_game_session_create(PDO $pdo, string $userId, string $qualificationId, array $questions): array
@@ -413,12 +519,16 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
         throw new InvalidArgumentException('user_id ve qualification_id zorunludur.');
     }
 
-    if (count($questions) !== 10) {
-        throw new InvalidArgumentException('Oyun için toplam 10 soru gereklidir.');
+    $settings = word_game_get_runtime_settings($pdo);
+    $minQ = max(1, (int)($settings['min_questions'] ?? 8));
+    $maxQ = max($minQ, (int)($settings['max_questions'] ?? 14));
+    if (count($questions) < $minQ || count($questions) > $maxQ) {
+        throw new InvalidArgumentException('Oyun için soru sayısı ayarlara uygun değil.');
     }
 
     $sessionId = function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16));
-    $remainingSeconds = word_game_session_initial_remaining_seconds();
+    $remainingSeconds = max(30, (int)($settings['duration_seconds'] ?? 400));
+    $pointsPerChar = max(1, (int)($settings['points_per_char'] ?? 100));
     $schema = word_game_session_schema($pdo);
 
     $sqSchema = word_game_session_questions_schema($pdo);
@@ -500,7 +610,7 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
         foreach (array_values($questions) as $idx => $question) {
             $sessionQuestionId = function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16));
             $answerLength = (int)($question['answer_length'] ?? 0);
-            $maxScore = word_game_question_max_score($answerLength);
+            $maxScore = word_game_question_max_score($answerLength, $pointsPerChar);
             $questionOrder = $idx + 1;
             $snapshotAnswerText = (string)($question['answer_text'] ?? '');
             $snapshotAnswerNormalized = word_game_normalize_answer((string)($question['answer_normalized'] ?? $question['answer_text'] ?? ''));
@@ -560,6 +670,11 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
                 'max_score' => $maxScore,
                 'answer_text_debug' => $snapshotAnswerText,
             ];
+
+            $hist = $pdo->prepare('INSERT INTO word_game_user_question_history (id, user_id, word_game_question_id, seen_count, last_seen_at, created_at, updated_at)
+                                   VALUES (?, ?, ?, 1, NOW(), NOW(), NOW())
+                                   ON DUPLICATE KEY UPDATE seen_count = seen_count + 1, last_seen_at = NOW(), updated_at = NOW()');
+            $hist->execute([function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16)), $userId, (string)$question['id']]);
         }
 
         $pdo->commit();
@@ -663,7 +778,9 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
     $answerRaw = (string)($sessionQuestion['answer_normalized'] ?? $sessionQuestion['answer_text'] ?? '');
     $answer = word_game_normalize_answer($answerRaw);
     $answerLength = (int)($sessionQuestion['answer_length'] ?? mb_strlen($answer, 'UTF-8'));
-    $maxScore = (int)($sessionQuestion['max_score'] ?? word_game_question_max_score($answerLength));
+    $settings = word_game_get_runtime_settings($pdo);
+    $pointsPerChar = max(1, (int)($settings['points_per_char'] ?? 100));
+    $maxScore = (int)($sessionQuestion['max_score'] ?? word_game_question_max_score($answerLength, $pointsPerChar));
 
     if ($sessionQuestionId === '' || $answerLength <= 0 || $answer === '') {
         throw new RuntimeException('Soru verisi okunamadı.');
@@ -696,7 +813,7 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
     sort($revealedIndexes, SORT_NUMERIC);
 
     $lettersTakenCount = (int)($sessionQuestion['letters_taken_count'] ?? 0) + 1;
-    $remainingScore = max(0, $maxScore - ($lettersTakenCount * 10));
+    $remainingScore = max(0, $maxScore - ($lettersTakenCount * $pointsPerChar));
     $revealedLetter = mb_substr($answer, $revealedIndex - 1, 1, 'UTF-8');
 
     $updateParts = [
@@ -744,7 +861,9 @@ function word_game_check_answer(PDO $pdo, array $sessionQuestion, string $submit
     $submittedNormalized = word_game_normalize_answer($submittedAnswer);
     $lettersTakenCount = (int)($sessionQuestion['letters_taken_count'] ?? 0);
     $sourceLength = (int)($sessionQuestion['answer_length'] ?? mb_strlen($correctAnswer, 'UTF-8'));
-    $maxScore = (int)($sessionQuestion['max_score'] ?? word_game_question_max_score($sourceLength));
+    $settings = word_game_get_runtime_settings($pdo);
+    $pointsPerChar = max(1, (int)($settings['points_per_char'] ?? 100));
+    $maxScore = (int)($sessionQuestion['max_score'] ?? word_game_question_max_score($sourceLength, $pointsPerChar));
     $wrongAttemptCount = (int)($sessionQuestion['wrong_attempt_count'] ?? 0);
 
     if ($sessionQuestionId === '' || $correctAnswer === '') {
@@ -754,7 +873,7 @@ function word_game_check_answer(PDO $pdo, array $sessionQuestion, string $submit
     $isCorrect = ($submittedNormalized !== '' && $submittedNormalized === $correctAnswer);
 
     if ($isCorrect) {
-        $earnedScore = max(0, $maxScore - ($lettersTakenCount * 10));
+        $earnedScore = max(0, $maxScore - ($lettersTakenCount * $pointsPerChar));
 
         $set = [
             '`' . $sqSchema['is_correct'] . '` = 1',
@@ -898,7 +1017,8 @@ function word_game_finish_session(PDO $pdo, string $sessionId, string $userId, i
         throw new InvalidArgumentException('status geçersiz.');
     }
 
-    $remainingSeconds = max(0, min(word_game_session_initial_remaining_seconds(), $remainingSeconds));
+    $settings = word_game_get_runtime_settings($pdo);
+    $remainingSeconds = max(0, min(max(30, (int)($settings['duration_seconds'] ?? 400)), $remainingSeconds));
     word_game_refresh_session_totals($pdo, $sessionId);
 
     $session = word_game_find_session($pdo, $sessionId, $userId);

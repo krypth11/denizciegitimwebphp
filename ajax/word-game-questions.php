@@ -34,6 +34,7 @@ try {
     switch ($action) {
         case 'list_questions':
             $filters = [
+                'category_id' => trim((string)($_GET['category_id'] ?? '')),
                 'qualification_id' => trim((string)($_GET['qualification_id'] ?? '')),
                 'is_active' => isset($_GET['is_active']) ? (string)$_GET['is_active'] : '',
                 'search' => trim((string)($_GET['search'] ?? '')),
@@ -62,9 +63,12 @@ try {
 
         case 'create_question':
             $result = word_game_create($pdo, [
+                'category_id' => $_POST['category_id'] ?? '',
                 'qualification_id' => $_POST['qualification_id'] ?? '',
                 'question_text' => $_POST['question_text'] ?? '',
+                'question_text_en' => $_POST['question_text_en'] ?? '',
                 'answer_text' => $_POST['answer_text'] ?? '',
+                'answer_text_en' => $_POST['answer_text_en'] ?? '',
                 'order_index' => $_POST['order_index'] ?? 0,
                 'notes' => $_POST['notes'] ?? '',
                 'is_active' => $_POST['is_active'] ?? 0,
@@ -85,9 +89,12 @@ try {
         case 'update_question':
             $id = trim((string)($_POST['id'] ?? ''));
             $result = word_game_update($pdo, $id, [
+                'category_id' => $_POST['category_id'] ?? '',
                 'qualification_id' => $_POST['qualification_id'] ?? '',
                 'question_text' => $_POST['question_text'] ?? '',
+                'question_text_en' => $_POST['question_text_en'] ?? '',
                 'answer_text' => $_POST['answer_text'] ?? '',
+                'answer_text_en' => $_POST['answer_text_en'] ?? '',
                 'order_index' => $_POST['order_index'] ?? 0,
                 'notes' => $_POST['notes'] ?? '',
                 'is_active' => $_POST['is_active'] ?? 0,
@@ -135,6 +142,62 @@ try {
             $isActive = in_array((string)$isActiveRaw, ['1', 'true', 'on'], true);
             word_game_toggle_active($pdo, $id, $isActive);
             word_game_json(true, $isActive ? 'Kayıt aktif yapıldı.' : 'Kayıt pasif yapıldı.');
+            break;
+
+        case 'parse_bulk_pattern':
+            $pattern = (string)($_POST['pattern'] ?? '');
+            $parsed = word_game_parse_bulk_pattern_text($pattern);
+            word_game_json(true, '', $parsed);
+            break;
+
+        case 'create_bulk_questions':
+            $categoryId = trim((string)($_POST['category_id'] ?? ''));
+            if ($categoryId === '') {
+                word_game_json(false, 'Başlık seçimi zorunludur.', [], 422);
+            }
+
+            $itemsRaw = $_POST['items'] ?? '[]';
+            if (is_string($itemsRaw)) {
+                $items = json_decode($itemsRaw, true);
+            } else {
+                $items = $itemsRaw;
+            }
+            if (!is_array($items)) {
+                word_game_json(false, 'Geçersiz kayıt listesi.', [], 422);
+            }
+
+            $created = [];
+            $errors = [];
+            foreach ($items as $idx => $item) {
+                $record = is_array($item) ? $item : [];
+                $result = word_game_create($pdo, [
+                    'category_id' => $categoryId,
+                    'question_text' => $record['tr_question'] ?? '',
+                    'question_text_en' => $record['en_question'] ?? '',
+                    'answer_text' => $record['tr_answer'] ?? '',
+                    'answer_text_en' => $record['en_answer'] ?? '',
+                    'notes' => $record['note'] ?? '',
+                    'is_active' => 1,
+                    'order_index' => 0,
+                ]);
+
+                if (!($result['success'] ?? false)) {
+                    $errors[] = [
+                        'index' => $idx,
+                        'message' => $result['message'] ?? 'Kayıt oluşturulamadı.',
+                        'errors' => $result['errors'] ?? [],
+                    ];
+                    continue;
+                }
+                $created[] = $result['item'] ?? null;
+            }
+
+            word_game_json(true, 'Toplu kayıt işlemi tamamlandı.', [
+                'created_count' => count($created),
+                'error_count' => count($errors),
+                'created' => $created,
+                'errors' => $errors,
+            ]);
             break;
 
         default:

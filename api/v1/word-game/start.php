@@ -10,6 +10,8 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
+    $payload = api_get_request_data();
+    $requestedCategoryId = trim((string)($payload['category_id'] ?? ''));
 
     $qualificationId = word_game_get_current_qualification_id($pdo, $userId);
     $qualificationName = null;
@@ -38,7 +40,24 @@ try {
     }
 
     try {
-        $questions = word_game_pick_questions($pdo, $qualificationId);
+        if ($requestedCategoryId !== '') {
+            $catStmt = $pdo->prepare('SELECT id, is_active FROM word_game_categories WHERE id = ? LIMIT 1');
+            $catStmt->execute([$requestedCategoryId]);
+            $cat = $catStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$cat || (int)($cat['is_active'] ?? 0) !== 1) {
+                api_send_json(['success'=>false,'message'=>'Kategori aktif değil veya bulunamadı.','data'=>null],422);
+            }
+
+            $mapStmt = $pdo->prepare('SELECT COUNT(*) FROM word_game_category_qualifications WHERE category_id = ? AND qualification_id = ?');
+            $mapStmt->execute([$requestedCategoryId, $qualificationId]);
+            if ((int)$mapStmt->fetchColumn() < 1) {
+                api_send_json(['success'=>false,'message'=>'Bu kategori için yeterlilik yetkiniz yok.','data'=>null],403);
+            }
+
+            $questions = word_game_pick_questions_for_category($pdo, $userId, $qualificationId, $requestedCategoryId);
+        } else {
+            $questions = word_game_pick_questions($pdo, $qualificationId);
+        }
     } catch (RuntimeException $e) {
         $message = $e->getMessage();
         if (str_starts_with($message, 'WORD_GAME_INSUFFICIENT_QUESTIONS|')) {
@@ -58,7 +77,11 @@ try {
             ], 422);
         }
 
-        throw $e;
+        api_send_json([
+            'success' => false,
+            'message' => $message === '' ? 'Bu ayarlara uygun kelime oyunu oluşturulamadı.' : $message,
+            'data' => null,
+        ], 422);
     }
 
     $created = word_game_session_create($pdo, $userId, $qualificationId, $questions);

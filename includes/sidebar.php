@@ -12,7 +12,17 @@ $menuGroups = [
         ['slug' => 'question-reports', 'url' => '/pages/question-reports.php', 'icon' => 'bi-flag', 'label' => 'Soru Bildirimleri'],
         ['slug' => 'question-scope-bulk', 'url' => '/pages/question-scope-bulk.php', 'icon' => 'bi-diagram-3', 'label' => 'Toplu Soru Kapsamı'],
         ['slug' => 'questions-export', 'url' => '/pages/questions-export.php', 'icon' => 'bi-file-earmark-arrow-down', 'label' => 'Soru Dışa Aktar'],
-        ['slug' => 'word-game-questions', 'url' => '/pages/word-game-questions.php', 'icon' => 'bi-controller', 'label' => 'Kelime Oyunu'],
+        [
+            'slug' => 'word-game',
+            'icon' => 'bi-controller',
+            'label' => 'Kelime Oyunu',
+            'children' => [
+                ['slug' => 'word-game-categories', 'url' => '/pages/word-game-categories.php', 'icon' => 'bi-collection', 'label' => 'Başlıklar'],
+                ['slug' => 'word-game-mappings', 'url' => '/pages/word-game-mappings.php', 'icon' => 'bi-diagram-2', 'label' => 'Eşleştirmeler'],
+                ['slug' => 'word-game-questions', 'url' => '/pages/word-game-questions.php', 'icon' => 'bi-question-circle', 'label' => 'Sorular'],
+                ['slug' => 'word-game-settings', 'url' => '/pages/word-game-settings.php', 'icon' => 'bi-sliders', 'label' => 'Ayarlar'],
+            ],
+        ],
         [
             'slug' => 'kart-game',
             'icon' => 'bi-grid-3x3-gap',
@@ -195,6 +205,7 @@ function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
+
 
 
 
