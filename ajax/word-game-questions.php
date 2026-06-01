@@ -40,10 +40,87 @@ try {
                 'search' => trim((string)($_GET['search'] ?? '')),
             ];
 
-            $rows = word_game_list($pdo, $filters);
+            $allowedPerPage = [10, 25, 50, 100, 500];
+            $page = (int)($_GET['page'] ?? 1);
+            if ($page < 1) {
+                $page = 1;
+            }
+            $perPage = (int)($_GET['per_page'] ?? 25);
+            if (!in_array($perPage, $allowedPerPage, true)) {
+                $perPage = 25;
+            }
+            $offset = ($page - 1) * $perPage;
+
+            $where = ['1=1'];
+            $params = [];
+
+            $categoryId = $filters['category_id'];
+            if ($categoryId !== '') {
+                $where[] = 'wq.category_id = ?';
+                $params[] = $categoryId;
+            }
+
+            $qualificationId = $filters['qualification_id'];
+            if ($qualificationId !== '') {
+                $where[] = 'wq.qualification_id = ?';
+                $params[] = $qualificationId;
+            }
+
+            if (isset($filters['is_active']) && $filters['is_active'] !== '') {
+                $where[] = 'wq.is_active = ?';
+                $params[] = ((int)$filters['is_active'] === 1 ? 1 : 0);
+            }
+
+            $search = trim((string)$filters['search']);
+            if ($search !== '') {
+                $where[] = '(wq.question_text LIKE ? OR wq.question_text_en LIKE ? OR wq.answer_text LIKE ? OR wq.answer_text_en LIKE ? OR wq.answer_normalized LIKE ?)';
+                $like = '%' . $search . '%';
+                array_push($params, $like, $like, $like, $like, $like);
+            }
+
+            $whereSql = implode(' AND ', $where);
+
+            $countSql = 'SELECT COUNT(*)
+                         FROM word_game_questions wq
+                         LEFT JOIN qualifications q ON q.id = wq.qualification_id
+                         LEFT JOIN word_game_categories c ON c.id = wq.category_id
+                         WHERE ' . $whereSql;
+            $countStmt = $pdo->prepare($countSql);
+            $countStmt->execute($params);
+            $totalCount = (int)$countStmt->fetchColumn();
+            $totalPages = max(1, (int)ceil($totalCount / $perPage));
+
+            if ($page > $totalPages) {
+                $page = $totalPages;
+                $offset = ($page - 1) * $perPage;
+            }
+
+            $dataSql = 'SELECT wq.*, q.name AS qualification_name, c.name AS category_name
+                        FROM word_game_questions wq
+                        LEFT JOIN qualifications q ON q.id = wq.qualification_id
+                        LEFT JOIN word_game_categories c ON c.id = wq.category_id
+                        WHERE ' . $whereSql . '
+                        ORDER BY c.order_index ASC, c.name ASC, wq.order_index ASC, wq.created_at DESC
+                        LIMIT :limit OFFSET :offset';
+            $dataStmt = $pdo->prepare($dataSql);
+            foreach ($params as $idx => $value) {
+                $dataStmt->bindValue($idx + 1, $value);
+            }
+            $dataStmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+            $dataStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+            $dataStmt->execute();
+            $rows = $dataStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
             word_game_json(true, '', [
                 'questions' => $rows,
-                'total_count' => count($rows),
+            ] + [
+                'total_count' => $totalCount,
+                'pagination' => [
+                    'page' => $page,
+                    'per_page' => $perPage,
+                    'total_count' => $totalCount,
+                    'total_pages' => $totalPages,
+                ],
             ]);
             break;
 
@@ -125,6 +202,63 @@ try {
 
             word_game_delete($pdo, $id);
             word_game_json(true, 'Kelime oyunu sorusu silindi.');
+            break;
+
+        case 'bulk_delete':
+            $idsRaw = $_POST['ids'] ?? [];
+            if (is_string($idsRaw)) {
+                $decoded = json_decode($idsRaw, true);
+                $ids = is_array($decoded) ? $decoded : [];
+            } elseif (is_array($idsRaw)) {
+                $ids = $idsRaw;
+            } else {
+                $ids = [];
+            }
+
+            if (empty($ids)) {
+                word_game_json(false, 'Silinecek ID listesi boş olamaz.', [], 422);
+            }
+
+            if (count($ids) > 500) {
+                word_game_json(false, 'Tek seferde en fazla 500 kayıt silinebilir.', [], 422);
+            }
+
+            $normalizedIds = [];
+            foreach ($ids as $idItem) {
+                if (!is_string($idItem)) {
+                    word_game_json(false, 'ID listesi sadece string değerler içermelidir.', [], 422);
+                }
+                $idItem = trim($idItem);
+                if ($idItem === '') {
+                    word_game_json(false, 'Boş ID değeri gönderilemez.', [], 422);
+                }
+                $normalizedIds[] = $idItem;
+            }
+
+            $normalizedIds = array_values(array_unique($normalizedIds));
+            if (empty($normalizedIds)) {
+                word_game_json(false, 'Geçerli ID bulunamadı.', [], 422);
+            }
+
+            $placeholders = implode(',', array_fill(0, count($normalizedIds), '?'));
+            $sql = "DELETE FROM word_game_questions WHERE id IN ($placeholders)";
+
+            $pdo->beginTransaction();
+            try {
+                $stmt = $pdo->prepare($sql);
+                $stmt->execute($normalizedIds);
+                $deletedCount = (int)$stmt->rowCount();
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            word_game_json(true, 'Seçili kayıtlar silindi.', [
+                'deleted_count' => $deletedCount,
+            ]);
             break;
 
         case 'toggle_active':
