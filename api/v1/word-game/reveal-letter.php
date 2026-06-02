@@ -68,7 +68,9 @@ try {
         'data' => [
             'revealed_index' => (int)$result['revealed_index'],
             'revealed_logical_index' => (int)$result['revealed_logical_index'],
+            'revealed_index_legacy_1_based' => (int)$result['revealed_index_legacy_1_based'],
             'revealed_letter' => (string)$result['revealed_letter'],
+            'revealed_letter_normalized' => (string)$result['revealed_letter_normalized'],
             'letters_taken_count' => (int)$result['letters_taken_count'],
             'remaining_question_score' => (int)$result['remaining_question_score'],
             'revealed_indexes' => array_values($result['revealed_indexes'] ?? []),

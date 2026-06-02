@@ -982,20 +982,6 @@ function word_game_normalize_revealed_indexes(array $revealedIndexes, int $answe
     $normalized = array_values(array_unique(array_map('intval', $revealedIndexes)));
     sort($normalized, SORT_NUMERIC);
 
-    if (empty($normalized)) {
-        return [];
-    }
-
-    $hasZeroBasedIndex = in_array(0, $normalized, true);
-    $hasLegacyOneBasedOnly = !$hasZeroBasedIndex
-        && min($normalized) >= 1
-        && max($normalized) <= $answerLength;
-
-    if ($hasLegacyOneBasedOnly) {
-        $normalized = array_values(array_unique(array_map(static fn(int $index): int => $index - 1, $normalized)));
-        sort($normalized, SORT_NUMERIC);
-    }
-
     return array_values(array_filter(
         $normalized,
         static fn(int $index): bool => $index >= 0 && $index < $answerLength
@@ -1022,7 +1008,8 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
         throw new RuntimeException('Tamamlanan soruda harf açılamaz.');
     }
 
-    $revealedIndexes = json_decode((string)($sessionQuestion['revealed_indexes_json'] ?? '[]'), true);
+    $revealedIndexesJsonBefore = (string)($sessionQuestion['revealed_indexes_json'] ?? '[]');
+    $revealedIndexes = json_decode($revealedIndexesJsonBefore, true);
     if (!is_array($revealedIndexes)) {
         $revealedIndexes = [];
     }
@@ -1052,10 +1039,13 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
     $lettersTakenCount = (int)($sessionQuestion['letters_taken_count'] ?? 0) + 1;
     $remainingScore = max(0, $maxScore - ($lettersTakenCount * $pointsPerChar));
     $revealedLetter = (string)($answerTextLogicalMap[$revealedLogicalIndex] ?? '');
+    $revealedLetterNormalized = word_game_normalize_answer($revealedLetter);
 
     if ($revealedLetter === '') {
         throw new RuntimeException('Açılan harf üretilemedi.');
     }
+
+    $revealedIndexesJsonAfter = json_encode($revealedIndexes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
     $updateParts = [
         '`' . $sqSchema['revealed_indexes_json'] . '` = ?',
@@ -1072,7 +1062,7 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
          WHERE `' . $sqSchema['id'] . '` = ?'
     );
     $updateStmt->execute([
-        json_encode($revealedIndexes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        $revealedIndexesJsonAfter,
         $lettersTakenCount,
         $remainingScore,
         $sessionQuestionId,
@@ -1084,14 +1074,20 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
         'answer_normalized' => $answerNormalized,
         'revealed_logical_index' => $revealedLogicalIndex,
         'revealed_letter' => $revealedLetter,
-        'revealed_index' => $revealedLogicalIndex + 1,
+        'revealed_letter_normalized' => $revealedLetterNormalized,
+        'revealed_index' => $revealedLogicalIndex,
+        'revealed_index_legacy_1_based' => $revealedLogicalIndex + 1,
+        'revealed_indexes_json_before' => $revealedIndexesJsonBefore,
+        'revealed_indexes_json_after' => $revealedIndexesJsonAfter,
         'letters_taken_count' => $lettersTakenCount,
     ]);
 
     return [
-        'revealed_index' => $revealedLogicalIndex + 1,
+        'revealed_index' => $revealedLogicalIndex,
         'revealed_logical_index' => $revealedLogicalIndex,
+        'revealed_index_legacy_1_based' => $revealedLogicalIndex + 1,
         'revealed_letter' => $revealedLetter,
+        'revealed_letter_normalized' => $revealedLetterNormalized,
         'letters_taken_count' => $lettersTakenCount,
         'remaining_question_score' => $remainingScore,
         'revealed_indexes' => $revealedIndexes,
