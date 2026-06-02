@@ -67,6 +67,7 @@ try {
         'success' => true,
         'data' => [
             'revealed_index' => (int)$result['revealed_index'],
+            'revealed_logical_index' => (int)$result['revealed_logical_index'],
             'revealed_letter' => (string)$result['revealed_letter'],
             'letters_taken_count' => (int)$result['letters_taken_count'],
             'remaining_question_score' => (int)$result['remaining_question_score'],

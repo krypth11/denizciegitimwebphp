@@ -950,18 +950,71 @@ function word_game_find_session_question(PDO $pdo, string $sessionQuestionId, st
     return $row ?: null;
 }
 
+function word_game_build_answer_text_logical_map(string $answerText, string $answerNormalized): array
+{
+    $map = [];
+    $logicalIndex = 0;
+    $textLength = mb_strlen($answerText, 'UTF-8');
+
+    for ($i = 0; $i < $textLength; $i++) {
+        $char = mb_substr($answerText, $i, 1, 'UTF-8');
+        $normalizedChar = word_game_normalize_answer($char);
+        if ($normalizedChar === '') {
+            continue;
+        }
+
+        $normalizedCharLength = mb_strlen($normalizedChar, 'UTF-8');
+        for ($j = 0; $j < $normalizedCharLength; $j++) {
+            $map[$logicalIndex++] = $char;
+        }
+    }
+
+    $normalizedLength = mb_strlen($answerNormalized, 'UTF-8');
+    if (count($map) > $normalizedLength) {
+        $map = array_slice($map, 0, $normalizedLength, true);
+    }
+
+    return array_values($map);
+}
+
+function word_game_normalize_revealed_indexes(array $revealedIndexes, int $answerLength): array
+{
+    $normalized = array_values(array_unique(array_map('intval', $revealedIndexes)));
+    sort($normalized, SORT_NUMERIC);
+
+    if (empty($normalized)) {
+        return [];
+    }
+
+    $hasZeroBasedIndex = in_array(0, $normalized, true);
+    $hasLegacyOneBasedOnly = !$hasZeroBasedIndex
+        && min($normalized) >= 1
+        && max($normalized) <= $answerLength;
+
+    if ($hasLegacyOneBasedOnly) {
+        $normalized = array_values(array_unique(array_map(static fn(int $index): int => $index - 1, $normalized)));
+        sort($normalized, SORT_NUMERIC);
+    }
+
+    return array_values(array_filter(
+        $normalized,
+        static fn(int $index): bool => $index >= 0 && $index < $answerLength
+    ));
+}
+
 function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
 {
     $sqSchema = word_game_session_questions_schema($pdo);
     $sessionQuestionId = (string)($sessionQuestion['id'] ?? '');
-    $answerRaw = (string)($sessionQuestion['answer_normalized'] ?? $sessionQuestion['answer_text'] ?? '');
-    $answer = word_game_normalize_answer($answerRaw);
-    $answerLength = (int)($sessionQuestion['answer_length'] ?? mb_strlen($answer, 'UTF-8'));
+    $answerText = (string)($sessionQuestion['answer_text'] ?? '');
+    $answerRaw = (string)($sessionQuestion['answer_normalized'] ?? $answerText);
+    $answerNormalized = word_game_normalize_answer($answerRaw);
+    $answerLength = (int)($sessionQuestion['answer_length'] ?? mb_strlen($answerNormalized, 'UTF-8'));
     $settings = word_game_get_runtime_settings($pdo);
     $pointsPerChar = max(1, (int)($settings['points_per_char'] ?? 100));
     $maxScore = (int)($sessionQuestion['max_score'] ?? word_game_question_max_score($answerLength, $pointsPerChar));
 
-    if ($sessionQuestionId === '' || $answerLength <= 0 || $answer === '') {
+    if ($sessionQuestionId === '' || $answerLength <= 0 || $answerNormalized === '') {
         throw new RuntimeException('Soru verisi okunamadı.');
     }
 
@@ -973,10 +1026,15 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
     if (!is_array($revealedIndexes)) {
         $revealedIndexes = [];
     }
-    $revealedIndexes = array_values(array_unique(array_map('intval', $revealedIndexes)));
+    $revealedIndexes = word_game_normalize_revealed_indexes($revealedIndexes, $answerLength);
+
+    $answerTextLogicalMap = word_game_build_answer_text_logical_map($answerText, $answerNormalized);
+    if (count($answerTextLogicalMap) !== $answerLength) {
+        throw new RuntimeException('Cevap harf eşlemesi oluşturulamadı.');
+    }
 
     $availableIndexes = [];
-    for ($i = 1; $i <= $answerLength; $i++) {
+    for ($i = 0; $i < $answerLength; $i++) {
         if (!in_array($i, $revealedIndexes, true)) {
             $availableIndexes[] = $i;
         }
@@ -987,13 +1045,17 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
     }
 
     $pickedPosition = random_int(0, count($availableIndexes) - 1);
-    $revealedIndex = (int)$availableIndexes[$pickedPosition];
-    $revealedIndexes[] = $revealedIndex;
+    $revealedLogicalIndex = (int)$availableIndexes[$pickedPosition];
+    $revealedIndexes[] = $revealedLogicalIndex;
     sort($revealedIndexes, SORT_NUMERIC);
 
     $lettersTakenCount = (int)($sessionQuestion['letters_taken_count'] ?? 0) + 1;
     $remainingScore = max(0, $maxScore - ($lettersTakenCount * $pointsPerChar));
-    $revealedLetter = mb_substr($answer, $revealedIndex - 1, 1, 'UTF-8');
+    $revealedLetter = (string)($answerTextLogicalMap[$revealedLogicalIndex] ?? '');
+
+    if ($revealedLetter === '') {
+        throw new RuntimeException('Açılan harf üretilemedi.');
+    }
 
     $updateParts = [
         '`' . $sqSchema['revealed_indexes_json'] . '` = ?',
@@ -1018,12 +1080,17 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
 
     word_game_debug_log('reveal letter index', [
         'session_question_id' => $sessionQuestionId,
-        'revealed_index' => $revealedIndex,
+        'answer_text' => $answerText,
+        'answer_normalized' => $answerNormalized,
+        'revealed_logical_index' => $revealedLogicalIndex,
+        'revealed_letter' => $revealedLetter,
+        'revealed_index' => $revealedLogicalIndex + 1,
         'letters_taken_count' => $lettersTakenCount,
     ]);
 
     return [
-        'revealed_index' => $revealedIndex,
+        'revealed_index' => $revealedLogicalIndex + 1,
+        'revealed_logical_index' => $revealedLogicalIndex,
         'revealed_letter' => $revealedLetter,
         'letters_taken_count' => $lettersTakenCount,
         'remaining_question_score' => $remainingScore,
