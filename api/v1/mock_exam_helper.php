@@ -702,6 +702,11 @@ function mock_exam_get_attempt_question_schema(PDO $pdo): array
         'option_e' => mock_exam_pick($cols, ['option_e'], false),
         'correct_answer' => mock_exam_pick($cols, ['correct_answer'], false),
         'explanation' => mock_exam_pick($cols, ['explanation'], false),
+        'image_url' => mock_exam_pick($cols, ['image_url'], false),
+        'question_image_url' => mock_exam_pick($cols, ['question_image_url'], false),
+        'question_image_thumb_url' => mock_exam_pick($cols, ['question_image_thumb_url'], false),
+        'explanation_image_url' => mock_exam_pick($cols, ['explanation_image_url'], false),
+        'explanation_image_thumb_url' => mock_exam_pick($cols, ['explanation_image_thumb_url'], false),
         'selected_answer' => mock_exam_pick($cols, ['selected_answer'], false),
         'is_correct' => mock_exam_pick($cols, ['is_correct'], false),
         'answered_at' => mock_exam_pick($cols, ['answered_at'], false),
@@ -1126,7 +1131,7 @@ function mock_exam_fetch_candidate_questions(PDO $pdo, string $qualificationId, 
         }
     }
 
-    $sql = 'SELECT DISTINCT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, q.created_at AS source_question_created_at, c.name AS course_name '
+    $sql = 'SELECT DISTINCT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, q.image_url, q.question_image_large_url, q.question_image_thumb_url, q.explanation_image_large_url, q.explanation_image_thumb_url, q.created_at AS source_question_created_at, c.name AS course_name '
         . 'FROM questions q INNER JOIN courses c ON c.id = ' . $scopeCourseExpr
         . ' WHERE ' . implode(' AND ', $where);
 
@@ -1626,6 +1631,11 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
             'selected_answer' => $selected,
             'is_flagged' => $aq['is_flagged'] ? ((int)($r[$aq['is_flagged']] ?? 0) === 1) : false,
             'is_answered' => $isAnswered,
+            'image_url' => $aq['image_url'] ? ($r[$aq['image_url']] ?? null) : ($aq['question_image_url'] ? ($r[$aq['question_image_url']] ?? null) : null),
+            'question_image_url' => $aq['question_image_url'] ? ($r[$aq['question_image_url']] ?? null) : ($aq['image_url'] ? ($r[$aq['image_url']] ?? null) : null),
+            'question_image_thumb_url' => $aq['question_image_thumb_url'] ? ($r[$aq['question_image_thumb_url']] ?? null) : null,
+            'explanation_image_url' => $aq['explanation_image_url'] ? ($r[$aq['explanation_image_url']] ?? null) : null,
+            'explanation_image_thumb_url' => $aq['explanation_image_thumb_url'] ? ($r[$aq['explanation_image_thumb_url']] ?? null) : null,
             'source_question_created_at' => $createdAtForBadge,
             'is_new_question' => is_question_new_by_created_at($createdAtForBadge, $newBadgeDays),
         ];
@@ -1634,7 +1644,6 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
             $item['correct_answer'] = $correct;
             $item['explanation'] = $explanation;
             $item['formatted_explanation'] = format_explanation_text((string)($explanation ?? ''));
-            $item['image_url'] = null;
             $item['is_correct'] = $isCorrect;
             $item['is_blank'] = !$isAnswered;
         }
@@ -2047,6 +2056,11 @@ function mock_exam_create_attempt(PDO $pdo, string $userId, array $payload): arr
                 'option_e' => $q['option_e'] ?? null,
                 'correct_answer' => $q['correct_answer'] ?? null,
                 'explanation' => $q['explanation'] ?? null,
+                'image_url' => $q['question_image_large_url'] ?? $q['image_url'] ?? null,
+                'question_image_url' => $q['question_image_large_url'] ?? $q['image_url'] ?? null,
+                'question_image_thumb_url' => $q['question_image_thumb_url'] ?? null,
+                'explanation_image_url' => $q['explanation_image_large_url'] ?? null,
+                'explanation_image_thumb_url' => $q['explanation_image_thumb_url'] ?? null,
                 'selected_answer' => null,
                 'is_flagged' => 0,
             ];

@@ -107,6 +107,10 @@ try {
         $hasCol('correct_answer') ? ($qc('correct_answer') . ' AS correct_answer') : "'' AS correct_answer",
         $hasCol('explanation') ? ($qc('explanation') . ' AS explanation') : "'' AS explanation",
         $hasCol('image_url') ? ($qc('image_url') . ' AS image_url') : 'NULL AS image_url',
+        $hasCol('question_image_large_url') ? ($qc('question_image_large_url') . ' AS question_image_large_url') : 'NULL AS question_image_large_url',
+        $hasCol('question_image_thumb_url') ? ($qc('question_image_thumb_url') . ' AS question_image_thumb_url') : 'NULL AS question_image_thumb_url',
+        $hasCol('explanation_image_large_url') ? ($qc('explanation_image_large_url') . ' AS explanation_image_large_url') : 'NULL AS explanation_image_large_url',
+        $hasCol('explanation_image_thumb_url') ? ($qc('explanation_image_thumb_url') . ' AS explanation_image_thumb_url') : 'NULL AS explanation_image_thumb_url',
         $hasCol('difficulty') ? ($qc('difficulty') . ' AS difficulty') : 'NULL AS difficulty',
         $hasCol('created_at') ? ($qc('created_at') . ' AS created_at') : 'NULL AS created_at',
     ];
@@ -437,6 +441,8 @@ try {
 
     $questions = array_map(static function (array $row) use ($newBadgeDays): array {
         $explanation = (string)($row['explanation'] ?? '');
+        $legacyImageUrl = $row['image_url'] ?? null;
+        $questionImageUrl = $row['question_image_large_url'] ?: $legacyImageUrl;
         return [
             'id' => (string)($row['id'] ?? ''),
             'topic_id' => (($row['topic_id'] ?? null) === '' ? null : ($row['topic_id'] ?? null)),
@@ -453,7 +459,11 @@ try {
             'correct_answer' => (string)($row['correct_answer'] ?? ''),
             'explanation' => $explanation,
             'formatted_explanation' => format_explanation_text($explanation),
-            'image_url' => $row['image_url'] ?? null,
+            'image_url' => $questionImageUrl,
+            'question_image_url' => $questionImageUrl,
+            'question_image_thumb_url' => $row['question_image_thumb_url'] ?? null,
+            'explanation_image_url' => $row['explanation_image_large_url'] ?? null,
+            'explanation_image_thumb_url' => $row['explanation_image_thumb_url'] ?? null,
             'difficulty' => $row['difficulty'] ?? null,
             'created_at' => $row['created_at'] ?? null,
             'is_new_question' => is_question_new_by_created_at($row['created_at'] ?? null, $newBadgeDays),

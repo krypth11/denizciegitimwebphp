@@ -5,6 +5,7 @@ require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/question_scope_helper.php';
+require_once '../includes/upload_helper.php';
 
 $user = require_admin();
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
@@ -24,6 +25,63 @@ function questions_json($success, $message = '', $data = [], $status = 200)
         'data' => $data,
     ], JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+function question_optional_image_file_present(array $file): bool
+{
+    return isset($file['error']) && (int)$file['error'] !== UPLOAD_ERR_NO_FILE && trim((string)($file['tmp_name'] ?? '')) !== '';
+}
+
+function store_question_optional_image(array $file, string $kind): array
+{
+    if (!question_optional_image_file_present($file)) {
+        return [];
+    }
+
+    if (!in_array($kind, ['question', 'explanation'], true)) {
+        throw new InvalidArgumentException('Geçersiz görsel türü.');
+    }
+
+    $subDir = 'images/' . date('Y') . '/' . date('m');
+    $saved = upload_store_image_fit_variants('questions', $subDir, $file, $kind . '-image', [
+        'large' => ['max_width' => 1200, 'max_height' => 1600, 'quality' => 82],
+        'thumb' => ['max_width' => 360, 'max_height' => 360, 'quality' => 74],
+    ]);
+
+    $prefix = $kind === 'question' ? 'question_image' : 'explanation_image';
+    return [
+        $prefix . '_large_url' => $saved['large']['public_url'] ?? null,
+        $prefix . '_large_path' => $saved['large']['relative_path'] ?? null,
+        $prefix . '_thumb_url' => $saved['thumb']['public_url'] ?? null,
+        $prefix . '_thumb_path' => $saved['thumb']['relative_path'] ?? null,
+    ];
+}
+
+function normalize_question_image_urls(array &$row): void
+{
+    foreach (['question_image_large', 'question_image_thumb', 'explanation_image_large', 'explanation_image_thumb'] as $base) {
+        $urlKey = $base . '_url';
+        $pathKey = $base . '_path';
+        if (empty($row[$urlKey]) && !empty($row[$pathKey])) {
+            $row[$urlKey] = upload_build_public_url((string)$row[$pathKey]);
+        }
+    }
+}
+
+function delete_question_image_kind_files(array $row, string $kind): void
+{
+    $prefix = $kind === 'question' ? 'question_image' : 'explanation_image';
+    foreach ([$prefix . '_large_path', $prefix . '_large_url', $prefix . '_thumb_path', $prefix . '_thumb_url'] as $key) {
+        if (!empty($row[$key])) {
+            upload_safe_delete((string)$row[$key], 'questions');
+        }
+    }
+}
+
+function delete_question_image_files(array $row): void
+{
+    delete_question_image_kind_files($row, 'question');
+    delete_question_image_kind_files($row, 'explanation');
 }
 
 try {
@@ -262,6 +320,7 @@ try {
             }
 
             foreach ($rows as &$row) {
+                normalize_question_image_urls($row);
                 $row['formatted_explanation'] = format_explanation_text($row['explanation'] ?? '');
             }
             unset($row);
@@ -343,62 +402,39 @@ try {
             }
 
             $id = generate_uuid();
+            $questionImageData = store_question_optional_image($_FILES['question_image'] ?? [], 'question');
+            $explanationImageData = store_question_optional_image($_FILES['explanation_image'] ?? [], 'explanation');
+            $imageData = array_merge($questionImageData, $explanationImageData);
 
             $pdo->beginTransaction();
             try {
-                if ($hasTopicId && $hasOptionE) {
-                    $stmt = $pdo->prepare(
-                        'INSERT INTO questions (
-                            id, course_id, topic_id, question_type, source_type, question_text,
-                            option_a, option_b, option_c, option_d, option_e,
-                            correct_answer, explanation, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                    );
-                    $ok = $stmt->execute([
-                        $id, $course_id, $topic_id, $question_type, $source_type, $question_text,
-                        $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
-                        $correct_answer, $explanation,
-                    ]);
-                } elseif ($hasTopicId) {
-                    $stmt = $pdo->prepare(
-                        'INSERT INTO questions (
-                            id, course_id, topic_id, question_type, source_type, question_text,
-                            option_a, option_b, option_c, option_d,
-                            correct_answer, explanation, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                    );
-                    $ok = $stmt->execute([
-                        $id, $course_id, $topic_id, $question_type, $source_type, $question_text,
-                        $option_a, $option_b, $option_c, $option_d,
-                        $correct_answer, $explanation,
-                    ]);
-                } elseif ($hasOptionE) {
-                    $stmt = $pdo->prepare(
-                        'INSERT INTO questions (
-                            id, course_id, question_type, source_type, question_text,
-                            option_a, option_b, option_c, option_d, option_e,
-                            correct_answer, explanation, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                    );
-                    $ok = $stmt->execute([
-                        $id, $course_id, $question_type, $source_type, $question_text,
-                        $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
-                        $correct_answer, $explanation,
-                    ]);
-                } else {
-                    $stmt = $pdo->prepare(
-                        'INSERT INTO questions (
-                            id, course_id, question_type, source_type, question_text,
-                            option_a, option_b, option_c, option_d,
-                            correct_answer, explanation, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                    );
-                    $ok = $stmt->execute([
-                        $id, $course_id, $question_type, $source_type, $question_text,
-                        $option_a, $option_b, $option_c, $option_d,
-                        $correct_answer, $explanation,
-                    ]);
+                $insertData = [
+                    'id' => $id,
+                    'course_id' => $course_id,
+                    'question_type' => $question_type,
+                    'source_type' => $source_type,
+                    'question_text' => $question_text,
+                    'option_a' => $option_a,
+                    'option_b' => $option_b,
+                    'option_c' => $option_c,
+                    'option_d' => $option_d,
+                    'correct_answer' => $correct_answer,
+                    'explanation' => $explanation,
+                ];
+                if ($hasTopicId) {
+                    $insertData['topic_id'] = $topic_id;
                 }
+                if ($hasOptionE) {
+                    $insertData['option_e'] = ($option_e !== '' ? $option_e : null);
+                }
+                $insertData = array_merge($insertData, $imageData);
+
+                $cols = array_keys($insertData);
+                $placeholders = array_fill(0, count($cols), '?');
+                $cols[] = 'created_at';
+                $placeholders[] = 'NOW()';
+                $stmt = $pdo->prepare('INSERT INTO questions (' . implode(', ', $cols) . ') VALUES (' . implode(', ', $placeholders) . ')');
+                $ok = $stmt->execute(array_values($insertData));
 
                 if (!$ok) {
                     throw new RuntimeException('Veritabanı hatası!');
@@ -413,6 +449,7 @@ try {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
+                delete_question_image_files($imageData);
                 throw $e;
             }
 
@@ -439,6 +476,7 @@ try {
             $data = $stmt->fetch();
 
             if ($data) {
+                normalize_question_image_urls($data);
                 echo json_encode([
                     'success' => true,
                     'data' => $data,
@@ -575,98 +613,68 @@ try {
 
             $pdo->beginTransaction();
             try {
-                if ($source_type === null) {
-                    $stmtCurrent = $pdo->prepare('SELECT source_type FROM questions WHERE id = ? LIMIT 1');
-                    $stmtCurrent->execute([$id]);
-                    $currentRow = $stmtCurrent->fetch(PDO::FETCH_ASSOC);
-                    $source_type = normalize_question_source_type($currentRow['source_type'] ?? 'scenario');
+                $stmtExisting = $pdo->prepare('SELECT * FROM questions WHERE id = ? LIMIT 1');
+                $stmtExisting->execute([$id]);
+                $existingQuestion = $stmtExisting->fetch(PDO::FETCH_ASSOC);
+                if (!$existingQuestion) {
+                    throw new RuntimeException('Soru bulunamadı!');
                 }
 
-                if ($hasTopicId && $hasOptionE) {
-                    $stmt = $pdo->prepare(
-                        'UPDATE questions SET
-                            course_id = ?,
-                            topic_id = ?,
-                            question_type = ?,
-                            source_type = ?,
-                            question_text = ?,
-                            option_a = ?,
-                            option_b = ?,
-                            option_c = ?,
-                            option_d = ?,
-                            option_e = ?,
-                            correct_answer = ?,
-                            explanation = ?
-                        WHERE id = ?'
-                    );
-                    $ok = $stmt->execute([
-                        $course_id, $topic_id, $question_type, $source_type, $question_text,
-                        $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
-                        $correct_answer, $explanation, $id,
-                    ]);
-                } elseif ($hasTopicId) {
-                    $stmt = $pdo->prepare(
-                        'UPDATE questions SET
-                            course_id = ?,
-                            topic_id = ?,
-                            question_type = ?,
-                            source_type = ?,
-                            question_text = ?,
-                            option_a = ?,
-                            option_b = ?,
-                            option_c = ?,
-                            option_d = ?,
-                            correct_answer = ?,
-                            explanation = ?
-                        WHERE id = ?'
-                    );
-                    $ok = $stmt->execute([
-                        $course_id, $topic_id, $question_type, $source_type, $question_text,
-                        $option_a, $option_b, $option_c, $option_d,
-                        $correct_answer, $explanation, $id,
-                    ]);
-                } elseif ($hasOptionE) {
-                    $stmt = $pdo->prepare(
-                        'UPDATE questions SET
-                            course_id = ?,
-                            question_type = ?,
-                            source_type = ?,
-                            question_text = ?,
-                            option_a = ?,
-                            option_b = ?,
-                            option_c = ?,
-                            option_d = ?,
-                            option_e = ?,
-                            correct_answer = ?,
-                            explanation = ?
-                        WHERE id = ?'
-                    );
-                    $ok = $stmt->execute([
-                        $course_id, $question_type, $source_type, $question_text,
-                        $option_a, $option_b, $option_c, $option_d, ($option_e !== '' ? $option_e : null),
-                        $correct_answer, $explanation, $id,
-                    ]);
-                } else {
-                    $stmt = $pdo->prepare(
-                        'UPDATE questions SET
-                            course_id = ?,
-                            question_type = ?,
-                            source_type = ?,
-                            question_text = ?,
-                            option_a = ?,
-                            option_b = ?,
-                            option_c = ?,
-                            option_d = ?,
-                            correct_answer = ?,
-                            explanation = ?
-                        WHERE id = ?'
-                    );
-                    $ok = $stmt->execute([
-                        $course_id, $question_type, $source_type, $question_text,
-                        $option_a, $option_b, $option_c, $option_d,
-                        $correct_answer, $explanation, $id,
-                    ]);
+                if ($source_type === null) {
+                    $source_type = normalize_question_source_type($existingQuestion['source_type'] ?? 'scenario');
                 }
+
+                $updateData = [
+                    'course_id' => $course_id,
+                    'question_type' => $question_type,
+                    'source_type' => $source_type,
+                    'question_text' => $question_text,
+                    'option_a' => $option_a,
+                    'option_b' => $option_b,
+                    'option_c' => $option_c,
+                    'option_d' => $option_d,
+                    'correct_answer' => $correct_answer,
+                    'explanation' => $explanation,
+                ];
+                if ($hasTopicId) {
+                    $updateData['topic_id'] = $topic_id;
+                }
+                if ($hasOptionE) {
+                    $updateData['option_e'] = ($option_e !== '' ? $option_e : null);
+                }
+
+                $newImageData = [];
+                foreach (['question', 'explanation'] as $kind) {
+                    $fileKey = $kind . '_image';
+                    $removeKey = 'remove_' . $kind . '_image';
+                    $remove = !empty($_POST[$removeKey]) && (string)$_POST[$removeKey] !== '0';
+                    $hasNewFile = question_optional_image_file_present($_FILES[$fileKey] ?? []);
+                    $prefix = $kind === 'question' ? 'question_image' : 'explanation_image';
+
+                    if ($remove || $hasNewFile) {
+                        delete_question_image_kind_files($existingQuestion, $kind);
+                        $updateData[$prefix . '_large_url'] = null;
+                        $updateData[$prefix . '_large_path'] = null;
+                        $updateData[$prefix . '_thumb_url'] = null;
+                        $updateData[$prefix . '_thumb_path'] = null;
+                    }
+
+                    if ($hasNewFile) {
+                        $stored = store_question_optional_image($_FILES[$fileKey], $kind);
+                        $newImageData = array_merge($newImageData, $stored);
+                        $updateData = array_merge($updateData, $stored);
+                    }
+                }
+
+                $sets = [];
+                $params = [];
+                foreach ($updateData as $col => $value) {
+                    $sets[] = $col . ' = ?';
+                    $params[] = $value;
+                }
+                $params[] = $id;
+                $stmt = $pdo->prepare('UPDATE questions SET ' . implode(', ', $sets) . ' WHERE id = ?');
+                $ok = $stmt->execute($params);
 
                 if (!empty($ok) && question_scope_has_links_table($pdo)) {
                     question_scope_replace_primary_from_question($pdo, $id);
@@ -676,6 +684,9 @@ try {
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
+                }
+                if (!empty($newImageData)) {
+                    delete_question_image_files($newImageData);
                 }
                 throw $e;
             }
@@ -726,6 +737,10 @@ try {
 
             $pdo->beginTransaction();
             try {
+                $stmtExisting = $pdo->prepare('SELECT * FROM questions WHERE id = ? LIMIT 1');
+                $stmtExisting->execute([$id]);
+                $existingQuestion = $stmtExisting->fetch(PDO::FETCH_ASSOC) ?: [];
+
                 if (question_scope_has_links_table($pdo)) {
                     $pdo->prepare('DELETE FROM question_scope_links WHERE question_id = ?')->execute([$id]);
                 }
@@ -737,6 +752,7 @@ try {
                 }
 
                 $pdo->commit();
+                delete_question_image_files($existingQuestion);
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
@@ -784,6 +800,10 @@ try {
 
             $pdo->beginTransaction();
             try {
+                $stmtRows = $pdo->prepare("SELECT * FROM questions WHERE id IN ($placeholders)");
+                $stmtRows->execute($valid_ids);
+                $rowsToDelete = $stmtRows->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
                 if (question_scope_has_links_table($pdo)) {
                     $stmtScope = $pdo->prepare("DELETE FROM question_scope_links WHERE question_id IN ($placeholders)");
                     $stmtScope->execute($valid_ids);
@@ -797,6 +817,10 @@ try {
 
                 $deleted = $stmt->rowCount();
                 $pdo->commit();
+
+                foreach ($rowsToDelete as $rowToDelete) {
+                    delete_question_image_files($rowToDelete);
+                }
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();

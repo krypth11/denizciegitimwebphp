@@ -313,6 +313,129 @@ function upload_create_webp_variant(
     }
 }
 
+function upload_create_webp_fit_variant(
+    string $sourceAbs,
+    string $targetAbs,
+    int $maxWidth,
+    int $maxHeight,
+    int $quality = 82
+): array {
+    if (!function_exists('imagewebp')) {
+        throw new RuntimeException('Sunucuda WebP üretimi desteklenmiyor.');
+    }
+
+    $dim = @getimagesize($sourceAbs);
+    if (!is_array($dim) || empty($dim['mime'])) {
+        throw new RuntimeException('Kaynak görsel doğrulanamadı.');
+    }
+
+    $srcW = max(1, (int)($dim[0] ?? 0));
+    $srcH = max(1, (int)($dim[1] ?? 0));
+    $mime = (string)$dim['mime'];
+
+    if ($mime === 'image/jpeg') {
+        $src = @imagecreatefromjpeg($sourceAbs);
+    } elseif ($mime === 'image/png') {
+        $src = @imagecreatefrompng($sourceAbs);
+    } elseif ($mime === 'image/webp') {
+        if (!function_exists('imagecreatefromwebp')) {
+            throw new RuntimeException('Sunucuda WebP üretimi desteklenmiyor.');
+        }
+        $src = @imagecreatefromwebp($sourceAbs);
+    } else {
+        throw new RuntimeException('Desteklenmeyen kaynak görsel türü.');
+    }
+
+    if (!$src) {
+        throw new RuntimeException('Kaynak görsel açılamadı.');
+    }
+
+    $scale = min(1.0, $maxWidth / $srcW, $maxHeight / $srcH);
+    $targetWidth = max(1, (int)floor($srcW * $scale));
+    $targetHeight = max(1, (int)floor($srcH * $scale));
+
+    $target = imagecreatetruecolor($targetWidth, $targetHeight);
+    if (!$target) {
+        imagedestroy($src);
+        throw new RuntimeException('Hedef görsel oluşturulamadı.');
+    }
+
+    imagealphablending($target, true);
+    imagesavealpha($target, false);
+    $white = imagecolorallocate($target, 255, 255, 255);
+    imagefilledrectangle($target, 0, 0, $targetWidth, $targetHeight, $white);
+
+    imagecopyresampled($target, $src, 0, 0, 0, 0, $targetWidth, $targetHeight, $srcW, $srcH);
+
+    upload_ensure_directory_ready(dirname($targetAbs));
+    $ok = @imagewebp($target, $targetAbs, max(0, min(100, $quality)));
+
+    imagedestroy($target);
+    imagedestroy($src);
+
+    if (!$ok) {
+        throw new RuntimeException('WebP dosyası kaydedilemedi.');
+    }
+
+    return [
+        'width' => $targetWidth,
+        'height' => $targetHeight,
+    ];
+}
+
+function upload_store_image_fit_variants(
+    string $module,
+    string $subDir,
+    array $file,
+    string $filenamePrefix,
+    array $variants
+): array {
+    $paths = upload_module_base_paths($module);
+    $safeSubDir = upload_sanitize_relative_path($subDir);
+    $targetAbsDir = $paths['base_abs'] . ($safeSubDir !== '' ? DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $safeSubDir) : '');
+    upload_ensure_directory_ready($targetAbsDir);
+
+    $validated = upload_validate_image_file($file, 6 * 1024 * 1024);
+    $uuid = function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16));
+    $uuid = str_replace('-', '', (string)$uuid);
+    $safePrefix = preg_replace('/[^a-z0-9\-]+/i', '-', strtolower(trim($filenamePrefix))) ?: 'image';
+    $safePrefix = trim($safePrefix, '-') ?: 'image';
+    $relativeDir = $paths['base_rel'] . ($safeSubDir !== '' ? '/' . $safeSubDir : '');
+
+    $saved = [];
+    try {
+        foreach ($variants as $name => $spec) {
+            $maxWidth = (int)($spec['max_width'] ?? $spec['width'] ?? 0);
+            $maxHeight = (int)($spec['max_height'] ?? $spec['height'] ?? 0);
+            $quality = (int)($spec['quality'] ?? 82);
+            if ($maxWidth < 1 || $maxHeight < 1) {
+                throw new RuntimeException('Variant ölçüleri geçersiz.');
+            }
+
+            $safeName = preg_replace('/[^a-z0-9\-]+/i', '-', strtolower((string)$name)) ?: 'variant';
+            $filename = $safePrefix . '-' . $uuid . '-' . trim($safeName, '-') . '.webp';
+            $targetAbs = $targetAbsDir . DIRECTORY_SEPARATOR . $filename;
+            $size = upload_create_webp_fit_variant($validated['tmp'], $targetAbs, $maxWidth, $maxHeight, $quality);
+            $relativePath = upload_sanitize_relative_path($relativeDir . '/' . $filename);
+
+            $saved[$name] = [
+                'public_url' => upload_build_public_url($relativePath),
+                'relative_path' => $relativePath,
+                'abs_path' => $targetAbs,
+                'width' => $size['width'],
+                'height' => $size['height'],
+            ];
+        }
+    } catch (Throwable $e) {
+        foreach ($saved as $item) {
+            upload_safe_delete((string)($item['relative_path'] ?? ''), $module);
+        }
+        throw $e;
+    }
+
+    return $saved;
+}
+
 function upload_store_image_variants(
     string $module,
     string $subDir,

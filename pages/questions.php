@@ -167,7 +167,7 @@ include '../includes/sidebar.php';
 <!-- Add / Edit modalları -->
 <div class="modal fade" id="addModal" tabindex="-1">
     <div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Yeni Soru Ekle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <form id="addForm"><div class="modal-body">
+        <form id="addForm" enctype="multipart/form-data"><div class="modal-body">
             <div class="row">
                 <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="add_course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" required><option value="">Seçiniz...</option><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
@@ -178,13 +178,17 @@ include '../includes/sidebar.php';
             <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e"></div></div>
             <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" required><option value="">Seçiniz...</option><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
             <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" rows="2"></textarea></div>
+            <div class="row">
+                <div class="col-md-6 mb-3"><label class="form-label">Soru Görseli <small class="text-muted">(opsiyonel)</small></label><input type="file" class="form-control" name="question_image" accept="image/jpeg,image/png,image/webp"><small class="text-muted">JPG, PNG veya WEBP. Oran korunarak optimize edilir.</small></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Açıklama Görseli <small class="text-muted">(opsiyonel)</small></label><input type="file" class="form-control" name="explanation_image" accept="image/jpeg,image/png,image/webp"><small class="text-muted">Sonuç/açıklama ekranları için opsiyonel görsel.</small></div>
+            </div>
         </div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button><button type="submit" class="btn btn-primary">Kaydet</button></div></form>
     </div></div>
 </div>
 
 <div class="modal fade" id="editModal" tabindex="-1">
     <div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Soru Düzenle</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <form id="editForm"><input type="hidden" name="id" id="edit_id"><div class="modal-body">
+        <form id="editForm" enctype="multipart/form-data"><input type="hidden" name="id" id="edit_id"><div class="modal-body">
             <div class="row">
                 <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="edit_course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" id="edit_question_type" required><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
@@ -195,6 +199,21 @@ include '../includes/sidebar.php';
             <div class="row"><div class="col-md-6 mb-3"><label class="form-label">A *</label><input type="text" class="form-control" name="option_a" id="edit_option_a" required></div><div class="col-md-6 mb-3"><label class="form-label">B *</label><input type="text" class="form-control" name="option_b" id="edit_option_b" required></div><div class="col-md-6 mb-3"><label class="form-label">C *</label><input type="text" class="form-control" name="option_c" id="edit_option_c" required></div><div class="col-md-6 mb-3"><label class="form-label">D *</label><input type="text" class="form-control" name="option_d" id="edit_option_d" required></div><div class="col-md-6 mb-3"><label class="form-label">Şık E (Opsiyonel)</label><input type="text" class="form-control" name="option_e" id="edit_option_e"></div></div>
             <div class="mb-3"><label class="form-label">Doğru Cevap *</label><select class="form-select" name="correct_answer" id="edit_correct_answer" required><option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option></select></div>
             <div class="mb-3"><label class="form-label">Açıklama</label><textarea class="form-control" name="explanation" id="edit_explanation" rows="2"></textarea></div>
+
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Soru Görseli <small class="text-muted">(opsiyonel)</small></label>
+                    <div class="mb-2 d-none" id="edit_question_image_preview_wrap"><img id="edit_question_image_preview" src="" alt="Soru görseli" class="img-thumbnail" style="max-height:120px;max-width:100%;object-fit:contain;"></div>
+                    <input type="file" class="form-control" name="question_image" id="edit_question_image" accept="image/jpeg,image/png,image/webp">
+                    <div class="form-check mt-2"><input class="form-check-input" type="checkbox" name="remove_question_image" value="1" id="remove_question_image"><label class="form-check-label" for="remove_question_image">Mevcut soru görselini kaldır</label></div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Açıklama Görseli <small class="text-muted">(opsiyonel)</small></label>
+                    <div class="mb-2 d-none" id="edit_explanation_image_preview_wrap"><img id="edit_explanation_image_preview" src="" alt="Açıklama görseli" class="img-thumbnail" style="max-height:120px;max-width:100%;object-fit:contain;"></div>
+                    <input type="file" class="form-control" name="explanation_image" id="edit_explanation_image" accept="image/jpeg,image/png,image/webp">
+                    <div class="form-check mt-2"><input class="form-check-input" type="checkbox" name="remove_explanation_image" value="1" id="remove_explanation_image"><label class="form-check-label" for="remove_explanation_image">Mevcut açıklama görselini kaldır</label></div>
+                </div>
+            </div>
 
             <div class="card border-0 bg-light" id="editScopeCard">
                 <div class="card-body">
@@ -1975,6 +1994,32 @@ $(document).ready(function() {
         `;
     }
 
+    function renderImageBadges(q) {
+        const badges = [];
+        if (q.question_image_thumb_url || q.question_image_large_url) {
+            badges.push('<span class="badge bg-secondary ms-1" title="Soru görseli"><i class="bi bi-image"></i> Soru görseli</span>');
+        }
+        if (q.explanation_image_thumb_url || q.explanation_image_large_url) {
+            badges.push('<span class="badge bg-light text-dark border ms-1" title="Açıklama görseli"><i class="bi bi-card-image"></i> Açıklama görseli</span>');
+        }
+        return badges.join('');
+    }
+
+    function setEditImagePreview(kind, url) {
+        const safeUrl = String(url || '');
+        const $wrap = $(`#edit_${kind}_image_preview_wrap`);
+        const $img = $(`#edit_${kind}_image_preview`);
+        $(`#remove_${kind}_image`).prop('checked', false);
+        $(`#edit_${kind}_image`).val('');
+        if (safeUrl) {
+            $img.attr('src', safeUrl);
+            $wrap.removeClass('d-none');
+        } else {
+            $img.attr('src', '');
+            $wrap.addClass('d-none');
+        }
+    }
+
     function renderDesktopRows(rows) {
         const $tb = $('#questionsTable tbody');
         if (!rows.length) {
@@ -1992,7 +2037,7 @@ $(document).ready(function() {
                         <div class="question-mobile-head">
                             <strong class="question-title-mobile question-title">${esc(shortText(q.question_text, 220))}</strong>
                         </div>
-                        <div class="mt-1">${typeBadge(q.question_type)}</div>
+                        <div class="mt-1">${typeBadge(q.question_type)}${renderImageBadges(q)}</div>
                         <div class="question-mobile-meta d-none">
                             <span>${esc(q.qualification_name || '-')}</span><span>/</span><span>${esc(q.course_name || '-')}</span>
                         </div>
@@ -2040,7 +2085,7 @@ $(document).ready(function() {
                             <div class="form-check">
                                 <input type="checkbox" class="form-check-input question-checkbox" value="${esc(q.id)}">
                             </div>
-                            <div>${typeBadge(q.question_type)}</div>
+                            <div>${typeBadge(q.question_type)}${renderImageBadges(q)}</div>
                         </div>
                         <div class="fw-semibold mt-2">${esc(shortText(q.question_text, 220))}</div>
                         <div class="small text-muted mt-1">${esc(q.qualification_name || '-')} / ${esc(q.course_name || '-')}</div>
@@ -2581,20 +2626,30 @@ $(document).ready(function() {
         if (addCorrect === 'E' && addOptionE === '') {
             return appAlert('Uyarı', 'Doğru cevap E ise Şık E (Opsiyonel) alanı doldurulmalıdır.', 'warning');
         }
-        $.post('../ajax/questions.php?action=add', $(this).serialize(), function(r){
-            if (r.success) {
-                appAlert('Başarılı', r.message, 'success');
-                setTimeout(() => location.reload(), 350);
-            } else {
-                appAlert('Hata', r.message, 'error');
+        $.ajax({
+            url: '../ajax/questions.php?action=add',
+            method: 'POST',
+            data: new FormData(this),
+            processData: false,
+            contentType: false,
+            dataType: 'json',
+            success: function(r){
+                if (r.success) {
+                    appAlert('Başarılı', r.message, 'success');
+                    setTimeout(() => location.reload(), 350);
+                } else {
+                    appAlert('Hata', r.message, 'error');
+                }
             }
-        }, 'json');
+        });
     });
     $(document).on('click', '.edit-btn', function(){
         const id=$(this).data('id');
         $.getJSON('../ajax/questions.php?action=get&id='+id, function(r){
             if(!r.success) return appAlert('Hata', r.message, 'error');
             const q=r.data;
+            setEditImagePreview('question', q.question_image_thumb_url || q.question_image_large_url || '');
+            setEditImagePreview('explanation', q.explanation_image_thumb_url || q.explanation_image_large_url || '');
             $('#edit_id').val(q.id); $('#edit_course_id').val(q.course_id); $('#edit_question_type').val(q.question_type);
             $('#edit_source_type').val(normalizeSourceType(q.source_type || 'scenario'));
             $('#edit_question_text').val(q.question_text); $('#edit_option_a').val(q.option_a); $('#edit_option_b').val(q.option_b);
@@ -2675,14 +2730,22 @@ $(document).ready(function() {
         if (editCorrect === 'E' && editOptionE === '') {
             return appAlert('Uyarı', 'Doğru cevap E ise Şık E (Opsiyonel) alanı doldurulmalıdır.', 'warning');
         }
-        $.post('../ajax/questions.php?action=update', $(this).serialize(), function(r){
-            if (r.success) {
-                appAlert('Başarılı', r.message, 'success');
-                setTimeout(() => location.reload(), 350);
-            } else {
-                appAlert('Hata', r.message, 'error');
+        $.ajax({
+            url: '../ajax/questions.php?action=update',
+            method: 'POST',
+            data: new FormData(this),
+            processData: false,
+            contentType: false,
+            dataType: 'json',
+            success: function(r){
+                if (r.success) {
+                    appAlert('Başarılı', r.message, 'success');
+                    setTimeout(() => location.reload(), 350);
+                } else {
+                    appAlert('Hata', r.message, 'error');
+                }
             }
-        }, 'json');
+        });
     });
     $(document).on('click', '.delete-btn', async function(){
         const id=$(this).data('id');
