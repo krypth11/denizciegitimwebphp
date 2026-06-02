@@ -39,6 +39,9 @@ try {
         ], 403);
     }
 
+    $usedCategoryId = $requestedCategoryId;
+    $autoCategoryId = null;
+
     try {
         if ($requestedCategoryId !== '') {
             $catStmt = $pdo->prepare('SELECT id, is_active FROM word_game_categories WHERE id = ? LIMIT 1');
@@ -56,7 +59,17 @@ try {
 
             $questions = word_game_pick_questions_for_category($pdo, $userId, $qualificationId, $requestedCategoryId);
         } else {
-            $questions = word_game_pick_questions($pdo, $qualificationId);
+            $autoCategoryId = word_game_find_best_category_for_qualification($pdo, $qualificationId);
+            if ($autoCategoryId === null || $autoCategoryId === '') {
+                api_send_json([
+                    'success' => false,
+                    'message' => 'Bu yeterlilik için aktif kelime oyunu başlığı veya uygun soru bulunamadı.',
+                    'data' => null,
+                ], 422);
+            }
+
+            $usedCategoryId = $autoCategoryId;
+            $questions = word_game_pick_questions_for_category($pdo, $userId, $qualificationId, $autoCategoryId);
         }
     } catch (RuntimeException $e) {
         $message = $e->getMessage();
@@ -85,6 +98,9 @@ try {
     }
 
     $created = word_game_session_create($pdo, $userId, $qualificationId, $questions);
+    $selectedTotalChars = array_sum(array_map(static fn(array $q): int => (int)($q['answer_length'] ?? 0), $questions));
+    $settings = word_game_get_runtime_settings($pdo);
+    $targetChars = (int)floor(max(1, (int)($settings['target_score'] ?? 10000)) / max(1, (int)($settings['points_per_char'] ?? 100)));
 
     $selectedDistribution = [];
     foreach (($questions ?? []) as $q) {
@@ -99,9 +115,14 @@ try {
 
     word_game_debug_log('word game start selected distribution result', [
         'user_id' => $userId,
+        'requested_category_id' => $requestedCategoryId,
+        'auto_selected_category_id' => $autoCategoryId,
         'qualification_id' => $qualificationId,
+        'used_category_id' => $usedCategoryId,
         'selected_distribution' => $selectedDistribution,
-        'selected_total' => count($questions),
+        'selected_question_count' => count($questions),
+        'selected_total_chars' => $selectedTotalChars,
+        'target_chars' => $targetChars,
     ]);
 
     word_game_debug_log('response debug answer_text', [
@@ -121,6 +142,7 @@ try {
         'data' => [
             'session_id' => (string)$created['session_id'],
             'qualification_id' => (string)$created['qualification_id'],
+            'category_id' => (string)$usedCategoryId,
             'duration_seconds' => (int)$created['duration_seconds'],
             'questions' => array_values($created['questions'] ?? []),
         ],
