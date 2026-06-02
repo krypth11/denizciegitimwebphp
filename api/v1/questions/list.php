@@ -32,10 +32,11 @@ try {
         api_error('Geçersiz pool_type.', 422);
     }
     $orderParam = strtolower(trim((string)($_GET['order'] ?? 'desc')));
+    $runtime = app_runtime_settings_get($pdo);
+    $newBadgeDays = app_runtime_settings_int($runtime, 'question_new_badge_days', 240);
 
     $allQuestionsPoolTypes = ['all', 'all_questions', 'all-questions', 'tum_sorular', 'tum-sorular'];
     if (in_array(strtolower(trim($poolTypeRaw)), $allQuestionsPoolTypes, true)) {
-        $runtime = app_runtime_settings_get($pdo);
         $allQuestionsMaxLimit = app_runtime_settings_int($runtime, 'study_all_questions_max_limit', 1000);
         $limit = api_get_int_query('limit', $allQuestionsMaxLimit, 1, $allQuestionsMaxLimit);
     } else {
@@ -434,7 +435,7 @@ try {
         }
     }
 
-    $questions = array_map(static function (array $row): array {
+    $questions = array_map(static function (array $row) use ($newBadgeDays): array {
         $explanation = (string)($row['explanation'] ?? '');
         return [
             'id' => (string)($row['id'] ?? ''),
@@ -455,6 +456,7 @@ try {
             'image_url' => $row['image_url'] ?? null,
             'difficulty' => $row['difficulty'] ?? null,
             'created_at' => $row['created_at'] ?? null,
+            'is_new_question' => is_question_new_by_created_at($row['created_at'] ?? null, $newBadgeDays),
             'wrong_score' => array_key_exists('wrong_score', $row) ? (int)$row['wrong_score'] : null,
         ];
     }, $rows);

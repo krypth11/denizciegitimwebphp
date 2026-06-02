@@ -1126,7 +1126,7 @@ function mock_exam_fetch_candidate_questions(PDO $pdo, string $qualificationId, 
         }
     }
 
-    $sql = 'SELECT DISTINCT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, c.name AS course_name '
+    $sql = 'SELECT DISTINCT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, q.created_at AS source_question_created_at, c.name AS course_name '
         . 'FROM questions q INNER JOIN courses c ON c.id = ' . $scopeCourseExpr
         . ' WHERE ' . implode(' AND ', $where);
 
@@ -1591,7 +1591,13 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
 {
     $aq = mock_exam_get_attempt_question_schema($pdo);
     $orderCol = $aq['order_index'] ?: $aq['id'];
-    $sql = 'SELECT * FROM ' . mock_exam_q($aq['table']) . ' WHERE ' . mock_exam_q($aq['attempt_id']) . ' = ? ORDER BY ' . mock_exam_q($orderCol) . ' ASC';
+    $runtimeSettings = app_runtime_settings_get($pdo);
+    $newBadgeDays = app_runtime_settings_int($runtimeSettings, 'question_new_badge_days', 240);
+    $sql = 'SELECT aq.*, qsrc.created_at AS source_question_created_at'
+        . ' FROM ' . mock_exam_q($aq['table']) . ' aq'
+        . ' LEFT JOIN questions qsrc ON qsrc.id = aq.' . mock_exam_q($aq['question_id'])
+        . ' WHERE aq.' . mock_exam_q($aq['attempt_id']) . ' = ?'
+        . ' ORDER BY aq.' . mock_exam_q($orderCol) . ' ASC';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$attemptId]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -1602,6 +1608,7 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
         $correct = $aq['correct_answer'] ? ($r[$aq['correct_answer']] ?? null) : null;
         $isAnswered = trim((string)$selected) !== '';
         $isCorrect = ($isAnswered && trim((string)$correct) !== '') ? (strtoupper((string)$selected) === strtoupper((string)$correct)) : null;
+        $createdAtForBadge = $r['source_question_created_at'] ?? null;
         $item = [
             'id' => (string)$r[$aq['id']],
             'question_id' => (string)$r[$aq['question_id']],
@@ -1619,6 +1626,8 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
             'selected_answer' => $selected,
             'is_flagged' => $aq['is_flagged'] ? ((int)($r[$aq['is_flagged']] ?? 0) === 1) : false,
             'is_answered' => $isAnswered,
+            'source_question_created_at' => $createdAtForBadge,
+            'is_new_question' => is_question_new_by_created_at($createdAtForBadge, $newBadgeDays),
         ];
         if ($withResultFields) {
             $explanation = $aq['explanation'] ? ($r[$aq['explanation']] ?? null) : null;

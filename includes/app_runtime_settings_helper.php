@@ -28,6 +28,7 @@ function app_runtime_settings_defaults(): array
         'kart_game_practice_daily_limit' => 20,
         'kart_game_ranked_free_plays' => 1,
         'kart_game_ranked_rewarded_plays' => 4,
+        'question_new_badge_days' => 240,
         'question_source_scenario_label' => 'Senaryo Tipi',
         'question_source_gasm_label' => 'GASM Tipi',
     ];
@@ -58,7 +59,28 @@ function app_runtime_settings_rules(): array
         'kart_game_practice_daily_limit' => ['min' => 0, 'max' => 999],
         'kart_game_ranked_free_plays' => ['min' => 0, 'max' => 999],
         'kart_game_ranked_rewarded_plays' => ['min' => 0, 'max' => 999],
+        'question_new_badge_days' => ['min' => 0, 'max' => 3650],
     ];
+}
+
+function is_question_new_by_created_at(?string $createdAt, int $days): bool
+{
+    if ($days <= 0) {
+        return false;
+    }
+
+    $raw = trim((string)($createdAt ?? ''));
+    if ($raw === '') {
+        return false;
+    }
+
+    try {
+        $created = new DateTimeImmutable($raw);
+        $threshold = (new DateTimeImmutable('now'))->sub(new DateInterval('P' . $days . 'D'));
+        return $created >= $threshold;
+    } catch (Throwable $e) {
+        return false;
+    }
 }
 
 function get_runtime_settings_row() {
