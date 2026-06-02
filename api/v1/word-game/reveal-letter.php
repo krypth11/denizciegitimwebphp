@@ -60,8 +60,51 @@ try {
         api_send_json(['success' => false, 'message' => 'Tamamlanan soruda harf açılamaz.', 'data' => null], 422);
     }
 
-    $result = word_game_reveal_letter($pdo, $sessionQuestion);
-    word_game_refresh_session_totals($pdo, $sessionId);
+    $pdo->beginTransaction();
+    word_game_debug_log('reveal transaction started', [
+        'transaction_started' => true,
+        'session_id' => $sessionId,
+        'session_question_id' => $sessionQuestionId,
+    ]);
+
+    try {
+        $lockedSessionQuestion = word_game_find_session_question_for_update($pdo, $sessionQuestionId, $sessionId);
+        if (!$lockedSessionQuestion) {
+            throw new RuntimeException('Oturum sorusu bulunamadı.');
+        }
+
+        if ((int)($lockedSessionQuestion['is_completed'] ?? 0) === 1) {
+            throw new RuntimeException('Tamamlanan soruda harf açılamaz.');
+        }
+
+        word_game_debug_log('reveal locked session question', [
+            'transaction_started' => $pdo->inTransaction(),
+            'locked_session_question_id' => (string)($lockedSessionQuestion['id'] ?? ''),
+            'revealed_indexes_json_before' => (string)($lockedSessionQuestion['revealed_indexes_json'] ?? '[]'),
+        ]);
+
+        $result = word_game_reveal_letter($pdo, $lockedSessionQuestion);
+        word_game_refresh_session_totals($pdo, $sessionId);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        word_game_debug_log('reveal transaction rollback', [
+            'endpoint' => 'word-game/reveal-letter',
+            'session_id' => $sessionId,
+            'session_question_id' => $sessionQuestionId,
+            'message' => $e->getMessage(),
+        ]);
+
+        $message = $e->getMessage() === 'Açılacak harf kalmadı.'
+            ? 'Açılacak harf kalmadı.'
+            : 'Harf açma işlemi başarısız oldu.';
+
+        api_send_json(word_game_build_error_response($message, $e), 422);
+    }
 
     api_send_json([
         'success' => true,
@@ -77,6 +120,10 @@ try {
         ],
     ]);
 } catch (Throwable $e) {
+    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
     word_game_debug_log('SQL error', [
         'endpoint' => 'word-game/reveal-letter',
         'message' => $e->getMessage(),

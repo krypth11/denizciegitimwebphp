@@ -950,6 +950,44 @@ function word_game_find_session_question(PDO $pdo, string $sessionQuestionId, st
     return $row ?: null;
 }
 
+function word_game_find_session_question_for_update(PDO $pdo, string $sessionQuestionId, string $sessionId): ?array
+{
+    $sqSchema = word_game_session_questions_schema($pdo);
+
+    $select = [
+        '`' . $sqSchema['id'] . '` AS id',
+        '`' . $sqSchema['session_id'] . '` AS session_id',
+        '`' . $sqSchema['word_game_question_id'] . '` AS word_game_question_id',
+        '`' . $sqSchema['question_order'] . '` AS question_order',
+        '`' . $sqSchema['question_text'] . '` AS question_text',
+        '`' . $sqSchema['answer_text'] . '` AS answer_text',
+        '`' . $sqSchema['answer_normalized'] . '` AS answer_normalized',
+        '`' . $sqSchema['answer_length'] . '` AS answer_length',
+        '`' . $sqSchema['max_score'] . '` AS max_score',
+        '`' . $sqSchema['letters_taken_count'] . '` AS letters_taken_count',
+        '`' . $sqSchema['wrong_attempt_count'] . '` AS wrong_attempt_count',
+        '`' . $sqSchema['earned_score'] . '` AS earned_score',
+        '`' . $sqSchema['is_correct'] . '` AS is_correct',
+        '`' . $sqSchema['is_completed'] . '` AS is_completed',
+        '`' . $sqSchema['revealed_indexes_json'] . '` AS revealed_indexes_json',
+        '`' . $sqSchema['submitted_answer'] . '` AS submitted_answer',
+        '`' . $sqSchema['completed_at'] . '` AS completed_at',
+    ];
+
+    $stmt = $pdo->prepare(
+        'SELECT ' . implode(', ', $select) . '
+         FROM `' . $sqSchema['table'] . '`
+         WHERE `' . $sqSchema['id'] . '` = ?
+           AND `' . $sqSchema['session_id'] . '` = ?
+         LIMIT 1
+         FOR UPDATE'
+    );
+    $stmt->execute([trim($sessionQuestionId), trim($sessionId)]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $row ?: null;
+}
+
 function word_game_build_answer_text_logical_map(string $answerText, string $answerNormalized): array
 {
     $map = [];
@@ -1069,6 +1107,8 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
     ]);
 
     word_game_debug_log('reveal letter index', [
+        'transaction_started' => $pdo->inTransaction(),
+        'locked_session_question_id' => $sessionQuestionId,
         'session_question_id' => $sessionQuestionId,
         'answer_text' => $answerText,
         'answer_normalized' => $answerNormalized,
@@ -1080,6 +1120,7 @@ function word_game_reveal_letter(PDO $pdo, array $sessionQuestion): array
         'revealed_indexes_json_before' => $revealedIndexesJsonBefore,
         'revealed_indexes_json_after' => $revealedIndexesJsonAfter,
         'letters_taken_count' => $lettersTakenCount,
+        'remaining_question_score' => $remainingScore,
     ]);
 
     return [
