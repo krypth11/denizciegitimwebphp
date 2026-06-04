@@ -119,6 +119,7 @@ function api_get_user_schema(PDO $pdo): array
         'full_name' => $pick(['full_name', 'name', 'display_name'], false),
         'is_admin' => $pick(['is_admin'], false),
         'is_deleted' => $pick(['is_deleted'], false),
+        'is_stats_archive' => $pick(['is_stats_archive'], false),
         'last_sign_in_at' => $pick(['last_sign_in_at', 'last_login_at'], false),
         'password' => $pick(['password_hash', 'hashed_password', 'password', 'pass_hash', 'passwd'], false),
     ];
@@ -159,6 +160,7 @@ function api_find_user_by_email(PDO $pdo, string $email): ?array
         $schema['full_name'] ? "`{$schema['full_name']}` AS full_name" : "'' AS full_name",
         $schema['is_admin'] ? "`{$schema['is_admin']}` AS is_admin" : '0 AS is_admin',
         $schema['is_deleted'] ? "`{$schema['is_deleted']}` AS is_deleted" : '0 AS is_deleted',
+        $schema['is_stats_archive'] ? "`{$schema['is_stats_archive']}` AS is_stats_archive" : '0 AS is_stats_archive',
         $schema['password'] ? "`{$schema['password']}` AS password_hash" : "'' AS password_hash",
     ];
 
@@ -174,6 +176,10 @@ function api_find_user_by_email(PDO $pdo, string $email): ?array
     }
 
     if (((int)($row['is_deleted'] ?? 0)) === 1) {
+        return null;
+    }
+
+    if (((int)($row['is_stats_archive'] ?? 0)) === 1) {
         return null;
     }
 
@@ -196,6 +202,7 @@ function api_find_user_by_id(PDO $pdo, string $userId): ?array
         $schema['full_name'] ? "`{$schema['full_name']}` AS full_name" : "'' AS full_name",
         $schema['is_admin'] ? "`{$schema['is_admin']}` AS is_admin" : '0 AS is_admin',
         $schema['is_deleted'] ? "`{$schema['is_deleted']}` AS is_deleted" : '0 AS is_deleted',
+        $schema['is_stats_archive'] ? "`{$schema['is_stats_archive']}` AS is_stats_archive" : '0 AS is_stats_archive',
     ];
 
     $sql = 'SELECT ' . implode(', ', $select)
@@ -205,7 +212,7 @@ function api_find_user_by_id(PDO $pdo, string $userId): ?array
     $stmt->execute([$userId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$row || ((int)($row['is_deleted'] ?? 0) === 1)) {
+    if (!$row || ((int)($row['is_deleted'] ?? 0) === 1) || ((int)($row['is_stats_archive'] ?? 0) === 1)) {
         return null;
     }
 
@@ -436,8 +443,11 @@ function api_find_active_user_id_by_auth_provider(PDO $pdo, string $provider, st
     $selectDeleted = $profileSchema['is_deleted']
         ? ('`u`.`' . $profileSchema['is_deleted'] . '` AS is_deleted')
         : '0 AS is_deleted';
+    $selectStatsArchive = $profileSchema['is_stats_archive']
+        ? ('`u`.`' . $profileSchema['is_stats_archive'] . '` AS is_stats_archive')
+        : '0 AS is_stats_archive';
 
-    $sql = 'SELECT p.`' . $providerSchema['user_id'] . '` AS user_id, ' . $selectDeleted
+    $sql = 'SELECT p.`' . $providerSchema['user_id'] . '` AS user_id, ' . $selectDeleted . ', ' . $selectStatsArchive
         . ' FROM `' . $providerSchema['table'] . '` p'
         . ' INNER JOIN `' . $profileSchema['table'] . '` u'
         . ' ON ' . $joinProviderUserIdExpr . ' = ' . $joinProfileIdExpr
@@ -454,6 +464,10 @@ function api_find_active_user_id_by_auth_provider(PDO $pdo, string $provider, st
     }
 
     if (((int)($row['is_deleted'] ?? 0)) === 1) {
+        return null;
+    }
+
+    if (((int)($row['is_stats_archive'] ?? 0)) === 1) {
         return null;
     }
 
@@ -794,6 +808,9 @@ function api_get_profile_schema(PDO $pdo): array
         'is_admin' => $pick(['is_admin'], false),
         'is_guest' => $pick(['is_guest', 'guest'], false),
         'is_deleted' => $pick(['is_deleted'], false),
+        'is_stats_archive' => $pick(['is_stats_archive'], false),
+        'archived_from_user_profile_id' => $pick(['archived_from_user_profile_id'], false),
+        'archived_at' => $pick(['archived_at'], false),
         'password' => $pick(['password_hash', 'hashed_password', 'password', 'pass_hash', 'passwd'], false),
         'current_qualification_id' => $pick(['current_qualification_id', 'qualification_id'], false),
         'target_qualification_id' => $pick(['target_qualification_id'], false),
@@ -819,6 +836,9 @@ function api_find_profile_by_user_id(PDO $pdo, string $userId): ?array
         $schema['full_name'] ? "`{$schema['full_name']}` AS full_name" : "'' AS full_name",
         $schema['is_admin'] ? "`{$schema['is_admin']}` AS is_admin" : '0 AS is_admin',
         $schema['is_guest'] ? "`{$schema['is_guest']}` AS is_guest" : '0 AS is_guest',
+        $schema['is_stats_archive'] ? "`{$schema['is_stats_archive']}` AS is_stats_archive" : '0 AS is_stats_archive',
+        $schema['archived_from_user_profile_id'] ? "`{$schema['archived_from_user_profile_id']}` AS archived_from_user_profile_id" : 'NULL AS archived_from_user_profile_id',
+        $schema['archived_at'] ? "`{$schema['archived_at']}` AS archived_at" : 'NULL AS archived_at',
         $schema['current_qualification_id'] ? "`{$schema['current_qualification_id']}` AS current_qualification_id" : 'NULL AS current_qualification_id',
         $schema['target_qualification_id'] ? "`{$schema['target_qualification_id']}` AS target_qualification_id" : 'NULL AS target_qualification_id',
         $schema['onboarding_completed'] ? "`{$schema['onboarding_completed']}` AS onboarding_completed" : '0 AS onboarding_completed',
@@ -872,6 +892,9 @@ function api_find_profile_by_user_id(PDO $pdo, string $userId): ?array
         'full_name' => $fullName,
         'is_admin' => ((int)($row['is_admin'] ?? 0) === 1),
         'is_guest' => (bool)$isGuest,
+        'is_stats_archive' => ((int)($row['is_stats_archive'] ?? 0) === 1),
+        'archived_from_user_profile_id' => $row['archived_from_user_profile_id'] ?? null,
+        'archived_at' => $row['archived_at'] ?? null,
         'current_qualification_id' => $row['current_qualification_id'] ?? null,
         'target_qualification_id' => $row['target_qualification_id'] ?? null,
         'onboarding_completed' => ((int)($row['onboarding_completed'] ?? 0) === 1),
@@ -1066,6 +1089,9 @@ function api_find_active_real_user_by_email(PDO $pdo, string $email): ?array
 
     if ($schema['is_deleted']) {
         $where[] = '`' . $schema['is_deleted'] . '` = 0';
+    }
+    if ($schema['is_stats_archive']) {
+        $where[] = '`' . $schema['is_stats_archive'] . '` = 0';
     }
 
     $orderBy = '1 DESC';
