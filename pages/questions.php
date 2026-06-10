@@ -172,6 +172,7 @@ include '../includes/sidebar.php';
                 <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="add_course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" required><option value="">Seçiniz...</option><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
                 <div class="col-md-6 mb-3"><label class="form-label">Soru Kaynak Tipi</label><select class="form-select" name="source_type"><option value="scenario"><?= htmlspecialchars($question_source_scenario_label) ?></option><option value="gasm"><?= htmlspecialchars($question_source_gasm_label) ?></option></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Etiket Durumu</label><select class="form-select" name="question_badge_type"><option value="normal" selected>Normal Soru</option><option value="new">Yeni Soru</option></select></div>
             </div>
             <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="add_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Konu seçmeden devam edebilirsiniz.</small></div>
             <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" rows="3" required></textarea></div>
@@ -193,6 +194,7 @@ include '../includes/sidebar.php';
                 <div class="col-md-6 mb-3"><label class="form-label">Ders *</label><select class="form-select" name="course_id" id="edit_course_id" required><option value="">Seçiniz...</option><?php foreach ($courses as $c): ?><option value="<?= htmlspecialchars($c['id']) ?>"><?= htmlspecialchars($c['qualification_name']) ?> - <?= htmlspecialchars($c['name']) ?></option><?php endforeach; ?></select></div>
                 <div class="col-md-6 mb-3"><label class="form-label">Tip *</label><select class="form-select" name="question_type" id="edit_question_type" required><option value="sayısal">Sayısal</option><option value="sözel">Sözel</option><option value="karışık">Karışık</option></select></div>
                 <div class="col-md-6 mb-3"><label class="form-label">Soru Kaynak Tipi</label><select class="form-select" name="source_type" id="edit_source_type"><option value="scenario"><?= htmlspecialchars($question_source_scenario_label) ?></option><option value="gasm"><?= htmlspecialchars($question_source_gasm_label) ?></option></select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Etiket Durumu</label><select class="form-select" name="question_badge_type" id="edit_question_badge_type"><option value="normal">Normal Soru</option><option value="new">Yeni Soru</option></select></div>
             </div>
             <div class="mb-3"><label class="form-label">Konu <small class="text-muted">(opsiyonel)</small></label><select class="form-select" name="topic_id" id="edit_topic_id" disabled><option value="">Önce ders seçin...</option></select><small class="text-muted">Konu alanı zorunlu değildir.</small></div>
             <div class="mb-3"><label class="form-label">Soru Metni *</label><textarea class="form-control" name="question_text" id="edit_question_text" rows="3" required></textarea></div>
@@ -319,6 +321,13 @@ include '../includes/sidebar.php';
                                 <option value="sayısal">Sayısal</option>
                             </select>
                         </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Etiket Durumu</label>
+                            <select class="form-select" id="bulk_question_badge_type">
+                                <option value="normal" selected>Normal Soru</option>
+                                <option value="new">Yeni Soru</option>
+                            </select>
+                        </div>
                     </div>
 
                     <div class="mt-3">
@@ -400,6 +409,13 @@ Cevap Anahtarı
                                 <option value="sayısal">Sayısal</option>
                             </select>
                         </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Etiket Durumu</label>
+                            <select class="form-select" id="latex_bulk_question_badge_type">
+                                <option value="normal" selected>Normal Soru</option>
+                                <option value="new">Yeni Soru</option>
+                            </select>
+                        </div>
                     </div>
 
                     <div class="alert alert-info mt-3 mb-0">
@@ -463,6 +479,10 @@ const questionSourceLabels = {
 
 function normalizeSourceType(v) {
     return (v === 'gasm') ? 'gasm' : 'scenario';
+}
+
+function normalizeQuestionBadgeType(v) {
+    return (v === 'new') ? 'new' : 'normal';
 }
 
 let generatedQuestions = [];
@@ -1731,7 +1751,8 @@ $(document).ready(function() {
                 qualification_id: $('#bulk_qualification_id').val() || '',
                 course_id: $('#bulk_course_id').val() || '',
                 topic_id: $('#bulk_topic_id').val() || '',
-                question_type: $('#bulk_question_type').val() || ''
+                question_type: $('#bulk_question_type').val() || '',
+                question_badge_type: normalizeQuestionBadgeType($('#bulk_question_badge_type').val() || 'normal')
             };
             console.log('bulk prefs save', payload);
             localStorage.setItem(BULK_UPLOAD_PREFS_STORAGE_KEY, JSON.stringify(payload));
@@ -1807,6 +1828,7 @@ $(document).ready(function() {
         const savedCourseId = String(savedPrefs.course_id || '');
         const savedTopicId = String(savedPrefs.topic_id || '');
         const savedQuestionType = String(savedPrefs.question_type || '');
+        const savedQuestionBadgeType = normalizeQuestionBadgeType(savedPrefs.question_badge_type || 'normal');
 
         if (savedQualificationId && $('#bulk_qualification_id option[value="' + savedQualificationId + '"]').length) {
             $('#bulk_qualification_id').val(savedQualificationId);
@@ -1839,6 +1861,8 @@ $(document).ready(function() {
         } else {
             $('#bulk_question_type').val('');
         }
+
+        $('#bulk_question_badge_type').val(savedQuestionBadgeType);
     }
 
     function getSavedLatexBulkUploadPrefs() {
@@ -1859,7 +1883,8 @@ $(document).ready(function() {
                 qualification_id: $('#latex_bulk_qualification_id').val() || '',
                 course_id: $('#latex_bulk_course_id').val() || '',
                 topic_id: $('#latex_bulk_topic_id').val() || '',
-                question_type: $('#latex_bulk_question_type').val() || ''
+                question_type: $('#latex_bulk_question_type').val() || '',
+                question_badge_type: normalizeQuestionBadgeType($('#latex_bulk_question_badge_type').val() || 'normal')
             };
             console.log('latex bulk prefs save', payload);
             localStorage.setItem(LATEX_BULK_UPLOAD_PREFS_STORAGE_KEY, JSON.stringify(payload));
@@ -1894,6 +1919,7 @@ $(document).ready(function() {
         const savedCourseId = String(savedPrefs.course_id || '');
         const savedTopicId = String(savedPrefs.topic_id || '');
         const savedQuestionType = String(savedPrefs.question_type || '');
+        const savedQuestionBadgeType = normalizeQuestionBadgeType(savedPrefs.question_badge_type || 'normal');
 
         if (savedQualificationId && $('#latex_bulk_qualification_id option[value="' + savedQualificationId + '"]').length) {
             $('#latex_bulk_qualification_id').val(savedQualificationId);
@@ -1926,6 +1952,8 @@ $(document).ready(function() {
         } else {
             $('#latex_bulk_question_type').val('');
         }
+
+        $('#latex_bulk_question_badge_type').val(savedQuestionBadgeType);
     }
 
     async function applySavedQuestionFilters(saved) {
@@ -1994,6 +2022,24 @@ $(document).ready(function() {
         `;
     }
 
+    function renderBadgeTypeToggle(id, badgeType) {
+        const active = normalizeQuestionBadgeType(badgeType);
+        const normalActive = active === 'normal' ? 'active' : '';
+        const newActive = active === 'new' ? 'active' : '';
+        return `
+            <div class="btn-group btn-group-sm badge-type-toggle" role="group" aria-label="badge type">
+                <button type="button" class="btn btn-outline-secondary badge-type-btn ${normalActive}" data-id="${esc(id)}" data-question-badge-type="normal">Normal</button>
+                <button type="button" class="btn btn-outline-secondary badge-type-btn ${newActive}" data-id="${esc(id)}" data-question-badge-type="new">Yeni</button>
+            </div>
+        `;
+    }
+
+    function renderQuestionBadge(q) {
+        return normalizeQuestionBadgeType(q.question_badge_type || 'normal') === 'new'
+            ? '<span class="badge bg-primary ms-1">Yeni Soru</span>'
+            : '';
+    }
+
     function renderImageBadges(q) {
         const badges = [];
         if (q.question_image_thumb_url || q.question_image_large_url) {
@@ -2029,6 +2075,7 @@ $(document).ready(function() {
 
         const html = rows.map((q) => {
             const sourceType = normalizeSourceType(q.source_type || 'scenario');
+            const badgeType = normalizeQuestionBadgeType(q.question_badge_type || 'normal');
             const optE = q.option_e ? `<div class="meq-option ${q.correct_answer === 'E' ? 'meq-option-correct' : ''}">E) ${esc(shortText(q.option_e))}</div>` : '';
             return `
                 <tr class="question-row-card desktop-question-row">
@@ -2037,7 +2084,7 @@ $(document).ready(function() {
                         <div class="question-mobile-head">
                             <strong class="question-title-mobile question-title">${esc(shortText(q.question_text, 220))}</strong>
                         </div>
-                        <div class="mt-1">${typeBadge(q.question_type)}${renderImageBadges(q)}</div>
+                        <div class="mt-1">${typeBadge(q.question_type)}${renderQuestionBadge(q)}${renderImageBadges(q)}</div>
                         <div class="question-mobile-meta d-none">
                             <span>${esc(q.qualification_name || '-')}</span><span>/</span><span>${esc(q.course_name || '-')}</span>
                         </div>
@@ -2056,6 +2103,7 @@ $(document).ready(function() {
                     <td class="questions-actions-cell">
                         <div class="table-actions questions-actions-wrap">
                             ${renderSourceToggle(q.id, sourceType)}
+                            ${renderBadgeTypeToggle(q.id, badgeType)}
                             <button class="btn btn-sm btn-warning edit-btn" data-id="${esc(q.id)}" title="Düzenle"><i class="bi bi-pencil"></i></button>
                             <button class="btn btn-sm btn-danger delete-btn" data-id="${esc(q.id)}" title="Sil"><i class="bi bi-trash"></i></button>
                         </div>
@@ -2077,6 +2125,7 @@ $(document).ready(function() {
 
         const html = rows.map((q) => {
             const sourceType = normalizeSourceType(q.source_type || 'scenario');
+            const badgeType = normalizeQuestionBadgeType(q.question_badge_type || 'normal');
             const optE = q.option_e ? `<div class="meq-option ${q.correct_answer === 'E' ? 'meq-option-correct' : ''}">E) ${esc(shortText(q.option_e))}</div>` : '';
             return `
                 <div class="card mb-3 meq-mobile-card">
@@ -2085,7 +2134,7 @@ $(document).ready(function() {
                             <div class="form-check">
                                 <input type="checkbox" class="form-check-input question-checkbox" value="${esc(q.id)}">
                             </div>
-                            <div>${typeBadge(q.question_type)}${renderImageBadges(q)}</div>
+                            <div>${typeBadge(q.question_type)}${renderQuestionBadge(q)}${renderImageBadges(q)}</div>
                         </div>
                         <div class="fw-semibold mt-2">${esc(shortText(q.question_text, 220))}</div>
                         <div class="small text-muted mt-1">${esc(q.qualification_name || '-')} / ${esc(q.course_name || '-')}</div>
@@ -2098,6 +2147,7 @@ $(document).ready(function() {
                         </div>
                         <div class="d-flex justify-content-end gap-2 mt-3">
                             ${renderSourceToggle(q.id, sourceType)}
+                            ${renderBadgeTypeToggle(q.id, badgeType)}
                             <button class="btn btn-sm btn-warning edit-btn" data-id="${esc(q.id)}"><i class="bi bi-pencil"></i> Düzenle</button>
                             <button class="btn btn-sm btn-danger delete-btn" data-id="${esc(q.id)}"><i class="bi bi-trash"></i> Sil</button>
                         </div>
@@ -2415,6 +2465,10 @@ $(document).ready(function() {
         saveBulkUploadPrefs();
     });
 
+    $('#bulk_question_badge_type').on('change', function() {
+        saveBulkUploadPrefs();
+    });
+
     $('#latex_bulk_qualification_id').on('change', function() {
         const qualId = $(this).val();
         $('#latex_bulk_course_id').val('');
@@ -2440,6 +2494,10 @@ $(document).ready(function() {
         saveLatexBulkUploadPrefs();
     });
 
+    $('#latex_bulk_question_badge_type').on('change', function() {
+        saveLatexBulkUploadPrefs();
+    });
+
     $('#bulkUploadForm').on('submit', function(e) {
         e.preventDefault();
 
@@ -2447,6 +2505,7 @@ $(document).ready(function() {
         const courseId = $('#bulk_course_id').val();
         const topicId = $('#bulk_topic_id').val() || '';
         const questionType = $('#bulk_question_type').val();
+        const questionBadgeType = normalizeQuestionBadgeType($('#bulk_question_badge_type').val() || 'normal');
         const rawText = $('#bulk_questions_text').val();
 
         if (!qualificationId) return appAlert('Uyarı', 'Lütfen yeterlilik seçiniz.', 'warning');
@@ -2459,12 +2518,17 @@ $(document).ready(function() {
             return appAlert('Hata', 'Hiç soru ayrıştırılamadı. Format hatalı olabilir.', 'error');
         }
 
-        generatedQuestions = parsedResult.parsed.map(q => ({ ...q, source_type: normalizeSourceType(q.source_type || 'scenario') }));
+        generatedQuestions = parsedResult.parsed.map(q => ({
+            ...q,
+            source_type: normalizeSourceType(q.source_type || 'scenario'),
+            question_badge_type: questionBadgeType
+        }));
         generationMeta = {
             source: 'bulk',
             parsed_count: parsedResult.parsed_count,
             skipped_count: parsedResult.skipped_count,
-            total_blocks: parsedResult.total_blocks
+            total_blocks: parsedResult.total_blocks,
+            question_badge_type: questionBadgeType
         };
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('bulkUploadModal')).hide();
@@ -2489,6 +2553,7 @@ $(document).ready(function() {
         const courseId = $('#latex_bulk_course_id').val();
         const topicId = $('#latex_bulk_topic_id').val() || '';
         const questionType = $('#latex_bulk_question_type').val();
+        const questionBadgeType = normalizeQuestionBadgeType($('#latex_bulk_question_badge_type').val() || 'normal');
         const rawText = $('#latex_bulk_questions_text').val();
 
         if (!qualificationId) return appAlert('Uyarı', 'Lütfen yeterlilik seçiniz.', 'warning');
@@ -2512,12 +2577,17 @@ $(document).ready(function() {
             return appAlert('Hata', buildLatexParseErrorMessage(parsedResult), 'error');
         }
 
-        generatedQuestions = parsedResult.parsed.map(q => ({ ...q, source_type: normalizeSourceType(q.source_type || 'scenario') }));
+        generatedQuestions = parsedResult.parsed.map(q => ({
+            ...q,
+            source_type: normalizeSourceType(q.source_type || 'scenario'),
+            question_badge_type: questionBadgeType
+        }));
         generationMeta = {
             source: 'latex_bulk',
             parsed_count: parsedResult.parsed_count,
             skipped_count: parsedResult.skipped_count,
-            total_blocks: parsedResult.total_blocks
+            total_blocks: parsedResult.total_blocks,
+            question_badge_type: questionBadgeType
         };
 
         bootstrap.Modal.getOrCreateInstance(document.getElementById('latexBulkUploadModal')).hide();
@@ -2652,6 +2722,7 @@ $(document).ready(function() {
             setEditImagePreview('explanation', q.explanation_image_thumb_url || q.explanation_image_large_url || '');
             $('#edit_id').val(q.id); $('#edit_course_id').val(q.course_id); $('#edit_question_type').val(q.question_type);
             $('#edit_source_type').val(normalizeSourceType(q.source_type || 'scenario'));
+            $('#edit_question_badge_type').val(normalizeQuestionBadgeType(q.question_badge_type || 'normal'));
             $('#edit_question_text').val(q.question_text); $('#edit_option_a').val(q.option_a); $('#edit_option_b').val(q.option_b);
             $('#edit_option_c').val(q.option_c); $('#edit_option_d').val(q.option_d); $('#edit_option_e').val(q.option_e || ''); $('#edit_correct_answer').val((q.correct_answer || '').toUpperCase()); $('#edit_explanation').val(q.explanation||'');
             loadTopicsByCourse(q.course_id || '', $('#edit_topic_id'), {
@@ -2797,6 +2868,37 @@ $(document).ready(function() {
         }
     });
 
+    $(document).on('click', '.badge-type-btn', async function() {
+        const $btn = $(this);
+        const id = String($btn.data('id') || '');
+        const questionBadgeType = normalizeQuestionBadgeType(String($btn.data('question-badge-type') || 'normal'));
+        if (!id) return;
+
+        const $group = $btn.closest('.badge-type-toggle');
+        $group.find('.badge-type-btn').prop('disabled', true);
+
+        try {
+            const res = await window.appAjax({
+                url: '../ajax/questions.php?action=update_badge_type',
+                method: 'POST',
+                dataType: 'json',
+                data: { id, question_badge_type: questionBadgeType }
+            });
+            if (!res.success) {
+                appAlert('Hata', res.message || 'Etiket durumu güncellenemedi.', 'error');
+                return;
+            }
+
+            $group.find('.badge-type-btn').removeClass('active');
+            $group.find(`.badge-type-btn[data-question-badge-type="${questionBadgeType}"]`).addClass('active');
+            await loadQuestions();
+        } catch (err) {
+            appAlert('Hata', err?.message || 'Etiket durumu güncellenemedi.', 'error');
+        } finally {
+            $group.find('.badge-type-btn').prop('disabled', false);
+        }
+    });
+
     $('#aiForm').on('submit', function(e){
         e.preventDefault();
         const count = normalizeCount($('#ai_question_count').val());
@@ -2885,8 +2987,11 @@ $(document).ready(function() {
                 item.option_e = null;
             }
             item.source_type = normalizeSourceType(item.source_type || 'scenario');
+            item.question_badge_type = normalizeQuestionBadgeType(item.question_badge_type || 'normal');
             return item;
         });
+
+        const saveBadgeType = normalizeQuestionBadgeType(generationMeta?.question_badge_type || normalizedApproved[0]?.question_badge_type || 'normal');
 
         const ok = await appConfirm(
             'Kaydetme Onayı',
@@ -2907,7 +3012,7 @@ $(document).ready(function() {
             dataType: 'json',
             xhrFields: { withCredentials: true },
             headers: { 'X-Requested-With': 'XMLHttpRequest' },
-            data: { questions: JSON.stringify(normalizedApproved) },
+            data: { questions: JSON.stringify(normalizedApproved), question_badge_type: saveBadgeType },
             success: function(r){
                 console.log('SAVE RESPONSE SUCCESS', r);
                 const skipSummary = formatSkipSummary(r);

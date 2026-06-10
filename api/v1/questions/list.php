@@ -33,7 +33,6 @@ try {
     }
     $orderParam = strtolower(trim((string)($_GET['order'] ?? 'desc')));
     $runtime = app_runtime_settings_get($pdo);
-    $newBadgeDays = app_runtime_settings_int($runtime, 'question_new_badge_days', 240);
 
     $allQuestionsPoolTypes = ['all', 'all_questions', 'all-questions', 'tum_sorular', 'tum-sorular'];
     if (in_array(strtolower(trim($poolTypeRaw)), $allQuestionsPoolTypes, true)) {
@@ -112,6 +111,7 @@ try {
         $hasCol('explanation_image_large_url') ? ($qc('explanation_image_large_url') . ' AS explanation_image_large_url') : 'NULL AS explanation_image_large_url',
         $hasCol('explanation_image_thumb_url') ? ($qc('explanation_image_thumb_url') . ' AS explanation_image_thumb_url') : 'NULL AS explanation_image_thumb_url',
         $hasCol('difficulty') ? ($qc('difficulty') . ' AS difficulty') : 'NULL AS difficulty',
+        $hasCol('question_badge_type') ? ($qc('question_badge_type') . ' AS question_badge_type') : "'normal' AS question_badge_type",
         $hasCol('created_at') ? ($qc('created_at') . ' AS created_at') : 'NULL AS created_at',
     ];
 
@@ -439,10 +439,11 @@ try {
         }
     }
 
-    $questions = array_map(static function (array $row) use ($newBadgeDays): array {
+    $questions = array_map(static function (array $row): array {
         $explanation = (string)($row['explanation'] ?? '');
         $legacyImageUrl = $row['image_url'] ?? null;
         $questionImageUrl = $row['question_image_large_url'] ?: $legacyImageUrl;
+        $badgeType = ((string)($row['question_badge_type'] ?? 'normal') === 'new') ? 'new' : 'normal';
         return [
             'id' => (string)($row['id'] ?? ''),
             'topic_id' => (($row['topic_id'] ?? null) === '' ? null : ($row['topic_id'] ?? null)),
@@ -466,7 +467,8 @@ try {
             'explanation_image_thumb_url' => $row['explanation_image_thumb_url'] ?? null,
             'difficulty' => $row['difficulty'] ?? null,
             'created_at' => $row['created_at'] ?? null,
-            'is_new_question' => is_question_new_by_created_at($row['created_at'] ?? null, $newBadgeDays),
+            'question_badge_type' => $badgeType,
+            'is_new_question' => $badgeType === 'new',
             'wrong_score' => array_key_exists('wrong_score', $row) ? (int)$row['wrong_score'] : null,
         ];
     }, $rows);

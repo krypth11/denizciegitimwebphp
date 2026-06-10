@@ -16,6 +16,12 @@ function normalize_question_source_type($value): string
     return in_array($sourceType, ['scenario', 'gasm'], true) ? $sourceType : 'scenario';
 }
 
+function normalize_question_badge_type($value): string
+{
+    $badgeType = strtolower(trim((string)$value));
+    return in_array($badgeType, ['normal', 'new'], true) ? $badgeType : 'normal';
+}
+
 function questions_json($success, $message = '', $data = [], $status = 200)
 {
     http_response_code($status);
@@ -90,6 +96,7 @@ try {
     $hasTopicId = is_array($questionCols) && in_array('topic_id', $questionCols, true);
     $hasStatus = is_array($questionCols) && in_array('status', $questionCols, true);
     $hasIsActive = is_array($questionCols) && in_array('is_active', $questionCols, true);
+    $hasQuestionBadgeType = is_array($questionCols) && in_array('question_badge_type', $questionCols, true);
 
     switch ($action) {
         case 'list_qualifications':
@@ -366,6 +373,7 @@ try {
             $topic_id = normalize_optional_uuid($_POST['topic_id'] ?? null);
             $question_type = $_POST['question_type'] ?? '';
             $source_type = normalize_question_source_type($_POST['source_type'] ?? 'scenario');
+            $question_badge_type = normalize_question_badge_type($_POST['question_badge_type'] ?? 'normal');
             $question_text = sanitize_input($_POST['question_text'] ?? '');
             $option_a = sanitize_input($_POST['option_a'] ?? '');
             $option_b = sanitize_input($_POST['option_b'] ?? '');
@@ -426,6 +434,9 @@ try {
                 }
                 if ($hasOptionE) {
                     $insertData['option_e'] = ($option_e !== '' ? $option_e : null);
+                }
+                if ($hasQuestionBadgeType) {
+                    $insertData['question_badge_type'] = $question_badge_type;
                 }
                 $insertData = array_merge($insertData, $imageData);
 
@@ -543,6 +554,7 @@ try {
             $source_type = array_key_exists('source_type', $_POST)
                 ? normalize_question_source_type($_POST['source_type'])
                 : null;
+            $question_badge_type = normalize_question_badge_type($_POST['question_badge_type'] ?? 'normal');
             $question_text = sanitize_input($_POST['question_text'] ?? '');
             $option_a = sanitize_input($_POST['option_a'] ?? '');
             $option_b = sanitize_input($_POST['option_b'] ?? '');
@@ -642,6 +654,9 @@ try {
                 if ($hasOptionE) {
                     $updateData['option_e'] = ($option_e !== '' ? $option_e : null);
                 }
+                if ($hasQuestionBadgeType) {
+                    $updateData['question_badge_type'] = $question_badge_type;
+                }
 
                 $newImageData = [];
                 foreach (['question', 'explanation'] as $kind) {
@@ -722,6 +737,30 @@ try {
                 questions_json(false, 'Güncelleme başarısız!', [], 500);
             }
             questions_json(true, 'Soru kaynak tipi güncellendi.');
+            break;
+
+        case 'update_badge_type':
+            $id = trim((string)($_POST['id'] ?? ''));
+            $badgeTypeRaw = $_POST['question_badge_type'] ?? '';
+            if ($id === '') {
+                questions_json(false, 'ID gerekli!', [], 422);
+            }
+
+            $badgeType = strtolower(trim((string)$badgeTypeRaw));
+            if (!in_array($badgeType, ['normal', 'new'], true)) {
+                questions_json(false, 'Geçersiz question_badge_type!', [], 422);
+            }
+
+            if (!$hasQuestionBadgeType) {
+                questions_json(false, 'question_badge_type kolonu bulunamadı.', [], 422);
+            }
+
+            $stmt = $pdo->prepare('UPDATE questions SET question_badge_type = ?, updated_at = NOW() WHERE id = ?');
+            $ok = $stmt->execute([$badgeType, $id]);
+            if (!$ok) {
+                questions_json(false, 'Güncelleme başarısız!', [], 500);
+            }
+            questions_json(true, 'Soru etiket durumu güncellendi.');
             break;
 
         case 'delete':
@@ -843,6 +882,7 @@ try {
 
         case 'save_generated':
             $questions_json = $_POST['questions'] ?? '';
+            $bulkBadgeType = normalize_question_badge_type($_POST['question_badge_type'] ?? 'normal');
             if ($questions_json === '') {
                 questions_json(false, 'Soru verisi gönderilmedi!', [], 422);
             }
@@ -860,40 +900,6 @@ try {
                 'sözel' => 'sözel',
                 'sayısal' => 'sayısal',
             ];
-
-            if ($hasTopicId && $hasOptionE) {
-                $stmt = $pdo->prepare(
-                    'INSERT INTO questions (
-                        id, course_id, topic_id, question_type, source_type, question_text,
-                        option_a, option_b, option_c, option_d, option_e,
-                        correct_answer, explanation, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                );
-            } elseif ($hasTopicId) {
-                $stmt = $pdo->prepare(
-                    'INSERT INTO questions (
-                        id, course_id, topic_id, question_type, source_type, question_text,
-                        option_a, option_b, option_c, option_d,
-                        correct_answer, explanation, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                );
-            } elseif ($hasOptionE) {
-                $stmt = $pdo->prepare(
-                    'INSERT INTO questions (
-                        id, course_id, question_type, source_type, question_text,
-                        option_a, option_b, option_c, option_d, option_e,
-                        correct_answer, explanation, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                );
-            } else {
-                $stmt = $pdo->prepare(
-                    'INSERT INTO questions (
-                        id, course_id, question_type, source_type, question_text,
-                        option_a, option_b, option_c, option_d,
-                        correct_answer, explanation, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())'
-                );
-            }
 
             $savedCount = 0;
             $skippedCount = 0;
@@ -950,31 +956,35 @@ try {
                 }
 
                 $id = generate_uuid();
-                if ($hasTopicId && $hasOptionE) {
-                    $ok = $stmt->execute([
-                        $id, $courseId, $topicId, $normalizedType, $sourceType, $questionText,
-                        $optionA, $optionB, $optionC, $optionD, ($optionE !== '' ? $optionE : null),
-                        $correctAnswer, $explanation,
-                    ]);
-                } elseif ($hasTopicId) {
-                    $ok = $stmt->execute([
-                        $id, $courseId, $topicId, $normalizedType, $sourceType, $questionText,
-                        $optionA, $optionB, $optionC, $optionD,
-                        $correctAnswer, $explanation,
-                    ]);
-                } elseif ($hasOptionE) {
-                    $ok = $stmt->execute([
-                        $id, $courseId, $normalizedType, $sourceType, $questionText,
-                        $optionA, $optionB, $optionC, $optionD, ($optionE !== '' ? $optionE : null),
-                        $correctAnswer, $explanation,
-                    ]);
-                } else {
-                    $ok = $stmt->execute([
-                        $id, $courseId, $normalizedType, $sourceType, $questionText,
-                        $optionA, $optionB, $optionC, $optionD,
-                        $correctAnswer, $explanation,
-                    ]);
+                $insertData = [
+                    'id' => $id,
+                    'course_id' => $courseId,
+                    'question_type' => $normalizedType,
+                    'source_type' => $sourceType,
+                    'question_text' => $questionText,
+                    'option_a' => $optionA,
+                    'option_b' => $optionB,
+                    'option_c' => $optionC,
+                    'option_d' => $optionD,
+                    'correct_answer' => $correctAnswer,
+                    'explanation' => $explanation,
+                ];
+                if ($hasTopicId) {
+                    $insertData['topic_id'] = $topicId;
                 }
+                if ($hasOptionE) {
+                    $insertData['option_e'] = ($optionE !== '' ? $optionE : null);
+                }
+                if ($hasQuestionBadgeType) {
+                    $insertData['question_badge_type'] = $bulkBadgeType;
+                }
+
+                $cols = array_keys($insertData);
+                $placeholders = array_fill(0, count($cols), '?');
+                $cols[] = 'created_at';
+                $placeholders[] = 'NOW()';
+                $stmt = $pdo->prepare('INSERT INTO questions (' . implode(', ', $cols) . ') VALUES (' . implode(', ', $placeholders) . ')');
+                $ok = $stmt->execute(array_values($insertData));
 
                 if (!$ok) {
                     $skippedCount++;

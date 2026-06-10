@@ -90,11 +90,6 @@ include '../includes/sidebar.php';
                         <input type="number" class="form-control" id="kart_game_ranked_rewarded_plays" name="kart_game_ranked_rewarded_plays" min="0" max="999" step="1" value="4" required>
                         <div class="form-text">Premium olmayan kullanıcıların reklam izleyerek kullanabileceği ekstra sıralı mod hakkı. Toplam sıralı mod hakkı genel sıralı mod limitini aşamaz.</div>
                     </div>
-                    <div class="col-12 col-lg-6">
-                        <label class="form-label" for="question_new_badge_days">Yeni soru etiketi gün sayısı</label>
-                        <input type="number" class="form-control" id="question_new_badge_days" name="question_new_badge_days" min="0" max="3650" step="1" value="240" required>
-                        <div class="form-text">Çalışma ve deneme modunda, bu gün sayısı içinde eklenen sorular Yeni Soru etiketiyle gösterilir. 0 = kapalı.</div>
-                    </div>
                 </div>
 
                 <hr class="my-4">
@@ -136,8 +131,7 @@ $(function () {
         kart_game_daily_attempt_limit: { min: 0, max: 100 },
         kart_game_practice_daily_limit: { min: 0, max: 999 },
         kart_game_ranked_free_plays: { min: 0, max: 999 },
-        kart_game_ranked_rewarded_plays: { min: 0, max: 999 },
-        question_new_badge_days: { min: 0, max: 3650 }
+        kart_game_ranked_rewarded_plays: { min: 0, max: 999 }
     };
     const textFieldRules = {
         question_source_scenario_label: { fallback: 'Senaryo Tipi', max: 100 },

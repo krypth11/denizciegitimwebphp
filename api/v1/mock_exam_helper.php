@@ -707,6 +707,7 @@ function mock_exam_get_attempt_question_schema(PDO $pdo): array
         'question_image_thumb_url' => mock_exam_pick($cols, ['question_image_thumb_url'], false),
         'explanation_image_url' => mock_exam_pick($cols, ['explanation_image_url'], false),
         'explanation_image_thumb_url' => mock_exam_pick($cols, ['explanation_image_thumb_url'], false),
+        'question_badge_type' => mock_exam_pick($cols, ['question_badge_type'], false),
         'selected_answer' => mock_exam_pick($cols, ['selected_answer'], false),
         'is_correct' => mock_exam_pick($cols, ['is_correct'], false),
         'answered_at' => mock_exam_pick($cols, ['answered_at'], false),
@@ -1101,6 +1102,8 @@ function mock_exam_fetch_candidate_questions(PDO $pdo, string $qualificationId, 
     }
 
     $scopeAvailable = mock_exam_has_scope_links_table($pdo);
+    $questionCols = get_table_columns($pdo, 'questions') ?: [];
+    $questionBadgeExpr = in_array('question_badge_type', $questionCols, true) ? 'q.question_badge_type' : "'normal'";
     $scopeCourseExpr = 'q.course_id';
     $scopeTopicExpr = 'q.topic_id';
     $where = [];
@@ -1131,7 +1134,7 @@ function mock_exam_fetch_candidate_questions(PDO $pdo, string $qualificationId, 
         }
     }
 
-    $sql = 'SELECT DISTINCT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, q.image_url, q.question_image_large_url, q.question_image_thumb_url, q.explanation_image_large_url, q.explanation_image_thumb_url, q.created_at AS source_question_created_at, c.name AS course_name '
+    $sql = 'SELECT DISTINCT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, q.image_url, q.question_image_large_url, q.question_image_thumb_url, q.explanation_image_large_url, q.explanation_image_thumb_url, ' . $questionBadgeExpr . ' AS question_badge_type, q.created_at AS source_question_created_at, c.name AS course_name '
         . 'FROM questions q INNER JOIN courses c ON c.id = ' . $scopeCourseExpr
         . ' WHERE ' . implode(' AND ', $where);
 
@@ -1596,9 +1599,11 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
 {
     $aq = mock_exam_get_attempt_question_schema($pdo);
     $orderCol = $aq['order_index'] ?: $aq['id'];
-    $runtimeSettings = app_runtime_settings_get($pdo);
-    $newBadgeDays = app_runtime_settings_int($runtimeSettings, 'question_new_badge_days', 240);
-    $sql = 'SELECT aq.*, qsrc.created_at AS source_question_created_at'
+    $questionCols = get_table_columns($pdo, 'questions') ?: [];
+    $sourceQuestionBadgeSelect = in_array('question_badge_type', $questionCols, true)
+        ? 'qsrc.question_badge_type'
+        : "'normal'";
+    $sql = 'SELECT aq.*, qsrc.created_at AS source_question_created_at, ' . $sourceQuestionBadgeSelect . ' AS source_question_badge_type'
         . ' FROM ' . mock_exam_q($aq['table']) . ' aq'
         . ' LEFT JOIN questions qsrc ON qsrc.id = aq.' . mock_exam_q($aq['question_id'])
         . ' WHERE aq.' . mock_exam_q($aq['attempt_id']) . ' = ?'
@@ -1614,6 +1619,11 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
         $isAnswered = trim((string)$selected) !== '';
         $isCorrect = ($isAnswered && trim((string)$correct) !== '') ? (strtoupper((string)$selected) === strtoupper((string)$correct)) : null;
         $createdAtForBadge = $r['source_question_created_at'] ?? null;
+        $badgeTypeRaw = $aq['question_badge_type'] ? ($r[$aq['question_badge_type']] ?? null) : null;
+        if ($badgeTypeRaw === null || trim((string)$badgeTypeRaw) === '') {
+            $badgeTypeRaw = $r['source_question_badge_type'] ?? 'normal';
+        }
+        $badgeType = ((string)$badgeTypeRaw === 'new') ? 'new' : 'normal';
         $item = [
             'id' => (string)$r[$aq['id']],
             'question_id' => (string)$r[$aq['question_id']],
@@ -1637,7 +1647,8 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
             'explanation_image_url' => $aq['explanation_image_url'] ? ($r[$aq['explanation_image_url']] ?? null) : null,
             'explanation_image_thumb_url' => $aq['explanation_image_thumb_url'] ? ($r[$aq['explanation_image_thumb_url']] ?? null) : null,
             'source_question_created_at' => $createdAtForBadge,
-            'is_new_question' => is_question_new_by_created_at($createdAtForBadge, $newBadgeDays),
+            'question_badge_type' => $badgeType,
+            'is_new_question' => $badgeType === 'new',
         ];
         if ($withResultFields) {
             $explanation = $aq['explanation'] ? ($r[$aq['explanation']] ?? null) : null;
@@ -2061,6 +2072,7 @@ function mock_exam_create_attempt(PDO $pdo, string $userId, array $payload): arr
                 'question_image_thumb_url' => $q['question_image_thumb_url'] ?? null,
                 'explanation_image_url' => $q['explanation_image_large_url'] ?? null,
                 'explanation_image_thumb_url' => $q['explanation_image_thumb_url'] ?? null,
+                'question_badge_type' => ((string)($q['question_badge_type'] ?? 'normal') === 'new') ? 'new' : 'normal',
                 'selected_answer' => null,
                 'is_flagged' => 0,
             ];
