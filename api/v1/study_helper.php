@@ -61,6 +61,28 @@ function study_parse_enum_values(?string $dbType): array
     return array_values(array_unique($values));
 }
 
+function study_question_report_status_normalize(?string $status): string
+{
+    $status = strtolower(trim((string)$status));
+    $allowed = ['reported', 'reviewing', 'completed', 'rejected'];
+
+    return in_array($status, $allowed, true) ? $status : 'reported';
+}
+
+function study_question_report_status_label(?string $status): string
+{
+    $status = study_question_report_status_normalize($status);
+
+    $labels = [
+        'reported' => 'Bildirildi',
+        'reviewing' => 'İnceleniyor',
+        'completed' => 'Tamamlandı',
+        'rejected' => 'İşlem Gerekmiyor',
+    ];
+
+    return $labels[$status] ?? $labels['reported'];
+}
+
 function study_can_persist_selected_answer(PDO $pdo, array $schema, string $selectedAnswer): bool
 {
     if (empty($schema['last_selected_answer'])) {
@@ -1004,12 +1026,18 @@ function study_insert_question_report(PDO $pdo, string $userId, string $question
     $reportTextCol = study_pick_column($cols, ['report_text', 'description', 'reason', 'message'], true);
     $snapshotCol = study_pick_column($cols, ['question_snapshot', 'snapshot', 'question_data'], false);
     $createdAtCol = study_pick_column($cols, ['created_at'], false);
+    $updatedAtCol = study_pick_column($cols, ['updated_at'], false);
+    $statusCol = study_pick_column($cols, ['status'], false);
 
     $insertValues = [
         $userCol => $userId,
         $questionCol => $questionId,
         $reportTextCol => $reportText,
     ];
+
+    if ($statusCol) {
+        $insertValues[$statusCol] = 'reported';
+    }
 
     $reportId = null;
     if ($idCol) {
@@ -1037,6 +1065,10 @@ function study_insert_question_report(PDO $pdo, string $userId, string $question
 
     if ($createdAtCol) {
         $colsSql[] = study_q($createdAtCol);
+        $holdersSql[] = 'NOW()';
+    }
+    if ($updatedAtCol) {
+        $colsSql[] = study_q($updatedAtCol);
         $holdersSql[] = 'NOW()';
     }
 

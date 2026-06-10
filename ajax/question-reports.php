@@ -28,6 +28,28 @@ function qr_parse_snapshot($raw): array
     return is_array($parsed) ? $parsed : [];
 }
 
+function qr_report_status_normalize(?string $status): string
+{
+    $status = strtolower(trim((string)$status));
+    $allowed = ['reported', 'reviewing', 'completed', 'rejected'];
+
+    return in_array($status, $allowed, true) ? $status : 'reported';
+}
+
+function qr_report_status_label(?string $status): string
+{
+    $status = qr_report_status_normalize($status);
+
+    $labels = [
+        'reported' => 'Bildirildi',
+        'reviewing' => 'İnceleniyor',
+        'completed' => 'Tamamlandı',
+        'rejected' => 'İşlem Gerekmiyor',
+    ];
+
+    return $labels[$status] ?? $labels['reported'];
+}
+
 function qr_find_snapshot_value(array $snapshot, string $key): ?string
 {
     if (array_key_exists($key, $snapshot)) {
@@ -54,12 +76,25 @@ function qr_question_id_is_valid(string $id): bool
 
 try {
     $questionCols = get_table_columns($pdo, 'questions');
+    $reportCols = get_table_columns($pdo, 'question_reports') ?: [];
     $hasOptionE = is_array($questionCols) && in_array('option_e', $questionCols, true);
     $hasQuestionType = is_array($questionCols) && in_array('question_type', $questionCols, true);
     $hasStatus = is_array($questionCols) && in_array('status', $questionCols, true);
     $hasIsActive = is_array($questionCols) && in_array('is_active', $questionCols, true);
+    $hasReportStatus = in_array('status', $reportCols, true);
+    $hasReportAdminResponse = in_array('admin_response', $reportCols, true);
+    $hasReportAdminResponseAt = in_array('admin_response_at', $reportCols, true);
+    $hasReportAdminResponseBy = in_array('admin_response_by', $reportCols, true);
+    $hasReportUpdatedAt = in_array('updated_at', $reportCols, true);
 
     if ($action === 'list') {
+        $reportStatusSelect = $hasReportStatus ? 'qr.status' : "'reported'";
+        $reportAdminResponseSelect = $hasReportAdminResponse ? 'qr.admin_response' : 'NULL';
+        $reportAdminResponseAtSelect = $hasReportAdminResponseAt ? 'qr.admin_response_at' : 'NULL';
+        $reportAdminResponseBySelect = $hasReportAdminResponseBy ? 'qr.admin_response_by' : 'NULL';
+        $reportUpdatedAtSelect = $hasReportUpdatedAt ? 'qr.updated_at' : 'NULL';
+        $orderUpdatedExpr = $hasReportUpdatedAt ? 'qr.updated_at' : 'NULL';
+
         $sql = "SELECT
                     qr.id AS report_id,
                     qr.user_id AS reporter_user_id,
@@ -67,7 +102,11 @@ try {
                     qr.report_text,
                     qr.question_snapshot,
                     qr.created_at,
-                    qr.updated_at,
+                    {$reportUpdatedAtSelect} AS updated_at,
+                    {$reportStatusSelect} AS status,
+                    {$reportAdminResponseSelect} AS admin_response,
+                    {$reportAdminResponseAtSelect} AS admin_response_at,
+                    {$reportAdminResponseBySelect} AS admin_response_by,
                     up.full_name AS reporter_name,
                     up.email AS reporter_email,
                     q.question_text,
@@ -83,7 +122,7 @@ try {
                 FROM question_reports qr
                 LEFT JOIN user_profiles up ON up.id = qr.user_id
                 LEFT JOIN questions q ON q.id = qr.question_id
-                ORDER BY qr.created_at DESC
+                ORDER BY COALESCE({$orderUpdatedExpr}, qr.created_at) DESC, qr.created_at DESC
                 LIMIT 300";
 
         $stmt = $pdo->prepare($sql);
@@ -92,6 +131,7 @@ try {
 
         $reports = array_map(static function (array $r): array {
             $snapshot = qr_parse_snapshot($r['question_snapshot'] ?? null);
+            $status = qr_report_status_normalize($r['status'] ?? 'reported');
 
             $fallbackQuestion = [
                 'question_text' => $r['question_text'] ?? null,
@@ -118,6 +158,11 @@ try {
                 'question_snapshot' => is_string($r['question_snapshot'] ?? null) ? $r['question_snapshot'] : '',
                 'created_at' => $r['created_at'] ?? null,
                 'updated_at' => $r['updated_at'] ?? null,
+                'status' => $status,
+                'status_label' => qr_report_status_label($status),
+                'admin_response' => $r['admin_response'] !== null ? (string)$r['admin_response'] : null,
+                'admin_response_at' => $r['admin_response_at'] ?? null,
+                'admin_response_by' => $r['admin_response_by'] ?? null,
                 'reporter_user_id' => (string)($r['reporter_user_id'] ?? ''),
                 'reporter_name' => (string)($r['reporter_name'] ?? ''),
                 'reporter_email' => (string)($r['reporter_email'] ?? ''),
@@ -126,6 +171,70 @@ try {
         }, $rows);
 
         qr_json(true, '', ['reports' => $reports]);
+    }
+
+    if ($action === 'update_report_response') {
+        $reportId = trim((string)($_POST['report_id'] ?? ''));
+        $status = qr_report_status_normalize($_POST['status'] ?? 'reported');
+        $rawAdminResponse = trim((string)($_POST['admin_response'] ?? ''));
+
+        if ($reportId === '') {
+            qr_json(false, 'report_id zorunludur.', [], 422);
+        }
+
+        $statusInput = strtolower(trim((string)($_POST['status'] ?? '')));
+        if (!in_array($statusInput, ['reported', 'reviewing', 'completed', 'rejected'], true)) {
+            qr_json(false, 'Geçersiz durum.', [], 422);
+        }
+
+        if (mb_strlen($rawAdminResponse) > 5000) {
+            qr_json(false, 'admin_response çok uzun.', [], 422);
+        }
+
+        $adminResponse = ($rawAdminResponse !== '') ? $rawAdminResponse : null;
+        $adminId = isset($admin['id']) && trim((string)$admin['id']) !== '' ? (string)$admin['id'] : null;
+
+        $setParts = [];
+        $params = [];
+
+        if ($hasReportStatus) {
+            $setParts[] = 'status = ?';
+            $params[] = $status;
+        }
+        if ($hasReportAdminResponse) {
+            $setParts[] = 'admin_response = ?';
+            $params[] = $adminResponse;
+        }
+        if ($hasReportAdminResponseAt) {
+            $setParts[] = 'admin_response_at = ?';
+            $params[] = $adminResponse !== null ? date('Y-m-d H:i:s') : null;
+        }
+        if ($hasReportAdminResponseBy) {
+            $setParts[] = 'admin_response_by = ?';
+            $params[] = $adminResponse !== null ? $adminId : null;
+        }
+        if ($hasReportUpdatedAt) {
+            $setParts[] = 'updated_at = NOW()';
+        }
+
+        if (!$setParts) {
+            qr_json(false, 'question_reports alanları güncellenemiyor.', [], 500);
+        }
+
+        $params[] = $reportId;
+        $sql = 'UPDATE question_reports SET ' . implode(', ', $setParts) . ' WHERE id = ?';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+
+        if ($stmt->rowCount() < 1) {
+            $existsStmt = $pdo->prepare('SELECT COUNT(*) FROM question_reports WHERE id = ?');
+            $existsStmt->execute([$reportId]);
+            if ((int)$existsStmt->fetchColumn() < 1) {
+                qr_json(false, 'Bildirim bulunamadı.', [], 404);
+            }
+        }
+
+        qr_json(true, 'Bildirim güncellendi.');
     }
 
     if ($action === 'delete_report') {

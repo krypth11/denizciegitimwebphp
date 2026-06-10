@@ -19,6 +19,23 @@ include '../includes/sidebar.php';
         </div>
     </div>
 
+    <div class="card mb-3">
+        <div class="card-body py-3">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4 col-lg-3">
+                    <label for="reportStatusFilter" class="form-label mb-1">Durum</label>
+                    <select class="form-select" id="reportStatusFilter">
+                        <option value="all">Tümü</option>
+                        <option value="reported">Bildirildi</option>
+                        <option value="reviewing">İnceleniyor</option>
+                        <option value="completed">Tamamlandı</option>
+                        <option value="rejected">İşlem Gerekmiyor</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="card d-none d-md-block">
         <div class="card-body">
             <div class="table-responsive">
@@ -26,6 +43,7 @@ include '../includes/sidebar.php';
                     <thead>
                     <tr>
                         <th>Bildirimi Yapan</th>
+                        <th>Durum</th>
                         <th>Bildirim</th>
                         <th>Soru</th>
                         <th>Tarih</th>
@@ -60,9 +78,27 @@ include '../includes/sidebar.php';
                         <label class="form-label fw-semibold mb-1">Tarih</label>
                         <div id="detailDates"></div>
                     </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold mb-1">Durum</label>
+                        <select class="form-select" id="detailReportStatus">
+                            <option value="reported">Bildirildi</option>
+                            <option value="reviewing">İnceleniyor</option>
+                            <option value="completed">Tamamlandı</option>
+                            <option value="rejected">İşlem Gerekmiyor</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold mb-1">Son Cevap Bilgisi</label>
+                        <div id="detailAdminResponseMeta" class="small text-muted">Henüz admin cevabı yok.</div>
+                    </div>
                     <div class="col-12">
                         <label class="form-label fw-semibold mb-1">Bildirim Metni</label>
                         <div id="detailReportText" class="border rounded p-3 bg-light-subtle text-break" style="white-space: pre-wrap;"></div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold mb-1">Admin Cevabı</label>
+                        <textarea class="form-control" id="detailAdminResponse" rows="5" placeholder="Kullanıcıya gösterilecek cevabı yazın..."></textarea>
+                        <div class="form-text">Bu cevap kullanıcı profilindeki “Bildirdiğim Sorular” ekranında görüntülenecek. Kullanıcı bu alana cevap yazamaz.</div>
                     </div>
                     <div class="col-12">
                         <label class="form-label fw-semibold mb-1">Soru Metni</label>
@@ -81,6 +117,11 @@ include '../includes/sidebar.php';
                         <div id="detailExplanation" class="border rounded p-3 bg-light-subtle text-break" style="white-space: pre-wrap;"></div>
                     </div>
                 </div>
+                <div id="detailReportAlert" class="d-none mt-3"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                <button type="button" class="btn btn-primary" id="saveReportResponseBtn">Durum / Cevap Kaydet</button>
             </div>
         </div>
     </div>
@@ -178,6 +219,9 @@ $(function () {
     const editModal = editModalEl ? new bootstrap.Modal(editModalEl) : null;
     let editMeta = { has_question_type: false, status_mode: 'none', has_option_e: true };
     let currentEditingQuestionId = '';
+    let reportsCache = [];
+    let currentDetailReportId = '';
+    let isSavingReportResponse = false;
 
     const api = async (action, method = 'GET', data = {}) => {
         return await window.appAjax({
@@ -193,6 +237,42 @@ $(function () {
         const s = String(v || '');
         return s.length > n ? s.slice(0, n) + '…' : s;
     };
+    const normalizeStatus = (status) => {
+        const allowed = ['reported', 'reviewing', 'completed', 'rejected'];
+        const normalized = String(status || '').trim().toLowerCase();
+        return allowed.includes(normalized) ? normalized : 'reported';
+    };
+    const statusLabel = (status) => ({
+        reported: 'Bildirildi',
+        reviewing: 'İnceleniyor',
+        completed: 'Tamamlandı',
+        rejected: 'İşlem Gerekmiyor'
+    }[normalizeStatus(status)] || 'Bildirildi');
+    const statusBadgeClass = (status) => ({
+        reported: 'text-bg-primary',
+        reviewing: 'text-bg-warning',
+        completed: 'text-bg-success',
+        rejected: 'text-bg-secondary'
+    }[normalizeStatus(status)] || 'text-bg-primary');
+    const responseBadgeHtml = (report) => (report.admin_response ? '<span class="badge text-bg-success-subtle text-success-emphasis border border-success-subtle ms-1">Cevaplandı</span>' : '');
+
+    function setDetailAlert(message, type = 'info') {
+        const cls = type === 'success' ? 'alert-success' : type === 'error' ? 'alert-danger' : 'alert-info';
+        $('#detailReportAlert').removeClass('d-none alert-success alert-danger alert-info').addClass(`alert ${cls}`).text(message || '');
+    }
+
+    function clearDetailAlert() {
+        $('#detailReportAlert').addClass('d-none').removeClass('alert alert-success alert-danger alert-info').text('');
+    }
+
+    function getFilteredReports() {
+        const filter = String($('#reportStatusFilter').val() || 'all').trim();
+        if (filter === 'all') {
+            return reportsCache.slice();
+        }
+
+        return reportsCache.filter((report) => normalizeStatus(report.status) === filter);
+    }
 
     function questionOptionsHtml(q) {
         const lines = [
@@ -216,31 +296,43 @@ $(function () {
 
     function fillDetail(r) {
         const q = r.question || {};
+        const status = normalizeStatus(r.status);
+        currentDetailReportId = String(r.report_id || '');
+        clearDetailAlert();
         $('#detailMeta').text(`Report ID: ${r.report_id || '-'} • Question ID: ${r.question_id || '-'}`);
         $('#detailReporter').html(`${esc(r.reporter_name || '-')}${r.reporter_email ? `<br><small class="text-muted">${esc(r.reporter_email)}</small>` : ''}<br><small class="text-muted">User ID: ${esc(r.reporter_user_id || '-')}</small>`);
         $('#detailDates').html(`Oluşturulma: ${esc(r.created_at || '-')}<br>Güncellenme: ${esc(r.updated_at || '-')}`);
+        $('#detailReportStatus').val(status);
+        $('#detailAdminResponse').val(r.admin_response || '');
+        $('#detailAdminResponseMeta').text(r.admin_response_at ? `Son cevap zamanı: ${r.admin_response_at}` : 'Henüz admin cevabı yok.');
         $('#detailReportText').html(nl2br(r.report_text || '-'));
         $('#detailQuestionText').html(nl2br(q.question_text || '-'));
         $('#detailOptions').html(questionOptionsHtml(q));
         $('#detailAnswerMeta').html(answerMetaHtml(q));
         $('#detailExplanation').html(nl2br(q.explanation || '-'));
+        $('#saveReportResponseBtn').prop('disabled', false).text('Durum / Cevap Kaydet');
     }
 
     function renderDesktop(rows) {
         const $tbody = $('#questionReportsTable tbody');
         if (!rows.length) {
-            $tbody.html('<tr><td colspan="5" class="text-muted p-3">Kayıt bulunamadı.</td></tr>');
+            $tbody.html('<tr><td colspan="6" class="text-muted p-3">Kayıt bulunamadı.</td></tr>');
             return;
         }
 
         $tbody.html(rows.map((r) => {
             const q = r.question || {};
+            const status = normalizeStatus(r.status);
             return `
                 <tr>
                     <td>
                         <div class="fw-semibold text-break">${esc(r.reporter_name || '-')}</div>
                         <div class="small text-muted text-break">${esc(r.reporter_email || '-')}</div>
                         <div class="small text-muted">ID: ${esc(r.reporter_user_id || '-')}</div>
+                    </td>
+                    <td>
+                        <span class="badge ${statusBadgeClass(status)}">${esc(statusLabel(status))}</span>
+                        ${responseBadgeHtml(r)}
                     </td>
                     <td>
                         <div class="text-break" style="max-width:320px; white-space:pre-wrap;">${esc(shortText(r.report_text || '-', 160))}</div>
@@ -275,6 +367,7 @@ $(function () {
         $empty.addClass('d-none');
         $list.html(rows.map((r) => {
             const q = r.question || {};
+            const status = normalizeStatus(r.status);
             return `
                 <div class="card mb-2">
                     <div class="card-body">
@@ -282,6 +375,7 @@ $(function () {
                             <div>
                                 <div class="fw-semibold text-break">${esc(r.reporter_name || '-')}</div>
                                 <div class="small text-muted text-break">${esc(r.reporter_email || '-')}</div>
+                                <div class="mt-1"><span class="badge ${statusBadgeClass(status)}">${esc(statusLabel(status))}</span>${responseBadgeHtml(r)}</div>
                             </div>
                             <small class="text-muted">${esc(r.created_at || '-')}</small>
                         </div>
@@ -306,12 +400,13 @@ $(function () {
     async function loadReports() {
         const res = await api('list');
         if (!res.success) {
-            $('#questionReportsTable tbody').html('<tr><td colspan="5" class="text-muted p-3">Bildirimler getirilemedi.</td></tr>');
+            $('#questionReportsTable tbody').html('<tr><td colspan="6" class="text-muted p-3">Bildirimler getirilemedi.</td></tr>');
             $('#questionReportsMobileList').html('');
             $('#questionReportsMobileEmpty').removeClass('d-none').text('Bildirimler getirilemedi.');
             return;
         }
-        const rows = res.data?.reports || [];
+        reportsCache = Array.isArray(res.data?.reports) ? res.data.reports : [];
+        const rows = getFilteredReports();
         renderDesktop(rows);
         renderMobile(rows);
     }
@@ -335,6 +430,36 @@ $(function () {
         if ($('#detailMeta').text().includes(`Question ID: ${questionId}`)) {
             $('#detailQuestionText').html(nl2br(questionText || '-'));
         }
+        reportsCache = reportsCache.map((report) => {
+            if (String(report.question_id || '') !== String(questionId || '')) {
+                return report;
+            }
+
+            return {
+                ...report,
+                question: {
+                    ...(report.question || {}),
+                    question_text: questionText || ''
+                }
+            };
+        });
+    }
+
+    function updateCachedReportResponse(reportId, status, adminResponse) {
+        reportsCache = reportsCache.map((report) => {
+            if (String(report.report_id || '') !== String(reportId || '')) {
+                return report;
+            }
+
+            return {
+                ...report,
+                status,
+                status_label: statusLabel(status),
+                admin_response: adminResponse,
+                admin_response_at: adminResponse ? new Date().toLocaleString('tr-TR') : null,
+                updated_at: new Date().toLocaleString('tr-TR')
+            };
+        });
     }
 
     async function openEditModal(questionId) {
@@ -395,6 +520,12 @@ $(function () {
         try { r = JSON.parse(raw); } catch (e) { r = {}; }
         fillDetail(r);
         if (detailModal) detailModal.show();
+    });
+
+    $('#reportStatusFilter').on('change', function () {
+        const rows = getFilteredReports();
+        renderDesktop(rows);
+        renderMobile(rows);
     });
 
     $(document).on('click', '.delete-btn', async function () {
@@ -467,6 +598,40 @@ $(function () {
         setEditAlert(res.message || 'Soru güncellendi.', 'success');
         updateReportQuestionText(currentEditingQuestionId, payload.question_text);
         await loadReports();
+    });
+
+    $('#saveReportResponseBtn').on('click', async function () {
+        if (isSavingReportResponse || !currentDetailReportId) {
+            return;
+        }
+
+        const payload = {
+            report_id: currentDetailReportId,
+            status: normalizeStatus($('#detailReportStatus').val()),
+            admin_response: String($('#detailAdminResponse').val() || '').trim()
+        };
+
+        isSavingReportResponse = true;
+        clearDetailAlert();
+        $('#saveReportResponseBtn').prop('disabled', true).text('Kaydediliyor...');
+
+        try {
+            const res = await api('update_report_response', 'POST', payload);
+            if (!res.success) {
+                setDetailAlert(res.message || 'Güncelleme başarısız.', 'error');
+                return;
+            }
+
+            setDetailAlert(res.message || 'Bildirim güncellendi.', 'success');
+            updateCachedReportResponse(currentDetailReportId, payload.status, payload.admin_response || null);
+            $('#detailAdminResponseMeta').text(payload.admin_response ? `Son cevap zamanı: ${new Date().toLocaleString('tr-TR')}` : 'Henüz admin cevabı yok.');
+            await loadReports();
+        } catch (err) {
+            setDetailAlert('İşlem sırasında bir hata oluştu.', 'error');
+        } finally {
+            isSavingReportResponse = false;
+            $('#saveReportResponseBtn').prop('disabled', false).text('Durum / Cevap Kaydet');
+        }
     });
 
     loadReports();
