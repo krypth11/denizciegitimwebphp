@@ -245,7 +245,6 @@ function build_question_filters(PDO $pdo, array $params): array
         }
 
         $fallbackClauses = [
-            'NOT EXISTS (SELECT 1 FROM question_scope_links qsl0 WHERE qsl0.question_id = ' . $qc('id') . ')',
             $qc('course_id') . ' IN (SELECT id FROM courses WHERE qualification_id = ?)',
         ];
         $fallbackParams = [$effectiveQualificationId];
