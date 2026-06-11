@@ -172,14 +172,14 @@ if (!function_exists('notification_schema')) {
                 'id' => notification_pick_column($lCols, ['id'], false),
                 'notification_id' => notification_pick_column($lCols, ['notification_id', 'notif_id']),
                 'user_id' => notification_pick_column($lCols, ['user_id'], false),
-                'token_id' => notification_pick_column($lCols, ['token_id', 'user_push_token_id'], false),
-                'token_masked' => notification_pick_column($lCols, ['token_masked', 'masked_token'], false),
+                'token_id' => notification_pick_column($lCols, ['token_id', 'user_push_token_id', 'push_token_id'], false),
+                'token_masked' => notification_pick_column($lCols, ['token_masked', 'masked_token', 'fcm_token_masked'], false),
                 'platform' => notification_pick_column($lCols, ['platform'], false),
                 'status' => notification_pick_column($lCols, ['status', 'send_status'], false),
                 'is_success' => notification_pick_column($lCols, ['is_success', 'success'], false),
                 'response_code' => notification_pick_column($lCols, ['response_code', 'http_code', 'firebase_code'], false),
-                'response_message' => notification_pick_column($lCols, ['response_message', 'response_text', 'error_message'], false),
-                'response_body' => notification_pick_column($lCols, ['response_body', 'provider_response', 'meta_json'], false),
+                'response_message' => notification_pick_column($lCols, ['response_message', 'response_text', 'error_message', 'provider_message_id'], false),
+                'response_body' => notification_pick_column($lCols, ['response_body', 'provider_response', 'meta_json', 'response_excerpt'], false),
                 'opened_at' => notification_pick_column($lCols, ['opened_at', 'read_at', 'opened_on'], false),
                 'created_at' => notification_pick_column($lCols, ['created_at', 'logged_at', 'sent_at'], false),
             ],
@@ -540,6 +540,15 @@ if (!function_exists('log_notification_result')) {
         $schema = notification_schema($pdo);
         $l = $schema['logs'];
         $now = date('Y-m-d H:i:s');
+        $normalizedStatus = null;
+
+        if ($l['status']) {
+            $normalizedStatus = notification_normalize_log_status(
+                isset($payload['status']) ? (string)$payload['status'] : null,
+                isset($payload['is_success']) ? (int)$payload['is_success'] : null,
+                $l['status']
+            );
+        }
 
         $row = [];
         if ($l['id']) $row[$l['id']] = generate_uuid();
@@ -559,8 +568,16 @@ if (!function_exists('log_notification_result')) {
 
         foreach ($optional as $key => $col) {
             if ($col && array_key_exists($key, $payload)) {
+                if ($key === 'status') {
+                    continue;
+                }
+
                 $row[$col] = $payload[$key];
             }
+        }
+
+        if ($l['status'] && $normalizedStatus !== null) {
+            $row[$l['status']] = $normalizedStatus;
         }
 
         if ($l['created_at']) {
@@ -568,6 +585,30 @@ if (!function_exists('log_notification_result')) {
         }
 
         notification_insert_row($pdo, $l['table'], $row);
+    }
+}
+
+if (!function_exists('notification_normalize_log_status')) {
+    function notification_normalize_log_status(?string $status, ?int $isSuccess, string $columnName): string
+    {
+        $normalized = strtolower(trim((string)$status));
+        $columnName = strtolower(trim($columnName));
+
+        if ($columnName === 'send_status') {
+            if ($normalized === 'sent' || $normalized === 'success') {
+                return 'success';
+            }
+            if ($normalized === 'failed' || $normalized === 'error') {
+                return 'failed';
+            }
+            if ($normalized === 'skipped') {
+                return 'skipped';
+            }
+
+            return ((int)$isSuccess === 1) ? 'success' : 'failed';
+        }
+
+        return $normalized !== '' ? $normalized : (((int)$isSuccess === 1) ? 'sent' : 'failed');
     }
 }
 
@@ -1706,12 +1747,18 @@ if (!function_exists('notification_inbox_base_from')) {
 if (!function_exists('notification_inbox_success_condition')) {
     function notification_inbox_success_condition(array $schema): string
     {
+        $n = $schema['notifications'];
         $l = $schema['logs'];
         $conditions = [];
 
         if ($l['status']) {
             $statusCol = 'l.' . notification_q($l['status']);
             $conditions[] = $statusCol . " IN ('success', 'sent')";
+
+            if (strtolower((string)$l['status']) === 'send_status' && $n['status']) {
+                $notificationStatusCol = 'n.' . notification_q($n['status']);
+                $conditions[] = '(' . $statusCol . " = '' AND " . $notificationStatusCol . " IN ('sent', 'partial'))";
+            }
         }
 
         if ($l['is_success']) {
