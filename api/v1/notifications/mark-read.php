@@ -26,8 +26,8 @@ try {
         api_error('Bu işlem için erişim yetkiniz yok.', 403);
     }
 
-    $detail = notification_get_detail_for_user($pdo, $userId, $notificationId);
-    if (!$detail) {
+    $hasLog = notification_user_has_notification_log($pdo, $userId, $notificationId);
+    if (!$hasLog) {
         api_error('Bildirim bulunamadı.', 404);
     }
 
@@ -36,6 +36,7 @@ try {
     api_success('Bildirim okundu olarak işaretlendi.', [
         'notification_id' => $notificationId,
         'updated' => $updated,
+        'updated_count' => $updated ? 1 : 0,
     ]);
 } catch (Throwable $e) {
     error_log('[notifications.mark-read] ' . $e->getMessage());

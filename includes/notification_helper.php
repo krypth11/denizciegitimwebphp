@@ -1987,6 +1987,32 @@ if (!function_exists('notification_get_detail_for_user')) {
     }
 }
 
+if (!function_exists('notification_user_has_notification_log')) {
+    function notification_user_has_notification_log(PDO $pdo, string $userId, string $notificationId): bool
+    {
+        $userId = trim($userId);
+        $notificationId = trim($notificationId);
+        if ($userId === '' || $notificationId === '') {
+            return false;
+        }
+
+        $schema = notification_schema($pdo);
+        $l = $schema['logs'];
+        if (!$l['table'] || !$l['user_id'] || !$l['notification_id']) {
+            return false;
+        }
+
+        $sql = 'SELECT 1 FROM ' . notification_q($l['table'])
+            . ' WHERE ' . notification_q($l['user_id']) . ' = ?'
+            . ' AND ' . notification_q($l['notification_id']) . ' = ?'
+            . ' LIMIT 1';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId, $notificationId]);
+        return (bool)$stmt->fetchColumn();
+    }
+}
+
 if (!function_exists('notification_mark_read_for_user')) {
     function notification_mark_read_for_user(PDO $pdo, string $userId, string $notificationId): bool
     {
@@ -1998,19 +2024,22 @@ if (!function_exists('notification_mark_read_for_user')) {
 
         $schema = notification_schema($pdo);
         $l = $schema['logs'];
-        if (!$l['opened_at'] || !$l['user_id']) {
+        if (!$l['opened_at'] || !$l['user_id'] || !$l['notification_id']) {
             return false;
         }
 
         $sql = 'UPDATE ' . notification_q($l['table'])
             . ' SET ' . notification_q($l['opened_at']) . ' = COALESCE(' . notification_q($l['opened_at']) . ', NOW())'
             . ' WHERE ' . notification_q($l['user_id']) . ' = ?'
-            . ' AND ' . notification_q($l['notification_id']) . ' = ?'
-            . ' AND ' . notification_inbox_success_condition($schema);
+            . ' AND ' . notification_q($l['notification_id']) . ' = ?';
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$userId, $notificationId]);
-        return $stmt->rowCount() > 0;
+        if ($stmt->rowCount() > 0) {
+            return true;
+        }
+
+        return notification_user_has_notification_log($pdo, $userId, $notificationId);
     }
 }
 
@@ -2023,15 +2052,18 @@ if (!function_exists('notification_mark_all_read_for_user')) {
         }
 
         $schema = notification_schema($pdo);
+        $n = $schema['notifications'];
         $l = $schema['logs'];
-        if (!$l['opened_at'] || !$l['user_id']) {
+        if (!$l['opened_at'] || !$l['user_id'] || !$l['notification_id'] || !$n['table'] || !$n['id']) {
             return 0;
         }
 
-        $sql = 'UPDATE ' . notification_q($l['table'])
-            . ' SET ' . notification_q($l['opened_at']) . ' = NOW()'
-            . ' WHERE ' . notification_q($l['user_id']) . ' = ?'
-            . ' AND ' . notification_q($l['opened_at']) . ' IS NULL'
+        $sql = 'UPDATE ' . notification_q($l['table']) . ' l'
+            . ' INNER JOIN ' . notification_q($n['table']) . ' n'
+            . ' ON n.' . notification_q($n['id']) . ' = l.' . notification_q($l['notification_id'])
+            . ' SET l.' . notification_q($l['opened_at']) . ' = NOW()'
+            . ' WHERE l.' . notification_q($l['user_id']) . ' = ?'
+            . ' AND l.' . notification_q($l['opened_at']) . ' IS NULL'
             . ' AND ' . notification_inbox_success_condition($schema);
 
         $stmt = $pdo->prepare($sql);
