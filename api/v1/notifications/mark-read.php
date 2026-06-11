@@ -10,10 +10,16 @@ try {
     $auth = api_require_auth($pdo);
     $userId = (string)($auth['user']['id'] ?? '');
     $payload = api_get_request_data();
-    $notificationId = trim((string)($payload['notification_id'] ?? ''));
+    $notificationId = trim((string)(
+        $payload['notification_id']
+        ?? $payload['id']
+        ?? $_POST['notification_id']
+        ?? $_POST['id']
+        ?? ''
+    ));
 
     if ($notificationId === '') {
-        api_error('notification_id zorunludur.', 422);
+        api_error('notification_id veya id zorunludur.', 422);
     }
 
     if ($userId === '' || notification_is_guest_user($pdo, $userId)) {

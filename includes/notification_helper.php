@@ -1707,13 +1707,19 @@ if (!function_exists('notification_inbox_success_condition')) {
     function notification_inbox_success_condition(array $schema): string
     {
         $l = $schema['logs'];
+        $conditions = [];
 
         if ($l['status']) {
-            return 'l.' . notification_q($l['status']) . " = 'success'";
+            $statusCol = 'l.' . notification_q($l['status']);
+            $conditions[] = $statusCol . " IN ('success', 'sent')";
         }
 
         if ($l['is_success']) {
-            return 'l.' . notification_q($l['is_success']) . ' = 1';
+            $conditions[] = 'l.' . notification_q($l['is_success']) . ' = 1';
+        }
+
+        if (!empty($conditions)) {
+            return '(' . implode(' OR ', $conditions) . ')';
         }
 
         return '1=1';
