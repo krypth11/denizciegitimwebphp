@@ -14,6 +14,7 @@ if (!function_exists('notification_deep_link_pages')) {
             ['value' => 'dashboard', 'label' => 'Anasayfa'],
             ['value' => 'study', 'label' => 'Çalışma Alanı'],
             ['value' => 'exam', 'label' => 'Deneme Sınavı'],
+            ['value' => 'news', 'label' => 'Haberler'],
             ['value' => 'word_game', 'label' => 'Kelime Oyunu'],
             ['value' => 'offline', 'label' => 'Offline İçerikler'],
             ['value' => 'maritime', 'label' => 'Maritime English'],

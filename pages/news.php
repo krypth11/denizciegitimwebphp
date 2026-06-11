@@ -3,6 +3,7 @@ require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/news_helper.php';
+require_once '../includes/notification_helper.php';
 
 $user = require_auth();
 $current_page = 'news';
@@ -35,6 +36,9 @@ include '../includes/sidebar.php';
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSources" type="button">Kaynaklar</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabNewsNotifications" type="button">Haber Bildirimleri</button>
         </li>
     </ul>
 
@@ -144,6 +148,29 @@ include '../includes/sidebar.php';
                 <div id="sourcesEmpty" class="text-muted d-none">Kayıtlı kaynak bulunamadı.</div>
             </div></div>
         </div>
+
+        <div class="tab-pane fade" id="tabNewsNotifications">
+            <div class="card"><div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                        <tr>
+                            <th>Bildirim Başlığı</th>
+                            <th>Haber</th>
+                            <th>Hedef</th>
+                            <th>Durum</th>
+                            <th>Zamanlama</th>
+                            <th>Başarı / Hata</th>
+                            <th>Tarih</th>
+                            <th>İşlemler</th>
+                        </tr>
+                        </thead>
+                        <tbody id="newsNotificationsBody"></tbody>
+                    </table>
+                </div>
+                <div id="newsNotificationsEmpty" class="text-muted d-none">Haber bildirimi bulunamadı.</div>
+            </div></div>
+        </div>
     </div>
 </div>
 
@@ -242,12 +269,107 @@ include '../includes/sidebar.php';
     </div>
 </div>
 
+<div class="modal fade" id="newsNotificationModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Haber Bildirimi Gönder</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="newsNotificationArticleId">
+
+                <div class="card bg-light border-0 mb-3">
+                    <div class="card-body">
+                        <div class="row g-3 align-items-center">
+                            <div class="col-md-9">
+                                <label class="form-label small text-muted mb-1">Haber Başlığı</label>
+                                <div class="fw-semibold" id="newsNotificationArticleTitleDisplay">-</div>
+                                <div class="small text-muted mt-1" id="newsNotificationArticleSummaryDisplay"></div>
+                            </div>
+                            <div class="col-md-3 text-md-end">
+                                <img id="newsNotificationArticleImagePreview" src="" alt="Haber Görseli" class="img-fluid rounded d-none" style="max-height:90px;object-fit:cover;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Bildirim Başlığı</label>
+                        <input type="text" class="form-control" id="newsNotificationTitle" maxlength="120">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Görsel URL</label>
+                        <input type="url" class="form-control" id="newsNotificationImageUrl" placeholder="https://...">
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Bildirim Mesajı</label>
+                        <textarea class="form-control" id="newsNotificationMessage" rows="4" maxlength="500"></textarea>
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Hedef Tipi</label>
+                        <select class="form-select" id="newsNotificationTargetType">
+                            <option value="all_users" selected>Tüm kullanıcılar</option>
+                            <option value="single_user">Tek kullanıcı</option>
+                            <option value="premium_users">Premium kullanıcılar</option>
+                            <option value="free_users">Free kullanıcılar</option>
+                            <option value="qualification">Belirli yeterlilik</option>
+                            <option value="last_7_days_active">Son 7 gün aktif</option>
+                            <option value="last_30_days_passive">Son 30 gün pasif</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 d-none" id="newsNotificationSingleUserWrap">
+                        <label class="form-label">Kullanıcı Ara</label>
+                        <input type="text" class="form-control mb-2" id="newsNotificationUserSearch" placeholder="Email / ad ile ara...">
+                        <select class="form-select" id="newsNotificationTargetUserId"></select>
+                    </div>
+                    <div class="col-md-6 d-none" id="newsNotificationQualificationWrap">
+                        <label class="form-label">Yeterlilik</label>
+                        <select class="form-select" id="newsNotificationTargetQualificationId"></select>
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label d-block">Zamanlama</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="news_notification_schedule_mode" id="newsNotificationScheduleNow" value="now" checked>
+                            <label class="form-check-label" for="newsNotificationScheduleNow">Hemen gönder</label>
+                        </div>
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="radio" name="news_notification_schedule_mode" id="newsNotificationScheduleScheduled" value="scheduled">
+                            <label class="form-check-label" for="newsNotificationScheduleScheduled">Planlı gönder</label>
+                        </div>
+                    </div>
+                    <div class="col-md-6 d-none" id="newsNotificationScheduledAtWrap">
+                        <label class="form-label">Planlanan Tarih/Saat</label>
+                        <input type="datetime-local" class="form-control" id="newsNotificationScheduledAt">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                <button type="button" class="btn btn-primary" id="sendNewsNotificationBtn"><i class="bi bi-send"></i> Bildirim Gönder</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?php
 $extra_js = <<<'JAVASCRIPT'
 <script>
 $(function () {
     const sourceApi = '/api/v1/admin/news/sources.php';
     const articleApi = '/api/v1/admin/news/articles.php';
+    const notificationApi = '../ajax/notifications.php';
 
     let categoryMap = {
         general: 'Genel',
@@ -262,6 +384,7 @@ $(function () {
     let pendingArticles = [];
     let approvedArticles = [];
     let rejectedArticles = [];
+    let newsNotifications = [];
     const selectedArticleIds = {
         pending: new Set(),
         approved: new Set(),
@@ -278,6 +401,15 @@ $(function () {
         return await window.appAjax({ url, method, data, dataType: 'json' });
     };
 
+    const notificationApiCall = async (action, method = 'GET', data = {}) => {
+        return await window.appAjax({
+            url: notificationApi + '?action=' + encodeURIComponent(action),
+            method,
+            data,
+            dataType: 'json'
+        });
+    };
+
     function fillCategorySelect($select) {
         const options = Object.entries(categoryMap).map(([key, label]) => `<option value="${esc(key)}">${esc(label)}</option>`);
         $select.html(options.join(''));
@@ -290,6 +422,7 @@ $(function () {
             actions.push(`<button class="btn btn-sm btn-success article-action-btn" data-id="${id}" data-action="approve">Onayla</button>`);
             actions.push(`<button class="btn btn-sm btn-warning article-action-btn" data-id="${id}" data-action="reject">Reddet</button>`);
         } else if (status === 'approved') {
+            actions.push(`<button class="btn btn-sm btn-outline-info article-notify-btn" data-id="${id}" title="Bildirim Gönder"><i class="bi bi-bell"></i></button>`);
             actions.push(`<button class="btn btn-sm btn-warning article-action-btn" data-id="${id}" data-action="reject">Yayından Kaldır</button>`);
         } else {
             actions.push(`<button class="btn btn-sm btn-success article-action-btn" data-id="${id}" data-action="approve">Onayla</button>`);
@@ -426,6 +559,7 @@ $(function () {
         if (activeTarget === '#tabApproved') return 'approved';
         if (activeTarget === '#tabRejected') return 'rejected';
         if (activeTarget === '#tabSources') return 'sources';
+        if (activeTarget === '#tabNewsNotifications') return 'news_notifications';
         return 'pending';
     }
 
@@ -435,6 +569,11 @@ $(function () {
 
         if (activeStatus === 'sources') {
             await loadSources();
+            return;
+        }
+
+        if (activeStatus === 'news_notifications') {
+            await loadNewsNotifications();
             return;
         }
 
@@ -451,6 +590,128 @@ $(function () {
     function findArticleById(id, status) {
         const list = status === 'pending' ? pendingArticles : (status === 'approved' ? approvedArticles : rejectedArticles);
         return list.find((x) => String(x.id) === String(id)) || null;
+    }
+
+    function getApprovedArticleById(id) {
+        return approvedArticles.find((x) => String(x.id) === String(id)) || null;
+    }
+
+    function toggleNewsNotificationTargetFields() {
+        const targetType = $('#newsNotificationTargetType').val();
+        $('#newsNotificationSingleUserWrap').toggleClass('d-none', targetType !== 'single_user');
+        $('#newsNotificationQualificationWrap').toggleClass('d-none', targetType !== 'qualification');
+    }
+
+    function toggleNewsNotificationScheduleField() {
+        const mode = $('input[name="news_notification_schedule_mode"]:checked').val();
+        $('#newsNotificationScheduledAtWrap').toggleClass('d-none', mode !== 'scheduled');
+    }
+
+    async function loadNotificationQualifications() {
+        try {
+            const res = await notificationApiCall('list_qualifications');
+            const items = res.data?.items || [];
+            const $sel = $('#newsNotificationTargetQualificationId');
+            $sel.empty().append('<option value="">Seçiniz...</option>');
+            items.forEach(i => $sel.append('<option value="' + esc(i.id) + '">' + esc(i.name) + '</option>'));
+        } catch (e) {
+            console.error('[news] loadNotificationQualifications', e);
+        }
+    }
+
+    async function searchNotificationUsers(q = '') {
+        try {
+            const res = await notificationApiCall('search_users', 'GET', { q });
+            const items = res.data?.items || [];
+            const $sel = $('#newsNotificationTargetUserId');
+            $sel.empty().append('<option value="">Kullanıcı seçiniz...</option>');
+            items.forEach(i => {
+                const label = (i.full_name || '') + (i.email ? ' (' + i.email + ')' : '');
+                $sel.append('<option value="' + esc(i.id) + '">' + esc(label.trim()) + '</option>');
+            });
+        } catch (e) {
+            console.error('[news] searchNotificationUsers', e);
+        }
+    }
+
+    function openNewsNotificationModal(article) {
+        const fallbackMessage = 'Yeni haber yayında. Detayları görmek için dokunun.';
+        $('#newsNotificationArticleId').val(article.id || '');
+        $('#newsNotificationArticleTitleDisplay').text(article.title || '-');
+        $('#newsNotificationArticleSummaryDisplay').text(article.summary || '');
+        $('#newsNotificationTitle').val(article.title || '');
+        $('#newsNotificationMessage').val(article.summary || fallbackMessage);
+        $('#newsNotificationImageUrl').val(article.image_url || '');
+        $('#newsNotificationTargetType').val('all_users');
+        $('#newsNotificationTargetUserId').val('');
+        $('#newsNotificationTargetQualificationId').val('');
+        $('#newsNotificationUserSearch').val('');
+        $('#newsNotificationScheduleNow').prop('checked', true);
+        $('#newsNotificationScheduledAt').val('');
+        toggleNewsNotificationTargetFields();
+        toggleNewsNotificationScheduleField();
+
+        const $img = $('#newsNotificationArticleImagePreview');
+        if (article.image_url) {
+            $img.attr('src', article.image_url).removeClass('d-none');
+        } else {
+            $img.attr('src', '').addClass('d-none');
+        }
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('newsNotificationModal')).show();
+    }
+
+    function buildNewsNotificationPayload(article) {
+        return JSON.stringify({
+            type: 'news_article',
+            screen: 'news',
+            deep_link: 'news',
+            entity_id: article.id,
+            article_id: article.id,
+            article_title: article.title || ''
+        });
+    }
+
+    function renderNewsNotifications() {
+        const $body = $('#newsNotificationsBody').empty();
+        $('#newsNotificationsEmpty').toggleClass('d-none', newsNotifications.length > 0);
+
+        newsNotifications.forEach((item) => {
+            const scheduleText = item.schedule_type === 'scheduled'
+                ? ('Planlı • ' + (item.scheduled_at || '-'))
+                : (item.schedule_type === 'draft' ? 'Taslak' : 'Hemen');
+            const dateText = item.created_at || item.sent_at || item.scheduled_at || '-';
+
+            $body.append(`
+                <tr>
+                    <td>
+                        <div class="fw-semibold">${esc(item.title || '-')}</div>
+                        <div class="small text-muted">${esc(item.message || '')}</div>
+                    </td>
+                    <td>
+                        <div>${esc(item.article_title || '-')}</div>
+                        <div class="small text-muted">ID: ${esc(item.article_id || '-')}</div>
+                    </td>
+                    <td>${esc(item.target_label || item.target_type || '-')}</td>
+                    <td><span class="badge text-bg-secondary">${esc(item.status_label || item.status || '-')}</span></td>
+                    <td>${esc(scheduleText)}</td>
+                    <td>${Number(item.success_count || 0)} / ${Number(item.failure_count || 0)}</td>
+                    <td>${fmtDate(dateText)}</td>
+                    <td>
+                        <button class="btn btn-sm btn-secondary news-notification-detail-btn" data-id="${esc(item.id)}" title="Detay">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </td>
+                </tr>
+            `);
+        });
+    }
+
+    async function loadNewsNotifications() {
+        const res = await notificationApiCall('list_news_notifications', 'GET');
+        if (!res.success) return appAlert('Hata', res.message || 'Haber bildirimleri alınamadı.', 'error');
+        newsNotifications = res.data?.items || [];
+        renderNewsNotifications();
     }
 
     $('#addSourceBtn').on('click', function () {
@@ -630,6 +891,13 @@ $(function () {
         bootstrap.Modal.getOrCreateInstance(document.getElementById('articleModal')).show();
     });
 
+    $(document).on('click', '.article-notify-btn', function () {
+        const id = $(this).data('id');
+        const article = getApprovedArticleById(id);
+        if (!article) return appAlert('Hata', 'Haber bilgisi bulunamadı.', 'error');
+        openNewsNotificationModal(article);
+    });
+
     $('#articleForm').on('submit', async function (e) {
         e.preventDefault();
         const payload = {
@@ -652,14 +920,104 @@ $(function () {
         await refreshAllArticles();
     });
 
+    $('#newsNotificationTargetType').on('change', toggleNewsNotificationTargetFields);
+    $('input[name="news_notification_schedule_mode"]').on('change', toggleNewsNotificationScheduleField);
+
+    let newsNotificationUserTimer = null;
+    $('#newsNotificationUserSearch').on('input', function () {
+        clearTimeout(newsNotificationUserTimer);
+        const q = $(this).val() || '';
+        newsNotificationUserTimer = setTimeout(() => searchNotificationUsers(q), 280);
+    });
+
+    $('#sendNewsNotificationBtn').on('click', async function () {
+        const articleId = ($('#newsNotificationArticleId').val() || '').trim();
+        const article = getApprovedArticleById(articleId);
+        const title = ($('#newsNotificationTitle').val() || '').trim();
+        const message = ($('#newsNotificationMessage').val() || '').trim();
+        const imageUrl = ($('#newsNotificationImageUrl').val() || '').trim();
+        const targetType = $('#newsNotificationTargetType').val() || 'all_users';
+        const targetUserId = $('#newsNotificationTargetUserId').val() || '';
+        const targetQualificationId = $('#newsNotificationTargetQualificationId').val() || '';
+        const scheduleMode = $('input[name="news_notification_schedule_mode"]:checked').val() || 'now';
+        const scheduledAt = $('#newsNotificationScheduledAt').val() || '';
+
+        if (!article) {
+            return appAlert('Hata', 'Seçili haber bulunamadı.', 'error');
+        }
+        if (!title || !message) {
+            return appAlert('Doğrulama', 'Başlık ve mesaj zorunludur.', 'warning');
+        }
+        if (targetType === 'single_user' && !targetUserId) {
+            return appAlert('Doğrulama', 'Tek kullanıcı seçmelisiniz.', 'warning');
+        }
+        if (targetType === 'qualification' && !targetQualificationId) {
+            return appAlert('Doğrulama', 'Yeterlilik seçmelisiniz.', 'warning');
+        }
+        if (scheduleMode === 'scheduled' && !scheduledAt) {
+            return appAlert('Doğrulama', 'Planlı gönderim için tarih/saat seçiniz.', 'warning');
+        }
+
+        const payload = {
+            title,
+            message,
+            image_url: imageUrl,
+            channel: 'news',
+            deep_link: 'news',
+            target_type: targetType,
+            target_user_id: targetUserId,
+            target_qualification_id: targetQualificationId,
+            schedule_mode: scheduleMode,
+            scheduled_at: scheduledAt,
+            payload_json: buildNewsNotificationPayload(article)
+        };
+
+        const action = scheduleMode === 'scheduled' ? 'create_notification' : 'send_now';
+        const $btn = $(this);
+        const defaultHtml = $btn.html();
+        $btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span> Gönderiliyor...');
+
+        try {
+            const res = await notificationApiCall(action, 'POST', payload);
+            if (!res.success) {
+                await appAlert('Hata', res.message || 'Bildirim gönderilemedi.', 'error');
+                return;
+            }
+
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('newsNotificationModal')).hide();
+            await appAlert('Başarılı', res.message || 'Bildirim başarıyla işlendi.', 'success');
+            await loadNewsNotifications();
+        } catch (e) {
+            console.error('[news] sendNewsNotification', e);
+            await appAlert('Hata', 'Bildirim gönderimi sırasında beklenmeyen bir hata oluştu.', 'error');
+        } finally {
+            $btn.prop('disabled', false).html(defaultHtml);
+        }
+    });
+
+    $(document).on('click', '.news-notification-detail-btn', async function () {
+        const id = $(this).data('id');
+        const res = await notificationApiCall('get_notification_detail', 'GET', { notification_id: id });
+        if (!res.success) return appAlert('Hata', res.message || 'Bildirim detayı alınamadı.', 'error');
+
+        const n = res.data?.notification || {};
+        await appAlert(n.title || 'Bildirim Detayı', n.message || '-', 'info');
+    });
+
     $('#newsTabs button[data-bs-toggle="tab"]').on('shown.bs.tab', function () {
         currentStatusTab = getActiveTabStatus();
+        if (currentStatusTab === 'news_notifications') {
+            loadNewsNotifications();
+            return;
+        }
         if (currentStatusTab !== 'sources') {
             syncSelectAllCheckbox(currentStatusTab);
         }
     });
 
     loadSources();
+    loadNotificationQualifications();
+    searchNotificationUsers('');
     refreshAllArticles();
 });
 </script>

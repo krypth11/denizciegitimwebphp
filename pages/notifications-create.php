@@ -62,6 +62,7 @@ include '../includes/sidebar.php';
                                 <option value="community">community</option>
                                 <option value="premium">premium</option>
                                 <option value="system">system</option>
+                                <option value="news">news</option>
                             </select>
                         </div>
                         <div class="col-12">

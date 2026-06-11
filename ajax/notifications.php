@@ -37,8 +37,220 @@ function notifications_safe_json_decode(?string $json): array
 
 function notifications_validate_channel(string $channel): string
 {
-    $allowed = ['general', 'study', 'exam', 'community', 'premium', 'system'];
+    $allowed = ['general', 'study', 'exam', 'community', 'premium', 'system', 'news'];
     return in_array($channel, $allowed, true) ? $channel : 'general';
+}
+
+function notifications_target_type_label(string $type): string
+{
+    $map = [
+        'all_users' => 'Tüm kullanıcılar',
+        'single_user' => 'Tek kullanıcı',
+        'premium_users' => 'Premium kullanıcılar',
+        'free_users' => 'Free kullanıcılar',
+        'qualification' => 'Belirli yeterlilik',
+        'last_7_days_active' => 'Son 7 gün aktif',
+        'last_30_days_passive' => 'Son 30 gün pasif',
+    ];
+
+    return $map[$type] ?? ($type !== '' ? $type : '-');
+}
+
+function notifications_status_label(string $status): string
+{
+    $map = [
+        'draft' => 'Taslak',
+        'scheduled' => 'Planlandı',
+        'queued' => 'Kuyrukta',
+        'processing' => 'İşleniyor',
+        'sending' => 'Gönderiliyor',
+        'sent' => 'Gönderildi',
+        'completed' => 'Gönderildi',
+        'success' => 'Gönderildi',
+        'failed' => 'Hatalı',
+        'error' => 'Hatalı',
+        'cancelled' => 'İptal Edildi',
+    ];
+
+    $key = strtolower(trim($status));
+    return $map[$key] ?? ($status !== '' ? $status : '-');
+}
+
+function notifications_schedule_label(string $scheduleType, ?string $scheduledAt): string
+{
+    $scheduleType = strtolower(trim($scheduleType));
+    if ($scheduleType === 'scheduled') {
+        return $scheduledAt ? ('Planlı • ' . $scheduledAt) : 'Planlı';
+    }
+    if ($scheduleType === 'draft') {
+        return 'Taslak';
+    }
+    return 'Hemen';
+}
+
+function notifications_extract_article_id(array $payload): string
+{
+    foreach (['article_id', 'entity_id', 'id'] as $key) {
+        $value = trim((string)($payload[$key] ?? ''));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    return '';
+}
+
+function notifications_is_news_item(array $row, array $schema): bool
+{
+    $n = $schema['notifications'];
+    $channel = $n['channel'] ? strtolower(trim((string)($row[$n['channel']] ?? ''))) : '';
+    if ($channel === 'news') {
+        return true;
+    }
+
+    $deepLink = $n['deep_link'] ? strtolower(trim((string)($row[$n['deep_link']] ?? ''))) : '';
+    if ($deepLink === 'news') {
+        return true;
+    }
+
+    $payload = [];
+    if ($n['payload_json'] && !empty($row[$n['payload_json']])) {
+        $decoded = json_decode((string)$row[$n['payload_json']], true);
+        if (is_array($decoded)) {
+            $payload = $decoded;
+        }
+    }
+
+    $type = strtolower(trim((string)($payload['type'] ?? '')));
+    $screen = strtolower(trim((string)($payload['screen'] ?? '')));
+    $payloadDeepLink = strtolower(trim((string)($payload['deep_link'] ?? '')));
+
+    return $type === 'news_article' || $screen === 'news' || $payloadDeepLink === 'news';
+}
+
+function notifications_list_news(PDO $pdo): array
+{
+    $schema = notification_schema($pdo);
+    $n = $schema['notifications'];
+
+    $select = [
+        notification_q($n['id']) . ' AS id',
+        notification_q($n['title']) . ' AS title',
+        notification_q($n['message']) . ' AS message',
+    ];
+
+    $optionalMap = [
+        'channel' => $n['channel'],
+        'deep_link' => $n['deep_link'],
+        'payload_json' => $n['payload_json'],
+        'target_type' => $n['target_type'],
+        'status' => $n['status'],
+        'schedule_type' => $n['schedule_type'],
+        'scheduled_at' => $n['scheduled_at'],
+        'sent_at' => $n['sent_at'],
+        'total_target' => $n['total_target'],
+        'success_count' => $n['success_count'],
+        'failure_count' => $n['failure_count'],
+        'created_at' => $n['created_at'],
+    ];
+
+    foreach ($optionalMap as $alias => $column) {
+        $select[] = $column ? notification_q($column) . ' AS ' . $alias : 'NULL AS ' . $alias;
+    }
+
+    $orderBy = $n['created_at'] ? notification_q($n['created_at']) : notification_q($n['id']);
+    $sql = 'SELECT ' . implode(', ', $select)
+        . ' FROM ' . notification_q($n['table'])
+        . ' ORDER BY ' . $orderBy . ' DESC LIMIT 1000';
+
+    $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $filtered = [];
+    $articleIds = [];
+
+    foreach ($rows as $row) {
+        if (!notifications_is_news_item($row, $schema)) {
+            continue;
+        }
+
+        $payload = [];
+        if (!empty($row['payload_json'])) {
+            $decoded = json_decode((string)$row['payload_json'], true);
+            if (is_array($decoded)) {
+                $payload = $decoded;
+            }
+        }
+
+        $articleId = notifications_extract_article_id($payload);
+        if ($articleId !== '') {
+            $articleIds[] = $articleId;
+        }
+
+        $filtered[] = [
+            'id' => (string)($row['id'] ?? ''),
+            'title' => (string)($row['title'] ?? ''),
+            'message' => (string)($row['message'] ?? ''),
+            'channel' => (string)($row['channel'] ?? ''),
+            'deep_link' => (string)($row['deep_link'] ?? ''),
+            'payload_json' => (string)($row['payload_json'] ?? ''),
+            '_payload' => $payload,
+            '_article_id' => $articleId,
+            'target_type' => (string)($row['target_type'] ?? 'all_users'),
+            'status' => (string)($row['status'] ?? ''),
+            'schedule_type' => (string)($row['schedule_type'] ?? ''),
+            'scheduled_at' => (string)($row['scheduled_at'] ?? ''),
+            'sent_at' => (string)($row['sent_at'] ?? ''),
+            'total_target' => (int)($row['total_target'] ?? 0),
+            'success_count' => (int)($row['success_count'] ?? 0),
+            'failure_count' => (int)($row['failure_count'] ?? 0),
+            'created_at' => (string)($row['created_at'] ?? ''),
+        ];
+    }
+
+    $articleTitleMap = [];
+    $articleIds = array_values(array_unique(array_filter($articleIds, static fn($id) => trim((string)$id) !== '')));
+    if (!empty($articleIds)) {
+        $placeholders = implode(', ', array_fill(0, count($articleIds), '?'));
+        $stmt = $pdo->prepare('SELECT id, title FROM news_articles WHERE id IN (' . $placeholders . ')');
+        $stmt->execute($articleIds);
+        $articleRows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        foreach ($articleRows as $articleRow) {
+            $articleTitleMap[(string)($articleRow['id'] ?? '')] = (string)($articleRow['title'] ?? '-');
+        }
+    }
+
+    $items = [];
+    foreach ($filtered as $item) {
+        $payload = $item['_payload'];
+        $articleId = $item['_article_id'];
+        $articleTitle = trim((string)($payload['article_title'] ?? ''));
+        if ($articleTitle === '' && $articleId !== '') {
+            $articleTitle = (string)($articleTitleMap[$articleId] ?? '');
+        }
+
+        $items[] = [
+            'id' => $item['id'],
+            'title' => $item['title'],
+            'message' => $item['message'],
+            'channel' => $item['channel'],
+            'deep_link' => $item['deep_link'],
+            'payload_json' => $item['payload_json'],
+            'article_id' => $articleId,
+            'article_title' => $articleTitle !== '' ? $articleTitle : '-',
+            'target_type' => $item['target_type'],
+            'target_label' => notifications_target_type_label($item['target_type']),
+            'status' => $item['status'],
+            'status_label' => notifications_status_label($item['status']),
+            'schedule_type' => $item['schedule_type'],
+            'scheduled_at' => $item['scheduled_at'],
+            'sent_at' => $item['sent_at'],
+            'total_target' => $item['total_target'],
+            'success_count' => $item['success_count'],
+            'failure_count' => $item['failure_count'],
+            'created_at' => $item['created_at'],
+        ];
+    }
+
+    return ['items' => $items];
 }
 
 function notifications_normalize_target_type(string $type): string
@@ -279,6 +491,11 @@ try {
         case 'list_history': {
             $history = notifications_list_history($pdo);
             notifications_json(true, '', $history);
+            break;
+        }
+
+        case 'list_news_notifications': {
+            notifications_json(true, '', notifications_list_news($pdo));
             break;
         }
 
