@@ -20,6 +20,7 @@ if (!function_exists('notification_deep_link_pages')) {
             ['value' => 'maritime', 'label' => 'Maritime English'],
             ['value' => 'daily_quiz', 'label' => 'Daily Quiz'],
             ['value' => 'profile', 'label' => 'Profil'],
+            ['value' => 'notification_detail', 'label' => 'Bildirim Detayı'],
         ];
     }
 }
@@ -179,6 +180,7 @@ if (!function_exists('notification_schema')) {
                 'response_code' => notification_pick_column($lCols, ['response_code', 'http_code', 'firebase_code'], false),
                 'response_message' => notification_pick_column($lCols, ['response_message', 'response_text', 'error_message'], false),
                 'response_body' => notification_pick_column($lCols, ['response_body', 'provider_response', 'meta_json'], false),
+                'opened_at' => notification_pick_column($lCols, ['opened_at', 'read_at', 'opened_on'], false),
                 'created_at' => notification_pick_column($lCols, ['created_at', 'logged_at', 'sent_at'], false),
             ],
             'rules' => [
@@ -212,6 +214,7 @@ if (!function_exists('notification_schema')) {
                 'id' => notification_pick_column($uCols, ['id']),
                 'email' => notification_pick_column($uCols, ['email'], false),
                 'full_name' => notification_pick_column($uCols, ['full_name', 'name', 'display_name'], false),
+                'is_guest' => notification_pick_column($uCols, ['is_guest'], false),
                 'is_deleted' => notification_pick_column($uCols, ['is_deleted'], false),
                 'current_qualification_id' => notification_pick_column($uCols, ['current_qualification_id', 'qualification_id'], false),
                 'last_sign_in_at' => notification_pick_column($uCols, ['last_sign_in_at', 'last_login_at'], false),
@@ -784,15 +787,9 @@ if (!function_exists('notification_disable_push_token')) {
 if (!function_exists('notification_build_fcm_data')) {
     function notification_build_fcm_data(array $notification, array $notificationSchema): array
     {
-        $payload = [];
-        $payloadColumn = $notificationSchema['payload_json'] ?? null;
-        if ($payloadColumn && !empty($notification[$payloadColumn])) {
-            $decoded = json_decode((string)$notification[$payloadColumn], true);
-            if (is_array($decoded)) {
-                $payload = $decoded;
-            }
-        }
+        $payload = notification_decode_payload_json($notification[$notificationSchema['payload_json'] ?? ''] ?? null);
 
+        $notificationId = trim((string)($notification[$notificationSchema['id'] ?? ''] ?? ''));
         $type = isset($payload['type']) ? (string)$payload['type'] : (string)($notification[$notificationSchema['channel'] ?? ''] ?? 'general');
         $notificationDeepLink = '';
         $deepLinkColumn = $notificationSchema['deep_link'] ?? null;
@@ -803,12 +800,28 @@ if (!function_exists('notification_build_fcm_data')) {
             ? (string)$payload['screen']
             : (isset($payload['deep_link']) ? (string)$payload['deep_link'] : $notificationDeepLink);
         $entityId = isset($payload['entity_id']) ? (string)$payload['entity_id'] : (string)($payload['id'] ?? '');
+        $deepLink = trim((string)($notificationDeepLink !== '' ? $notificationDeepLink : ($payload['deep_link'] ?? '')));
 
-        return [
+        $data = [
+            'notification_id' => $notificationId,
             'type' => $type,
             'screen' => $screen,
             'entity_id' => $entityId,
+            'deep_link' => $deepLink,
         ];
+
+        foreach (['article_id', 'articleTitle', 'article_title', 'custom_type', 'detail_title'] as $key) {
+            if (!array_key_exists($key, $payload) || is_array($payload[$key]) || is_object($payload[$key])) {
+                continue;
+            }
+            $data[$key] = (string)$payload[$key];
+        }
+
+        foreach ($data as $key => $value) {
+            $data[$key] = (string)$value;
+        }
+
+        return $data;
     }
 }
 
@@ -816,6 +829,13 @@ if (!function_exists('notification_send_fcm_v1')) {
     function notification_send_fcm_v1(string $projectId, string $accessToken, string $targetToken, string $title, string $message, array $data): array
     {
         $url = 'https://fcm.googleapis.com/v1/projects/' . rawurlencode($projectId) . '/messages:send';
+        $stringData = [];
+        foreach ($data as $key => $value) {
+            if (is_array($value) || is_object($value)) {
+                continue;
+            }
+            $stringData[(string)$key] = (string)$value;
+        }
         $requestBody = [
             'message' => [
                 'token' => $targetToken,
@@ -823,11 +843,7 @@ if (!function_exists('notification_send_fcm_v1')) {
                     'title' => $title,
                     'body' => $message,
                 ],
-                'data' => [
-                    'type' => (string)($data['type'] ?? ''),
-                    'screen' => (string)($data['screen'] ?? ''),
-                    'entity_id' => (string)($data['entity_id'] ?? ''),
-                ],
+                'data' => $stringData,
                 'android' => [
                     'priority' => 'high',
                 ],
@@ -1637,5 +1653,336 @@ if (!function_exists('notification_run_rules_engine')) {
         }
 
         return $stats;
+    }
+}
+
+if (!function_exists('notification_decode_payload_json')) {
+    function notification_decode_payload_json($payloadJson): array
+    {
+        $raw = trim((string)$payloadJson);
+        if ($raw === '') {
+            return [];
+        }
+
+        $decoded = json_decode($raw, true);
+        return is_array($decoded) ? $decoded : [];
+    }
+}
+
+if (!function_exists('notification_is_guest_user')) {
+    function notification_is_guest_user(PDO $pdo, string $userId): bool
+    {
+        $userId = trim($userId);
+        if ($userId === '') {
+            return true;
+        }
+
+        $schema = notification_schema($pdo);
+        $u = $schema['users'];
+        if (!$u['is_guest']) {
+            return false;
+        }
+
+        $sql = 'SELECT ' . notification_q($u['is_guest']) . ' FROM ' . notification_q($u['table'])
+            . ' WHERE ' . notification_q($u['id']) . ' = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        return ((int)$stmt->fetchColumn()) === 1;
+    }
+}
+
+if (!function_exists('notification_inbox_base_from')) {
+    function notification_inbox_base_from(array $schema): string
+    {
+        $n = $schema['notifications'];
+        $l = $schema['logs'];
+
+        return ' FROM ' . notification_q($l['table']) . ' l'
+            . ' INNER JOIN ' . notification_q($n['table']) . ' n'
+            . ' ON n.' . notification_q($n['id']) . ' = l.' . notification_q($l['notification_id']);
+    }
+}
+
+if (!function_exists('notification_inbox_success_condition')) {
+    function notification_inbox_success_condition(array $schema): string
+    {
+        $l = $schema['logs'];
+
+        if ($l['status']) {
+            return 'l.' . notification_q($l['status']) . " = 'success'";
+        }
+
+        if ($l['is_success']) {
+            return 'l.' . notification_q($l['is_success']) . ' = 1';
+        }
+
+        return '1=1';
+    }
+}
+
+if (!function_exists('notification_inbox_sort_expression')) {
+    function notification_inbox_sort_expression(array $schema): string
+    {
+        $n = $schema['notifications'];
+        $l = $schema['logs'];
+
+        $parts = [];
+        if ($n['sent_at']) {
+            $parts[] = 'n.' . notification_q($n['sent_at']);
+        }
+        if ($l['created_at']) {
+            $parts[] = 'MAX(l.' . notification_q($l['created_at']) . ')';
+        }
+        if ($n['created_at']) {
+            $parts[] = 'n.' . notification_q($n['created_at']);
+        }
+
+        if (empty($parts)) {
+            return 'n.' . notification_q($n['id']);
+        }
+
+        return 'COALESCE(' . implode(', ', $parts) . ')';
+    }
+}
+
+if (!function_exists('notification_inbox_map_row')) {
+    function notification_inbox_map_row(array $row): array
+    {
+        $payload = notification_decode_payload_json($row['payload_json'] ?? null);
+        $type = trim((string)($payload['type'] ?? $row['channel'] ?? ''));
+        $screen = trim((string)($payload['screen'] ?? $payload['deep_link'] ?? $row['deep_link'] ?? ''));
+        $entityId = trim((string)($payload['entity_id'] ?? $payload['id'] ?? ''));
+        $openedAt = $row['opened_at'] ?? null;
+
+        return [
+            'id' => (string)($row['id'] ?? ''),
+            'title' => (string)($row['title'] ?? ''),
+            'body' => (string)($row['body'] ?? ''),
+            'image_url' => $row['image_url'] !== null ? (string)$row['image_url'] : null,
+            'channel' => (string)($row['channel'] ?? ''),
+            'deep_link' => (string)($row['deep_link'] ?? ''),
+            'payload' => $payload,
+            'type' => $type,
+            'screen' => $screen,
+            'entity_id' => $entityId,
+            'is_read' => $openedAt !== null && $openedAt !== '',
+            'created_at' => $row['created_at'] ?? null,
+            'opened_at' => $openedAt,
+            'sent_at' => $row['sent_at'] ?? null,
+        ];
+    }
+}
+
+if (!function_exists('notification_count_unread_for_user')) {
+    function notification_count_unread_for_user(PDO $pdo, string $userId): int
+    {
+        $userId = trim($userId);
+        if ($userId === '') {
+            return 0;
+        }
+
+        $schema = notification_schema($pdo);
+        $l = $schema['logs'];
+        if (!$l['user_id']) {
+            return 0;
+        }
+
+        $openedExpr = $l['opened_at']
+            ? 'MAX(l.' . notification_q($l['opened_at']) . ')'
+            : 'NULL';
+
+        $sql = 'SELECT COUNT(*) FROM ('
+            . ' SELECT l.' . notification_q($l['notification_id'])
+            . notification_inbox_base_from($schema)
+            . ' WHERE l.' . notification_q($l['user_id']) . ' = ?'
+            . ' AND ' . notification_inbox_success_condition($schema)
+            . ' GROUP BY l.' . notification_q($l['notification_id'])
+            . ' HAVING ' . $openedExpr . ' IS NULL'
+            . ' ) unread_notifications';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        return (int)$stmt->fetchColumn();
+    }
+}
+
+if (!function_exists('notification_list_inbox_for_user')) {
+    function notification_list_inbox_for_user(PDO $pdo, string $userId, string $filter = 'all', int $page = 1, int $limit = 30): array
+    {
+        $userId = trim($userId);
+        if ($userId === '') {
+            return [
+                'items' => [],
+                'pagination' => ['page' => max(1, $page), 'limit' => max(1, min(100, $limit)), 'has_more' => false],
+                'unread_count' => 0,
+            ];
+        }
+
+        $schema = notification_schema($pdo);
+        $n = $schema['notifications'];
+        $l = $schema['logs'];
+        $page = max(1, $page);
+        $limit = max(1, min(100, $limit));
+        $offset = ($page - 1) * $limit;
+        $filter = ($filter === 'unread') ? 'unread' : 'all';
+
+        $createdExprParts = [];
+        if ($l['created_at']) {
+            $createdExprParts[] = 'MIN(l.' . notification_q($l['created_at']) . ')';
+        }
+        if ($n['sent_at']) {
+            $createdExprParts[] = 'n.' . notification_q($n['sent_at']);
+        }
+        if ($n['created_at']) {
+            $createdExprParts[] = 'n.' . notification_q($n['created_at']);
+        }
+        $createdExpr = empty($createdExprParts) ? 'n.' . notification_q($n['id']) : 'COALESCE(' . implode(', ', $createdExprParts) . ')';
+        $openedExpr = $l['opened_at'] ? 'MAX(l.' . notification_q($l['opened_at']) . ')' : 'NULL';
+        $sortExpr = notification_inbox_sort_expression($schema);
+
+        $select = [
+            'n.' . notification_q($n['id']) . ' AS id',
+            'n.' . notification_q($n['title']) . ' AS title',
+            'n.' . notification_q($n['message']) . ' AS body',
+            ($n['image_url'] ? 'n.' . notification_q($n['image_url']) : 'NULL') . ' AS image_url',
+            ($n['channel'] ? 'n.' . notification_q($n['channel']) : "''") . ' AS channel',
+            ($n['deep_link'] ? 'n.' . notification_q($n['deep_link']) : 'NULL') . ' AS deep_link',
+            ($n['payload_json'] ? 'n.' . notification_q($n['payload_json']) : 'NULL') . ' AS payload_json',
+            $createdExpr . ' AS created_at',
+            ($n['sent_at'] ? 'n.' . notification_q($n['sent_at']) : 'NULL') . ' AS sent_at',
+            $openedExpr . ' AS opened_at',
+            $sortExpr . ' AS sort_at',
+        ];
+
+        $sql = 'SELECT ' . implode(', ', $select)
+            . notification_inbox_base_from($schema)
+            . ' WHERE l.' . notification_q($l['user_id']) . ' = ?'
+            . ' AND ' . notification_inbox_success_condition($schema)
+            . ' GROUP BY n.' . notification_q($n['id']);
+
+        if ($filter === 'unread') {
+            $sql .= ' HAVING ' . $openedExpr . ' IS NULL';
+        }
+
+        $sql .= ' ORDER BY ' . $sortExpr . ' DESC LIMIT ' . ($limit + 1) . ' OFFSET ' . $offset;
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $hasMore = count($rows) > $limit;
+        if ($hasMore) {
+            array_pop($rows);
+        }
+
+        $items = array_map('notification_inbox_map_row', $rows);
+
+        return [
+            'items' => $items,
+            'pagination' => [
+                'page' => $page,
+                'limit' => $limit,
+                'has_more' => $hasMore,
+            ],
+            'unread_count' => notification_count_unread_for_user($pdo, $userId),
+        ];
+    }
+}
+
+if (!function_exists('notification_get_detail_for_user')) {
+    function notification_get_detail_for_user(PDO $pdo, string $userId, string $notificationId): ?array
+    {
+        $userId = trim($userId);
+        $notificationId = trim($notificationId);
+        if ($userId === '' || $notificationId === '') {
+            return null;
+        }
+
+        $schema = notification_schema($pdo);
+        $n = $schema['notifications'];
+        $l = $schema['logs'];
+        $openedExpr = $l['opened_at'] ? 'MAX(l.' . notification_q($l['opened_at']) . ')' : 'NULL';
+        $createdExpr = notification_inbox_sort_expression($schema);
+
+        $select = [
+            'n.' . notification_q($n['id']) . ' AS id',
+            'n.' . notification_q($n['title']) . ' AS title',
+            'n.' . notification_q($n['message']) . ' AS body',
+            ($n['image_url'] ? 'n.' . notification_q($n['image_url']) : 'NULL') . ' AS image_url',
+            ($n['channel'] ? 'n.' . notification_q($n['channel']) : "''") . ' AS channel',
+            ($n['deep_link'] ? 'n.' . notification_q($n['deep_link']) : 'NULL') . ' AS deep_link',
+            ($n['payload_json'] ? 'n.' . notification_q($n['payload_json']) : 'NULL') . ' AS payload_json',
+            ($n['created_at'] ? 'n.' . notification_q($n['created_at']) : 'NULL') . ' AS created_at',
+            ($n['sent_at'] ? 'n.' . notification_q($n['sent_at']) : 'NULL') . ' AS sent_at',
+            $openedExpr . ' AS opened_at',
+            $createdExpr . ' AS sort_at',
+        ];
+
+        $sql = 'SELECT ' . implode(', ', $select)
+            . notification_inbox_base_from($schema)
+            . ' WHERE l.' . notification_q($l['user_id']) . ' = ?'
+            . ' AND n.' . notification_q($n['id']) . ' = ?'
+            . ' AND ' . notification_inbox_success_condition($schema)
+            . ' GROUP BY n.' . notification_q($n['id'])
+            . ' LIMIT 1';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId, $notificationId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row ? notification_inbox_map_row($row) : null;
+    }
+}
+
+if (!function_exists('notification_mark_read_for_user')) {
+    function notification_mark_read_for_user(PDO $pdo, string $userId, string $notificationId): bool
+    {
+        $userId = trim($userId);
+        $notificationId = trim($notificationId);
+        if ($userId === '' || $notificationId === '') {
+            return false;
+        }
+
+        $schema = notification_schema($pdo);
+        $l = $schema['logs'];
+        if (!$l['opened_at'] || !$l['user_id']) {
+            return false;
+        }
+
+        $sql = 'UPDATE ' . notification_q($l['table'])
+            . ' SET ' . notification_q($l['opened_at']) . ' = COALESCE(' . notification_q($l['opened_at']) . ', NOW())'
+            . ' WHERE ' . notification_q($l['user_id']) . ' = ?'
+            . ' AND ' . notification_q($l['notification_id']) . ' = ?'
+            . ' AND ' . notification_inbox_success_condition($schema);
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId, $notificationId]);
+        return $stmt->rowCount() > 0;
+    }
+}
+
+if (!function_exists('notification_mark_all_read_for_user')) {
+    function notification_mark_all_read_for_user(PDO $pdo, string $userId): int
+    {
+        $userId = trim($userId);
+        if ($userId === '') {
+            return 0;
+        }
+
+        $schema = notification_schema($pdo);
+        $l = $schema['logs'];
+        if (!$l['opened_at'] || !$l['user_id']) {
+            return 0;
+        }
+
+        $sql = 'UPDATE ' . notification_q($l['table'])
+            . ' SET ' . notification_q($l['opened_at']) . ' = NOW()'
+            . ' WHERE ' . notification_q($l['user_id']) . ' = ?'
+            . ' AND ' . notification_q($l['opened_at']) . ' IS NULL'
+            . ' AND ' . notification_inbox_success_condition($schema);
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$userId]);
+        return (int)$stmt->rowCount();
     }
 }

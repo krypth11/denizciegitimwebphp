@@ -342,6 +342,77 @@ function notifications_list_history(PDO $pdo): array
     ];
 }
 
+function notifications_payload_type(array $row, array $schema): string
+{
+    $n = $schema['notifications'];
+    if (!$n['payload_json'] || empty($row[$n['payload_json']])) {
+        return '';
+    }
+
+    $payload = json_decode((string)$row[$n['payload_json']], true);
+    return is_array($payload) ? strtolower(trim((string)($payload['type'] ?? ''))) : '';
+}
+
+function notifications_is_special_item(array $row, array $schema): bool
+{
+    $n = $schema['notifications'];
+    $type = notifications_payload_type($row, $schema);
+    if ($type === 'custom_notification') {
+        return true;
+    }
+
+    $deepLink = $n['deep_link'] ? strtolower(trim((string)($row[$n['deep_link']] ?? ''))) : '';
+    return $deepLink === 'notification_detail';
+}
+
+function notifications_list_special(PDO $pdo): array
+{
+    $schema = notification_schema($pdo);
+    $n = $schema['notifications'];
+
+    $sql = 'SELECT * FROM ' . notification_q($n['table'])
+        . ' ORDER BY ' . ($n['created_at'] ? notification_q($n['created_at']) : notification_q($n['id'])) . ' DESC LIMIT 200';
+    $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $items = [];
+
+    foreach ($rows as $row) {
+        if (!notifications_is_special_item($row, $schema)) {
+            continue;
+        }
+
+        $payload = $n['payload_json'] ? json_decode((string)($row[$n['payload_json']] ?? ''), true) : [];
+        if (!is_array($payload)) {
+            $payload = [];
+        }
+
+        $targetType = (string)($row[$n['target_type']] ?? 'all_users');
+        $scheduleType = (string)($row[$n['schedule_type']] ?? 'now');
+        $scheduledAt = (string)($row[$n['scheduled_at']] ?? '');
+        $status = (string)($row[$n['status']] ?? '');
+
+        $items[] = [
+            'id' => (string)($row[$n['id']] ?? ''),
+            'title' => (string)($row[$n['title']] ?? ''),
+            'message' => (string)($row[$n['message']] ?? ''),
+            'status' => $status,
+            'status_label' => notifications_status_label($status),
+            'target_type' => $targetType,
+            'target_label' => notifications_target_type_label($targetType),
+            'schedule_type' => $scheduleType,
+            'schedule_label' => notifications_schedule_label($scheduleType, $scheduledAt !== '' ? $scheduledAt : null),
+            'success_count' => (int)($row[$n['success_count']] ?? 0),
+            'failure_count' => (int)($row[$n['failure_count']] ?? 0),
+            'created_at' => (string)($row[$n['created_at']] ?? ''),
+            'sent_at' => (string)($row[$n['sent_at']] ?? ''),
+            'payload' => $payload,
+            'deep_link' => (string)($row[$n['deep_link']] ?? ''),
+            'image_url' => (string)($row[$n['image_url']] ?? ''),
+        ];
+    }
+
+    return ['items' => $items];
+}
+
 function notifications_stats_summary(PDO $pdo): array
 {
     $schema = notification_schema($pdo);
@@ -496,6 +567,11 @@ try {
 
         case 'list_news_notifications': {
             notifications_json(true, '', notifications_list_news($pdo));
+            break;
+        }
+
+        case 'list_special_notifications': {
+            notifications_json(true, '', notifications_list_special($pdo));
             break;
         }
 
@@ -746,6 +822,66 @@ try {
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
             notifications_json(true, '', ['items' => $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []]);
+            break;
+        }
+
+        case 'create_special_notification': {
+            $title = trim((string)($_POST['title'] ?? ''));
+            $message = trim((string)($_POST['message'] ?? ''));
+            $detailText = trim((string)($_POST['detail_text'] ?? ''));
+            $imageUrl = trim((string)($_POST['image_url'] ?? ''));
+            $targetType = notifications_normalize_target_type(trim((string)($_POST['target_type'] ?? 'all_users')));
+            $scheduleMode = trim((string)($_POST['schedule_mode'] ?? 'now'));
+            $scheduledAt = trim((string)($_POST['scheduled_at'] ?? ''));
+
+            if ($title === '') {
+                notifications_json(false, 'Başlık zorunludur.', [], 422, ['title' => 'required']);
+            }
+            if ($message === '') {
+                notifications_json(false, 'Mesaj zorunludur.', [], 422, ['message' => 'required']);
+            }
+            if ($scheduleMode === 'scheduled' && $scheduledAt === '') {
+                notifications_json(false, 'Planlı gönderim için tarih/saat zorunludur.', [], 422, ['scheduled_at' => 'required']);
+            }
+
+            $targetValue = notifications_build_target_value($targetType);
+            $notificationId = generate_uuid();
+            $detailTextValue = $detailText !== '' ? $detailText : $message;
+            $payload = [
+                'type' => 'custom_notification',
+                'screen' => 'notification_detail',
+                'deep_link' => 'notification_detail',
+                'entity_id' => $notificationId,
+                'notification_id' => $notificationId,
+                'detail_text' => $detailTextValue,
+                'detail_image_url' => $imageUrl,
+                'detail_title' => $title,
+            ];
+
+            $status = $scheduleMode === 'scheduled' ? 'scheduled' : 'queued';
+            $notificationPayload = [
+                'title' => $title,
+                'message' => $message,
+                'image_url' => ($imageUrl !== '' ? $imageUrl : null),
+                'deep_link' => 'notification_detail',
+                'payload_json' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                'channel' => 'system',
+                'target_type' => $targetType,
+                'target_value' => !empty($targetValue) ? json_encode($targetValue, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
+                'status' => $status,
+                'schedule_type' => $scheduleMode === 'scheduled' ? 'scheduled' : 'now',
+                'scheduled_at' => $scheduleMode === 'scheduled' ? $scheduledAt : null,
+                'created_by' => (string)($authUser['user_id'] ?? ($_SESSION['user_id'] ?? '')),
+            ];
+
+            notification_create_or_update($pdo, $notificationPayload, $notificationId);
+
+            if ($scheduleMode === 'scheduled') {
+                notifications_json(true, 'Özel bildirim planlandı.', ['notification_id' => $notificationId]);
+            }
+
+            $result = send_push_notification($pdo, $notificationId);
+            notifications_json(true, 'Özel bildirim gönderildi.', ['notification_id' => $notificationId, 'send_result' => $result]);
             break;
         }
 
