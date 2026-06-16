@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/usage_limits_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/subscription_management_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/referral_helper.php';
 
 api_require_method('POST');
 
@@ -166,6 +167,15 @@ try {
             ]),
         ]);
         $historyInserted = true;
+
+        referral_handle_revenuecat_event(
+            $pdo,
+            $matchedUserId,
+            $eventRowId,
+            $eventId,
+            $event,
+            $eventType
+        );
 
         subscription_mgmt_apply_lifecycle_event($pdo, $matchedUserId, $beforeStatus, $afterStatus, $eventType);
     } else {

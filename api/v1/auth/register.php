@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/user_lifecycle_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/referral_helper.php';
 
 api_require_method('POST');
 
@@ -12,6 +13,7 @@ try {
     $fullName = trim((string)($payload['full_name'] ?? ''));
     $email = trim(strtolower((string)($payload['email'] ?? '')));
     $password = (string)($payload['password'] ?? '');
+    $referralCode = strtoupper(trim((string)($payload['referral_code'] ?? '')));
 
     if ($fullName === '') {
         api_error('full_name zorunludur.', 422);
@@ -75,6 +77,16 @@ try {
             'current_qualification_id' => null,
             'target_qualification_id' => null,
         ]);
+
+        if ($referralCode !== '') {
+            referral_apply_code_to_user(
+                $pdo,
+                $userId,
+                $referralCode,
+                isset($payload['device_hash']) ? (string)$payload['device_hash'] : null,
+                $_SERVER['REMOTE_ADDR'] ?? null
+            );
+        }
 
         // Internal guard: pending kullanıcıda password hash gerçekten kaydedilmiş olmalı.
         $profileSchema = api_get_profile_schema($pdo);

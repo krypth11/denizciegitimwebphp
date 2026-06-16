@@ -1186,6 +1186,18 @@ function usage_limits_is_user_pro(PDO $pdo, string $userId): bool
     $isActive = usage_limits_is_subscription_active($status);
 
     if (!$isActive) {
+        $bonusUntil = usage_limits_get_active_premium_bonus_until($pdo, $userId);
+        if ($bonusUntil !== null) {
+            usage_limits_subscription_debug_log('is_user_pro_true_bonus_grant', [
+                'user_id' => $userId,
+                'premium_bonus_until' => $bonusUntil,
+                'premium_source' => 'referral_bonus_grant',
+            ]);
+            return true;
+        }
+    }
+
+    if (!$isActive) {
         $expiresAt = $status['expires_at'] ?? null;
         $expiresAtText = trim((string)$expiresAt);
         $expiresAtTs = null;
@@ -1213,6 +1225,22 @@ function usage_limits_is_user_pro(PDO $pdo, string $userId): bool
     }
 
     return $isActive;
+}
+
+function usage_limits_get_active_premium_bonus_until(PDO $pdo, string $userId): ?string
+{
+    try {
+        if (empty(get_table_columns($pdo, 'user_premium_bonus_grants'))) {
+            return null;
+        }
+        $stmt = $pdo->prepare("SELECT MAX(expires_at) FROM user_premium_bonus_grants WHERE user_id = ? AND status = 'active' AND expires_at > NOW()");
+        $stmt->execute([$userId]);
+        $value = usage_limits_normalize_datetime_to_mysql($stmt->fetchColumn() ?: null);
+        return $value ?: null;
+    } catch (Throwable $e) {
+        usage_limits_log_exception('premium_bonus_until_lookup_failed', $e, ['user_id' => $userId]);
+        return null;
+    }
 }
 
 function usage_limits_upsert_subscription_status(PDO $pdo, string $userId, array $payload): array
@@ -1518,21 +1546,30 @@ function usage_limits_get_summary(PDO $pdo, string $userId, string $qualificatio
     $usageDateTr = usage_limits_tr_date();
     $subscription = usage_limits_get_user_subscription_status($pdo, $userId);
     $isActive = usage_limits_is_subscription_active($subscription);
-    $isPro = $isActive;
+    $premiumBonusUntil = usage_limits_get_active_premium_bonus_until($pdo, $userId);
+    $premiumBonusActive = $premiumBonusUntil !== null;
+    $isPro = $isActive || $premiumBonusActive;
     $normalizedSubscription = usage_limits_normalize_subscription_row($subscription, $userId);
-    $planCode = $isActive ? ($normalizedSubscription['plan_code'] ?? null) : null;
-    $expiresAt = $isActive
-        ? usage_limits_normalize_datetime_to_mysql($normalizedSubscription['expires_at'] ?? null)
-        : null;
+    $revenueCatExpiresAt = $isActive ? usage_limits_normalize_datetime_to_mysql($normalizedSubscription['expires_at'] ?? null) : null;
+    $effectiveExpiresAt = $revenueCatExpiresAt;
+    $premiumSource = $isActive ? 'revenuecat' : 'free';
+    if ($premiumBonusUntil !== null && ($effectiveExpiresAt === null || strtotime($premiumBonusUntil) > strtotime((string)$effectiveExpiresAt))) {
+        $effectiveExpiresAt = $premiumBonusUntil;
+        $premiumSource = $isActive ? 'revenuecat_plus_bonus' : 'bonus_grant';
+    }
+    $planCode = $isPro ? ($normalizedSubscription['plan_code'] ?? null) : null;
 
     return [
         'is_pro' => $isPro,
-        'is_active' => $isActive,
+        'is_active' => $isPro,
         'state' => $isPro ? 'premium' : 'free',
         'plan_code' => $planCode,
-        'expires_at' => $expiresAt,
-        'subscription_expires_at' => $expiresAt,
+        'expires_at' => $effectiveExpiresAt,
+        'subscription_expires_at' => $revenueCatExpiresAt,
         'subscription_is_active' => $isActive,
+        'premium_bonus_until' => $premiumBonusUntil,
+        'premium_bonus_active' => $premiumBonusActive,
+        'premium_source' => $premiumSource,
         'qualification_id' => $qualificationId,
         'usage_date_tr' => $usageDateTr,
         'study' => usage_limits_build_feature_summary(

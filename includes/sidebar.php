@@ -56,6 +56,15 @@ $menuGroups = [
                 ['slug' => 'subscription-issues', 'url' => '/pages/subscription-issues.php', 'icon' => 'bi-exclamation-diamond', 'label' => 'Sorunlu Kayıtlar'],
             ],
         ],
+        [
+            'slug' => 'referral-management',
+            'icon' => 'bi-share',
+            'label' => 'Referans Yönetimi',
+            'children' => [
+                ['slug' => 'referral-settings', 'url' => '/pages/referral-settings.php', 'icon' => 'bi-sliders', 'label' => 'Referans Ayarları'],
+                ['slug' => 'referral-events', 'url' => '/pages/referral-events.php', 'icon' => 'bi-list-check', 'label' => 'Referans İşlemleri'],
+            ],
+        ],
         ['slug' => 'stories', 'url' => '/pages/stories.php', 'icon' => 'bi-images', 'label' => 'Dashboard Hikayeleri'],
         ['slug' => 'news', 'url' => '/pages/news.php', 'icon' => 'bi-newspaper', 'label' => 'Denizcilik Haberleri'],
         ['slug' => 'study-resources', 'url' => '/pages/study-resources.php', 'icon' => 'bi-file-earmark-pdf', 'label' => 'Çalışma Kaynakları'],
@@ -206,35 +215,3 @@ function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default
             <i class="bi bi-list"></i> Menü
         </button>
     </div>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
