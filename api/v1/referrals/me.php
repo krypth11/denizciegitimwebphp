@@ -8,5 +8,6 @@ try {
     $auth = api_require_auth($pdo);
     api_success('Referans özeti alındı.', referral_get_user_summary($pdo, (string)$auth['user']['id']));
 } catch (Throwable $e) {
+    error_log('[referrals/me] ' . $e->getMessage());
     api_error('Referans özeti alınırken hata oluştu.', 500);
 }

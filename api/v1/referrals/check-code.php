@@ -9,12 +9,13 @@ $code = strtoupper(trim((string)($payload['referral_code'] ?? '')));
 if ($code === '') api_error('referral_code zorunludur.', 422);
 
 try {
-    $stmt = $pdo->prepare("SELECT user_id FROM user_referral_codes WHERE code = ? AND status = 'active' LIMIT 1");
+    $stmt = $pdo->prepare('SELECT user_id FROM user_referral_codes WHERE referral_code = ? AND is_active = 1 LIMIT 1');
     $stmt->execute([$code]);
     $referrerId = $stmt->fetchColumn();
     api_success('Kod kontrol edildi.', [
         'valid' => (bool)$referrerId,
         'referral_code' => $code,
+        'code' => $code,
         'referrer' => $referrerId ? ['masked_name' => referral_mask_name($pdo, (string)$referrerId)] : null,
         'message' => $referrerId ? 'Geçerli referans kodu.' : 'Geçersiz referans kodu.',
     ]);

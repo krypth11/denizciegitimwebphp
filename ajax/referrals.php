@@ -36,14 +36,14 @@ function referrals_save_rule(PDO $pdo, array $p): array
         max(0, (int)($p['referrer_reward_days'] ?? 0)),
         max(0, (int)($p['referred_reward_days'] ?? 0)),
         max(0, (int)($p['referrer_bonus_percent_delta'] ?? 0)),
-        max(0, (int)($p['waiting_days'] ?? 0)),
+        max(0, (int)($p['hold_days'] ?? $p['waiting_days'] ?? 0)),
         !empty($p['is_active']) ? 1 : 0,
     ];
     if ($id === '') {
         $id = generate_uuid();
-        $pdo->prepare('INSERT INTO referral_reward_rules (id, plan_code, product_id, referrer_reward_days, referred_reward_days, referrer_bonus_percent_delta, waiting_days, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())')->execute(array_merge([$id], $vals));
+        $pdo->prepare('INSERT INTO referral_reward_rules (id, plan_code, product_id, referrer_reward_days, referred_reward_days, referrer_bonus_percent_delta, hold_days, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())')->execute(array_merge([$id], $vals));
     } else {
-        $pdo->prepare('UPDATE referral_reward_rules SET plan_code=?, product_id=?, referrer_reward_days=?, referred_reward_days=?, referrer_bonus_percent_delta=?, waiting_days=?, is_active=?, updated_at=NOW() WHERE id=?')->execute(array_merge($vals, [$id]));
+        $pdo->prepare('UPDATE referral_reward_rules SET plan_code=?, product_id=?, referrer_reward_days=?, referred_reward_days=?, referrer_bonus_percent_delta=?, hold_days=?, is_active=?, updated_at=NOW() WHERE id=?')->execute(array_merge($vals, [$id]));
     }
     $st = $pdo->prepare('SELECT * FROM referral_reward_rules WHERE id=? LIMIT 1'); $st->execute([$id]);
     return $st->fetch(PDO::FETCH_ASSOC) ?: ['id' => $id];
@@ -100,7 +100,7 @@ try {
             $st = $pdo->prepare('SELECT * FROM referral_reward_events WHERE id=? LIMIT 1'); $st->execute([(string)($_GET['id'] ?? $payload['id'] ?? '')]);
             referrals_json(true, 'OK', ['item' => $st->fetch(PDO::FETCH_ASSOC) ?: null]);
         case 'mark_suspicious':
-            $pdo->prepare("UPDATE referral_reward_events SET status='suspicious', is_suspicious=1, admin_note=?, updated_at=NOW() WHERE id=? AND status='pending'")->execute([(string)($payload['note'] ?? 'admin_mark_suspicious'), (string)($payload['id'] ?? '')]);
+            $pdo->prepare("UPDATE referral_reward_events SET status='suspicious', admin_note=?, updated_at=NOW() WHERE id=? AND status='pending'")->execute([(string)($payload['note'] ?? 'admin_mark_suspicious'), (string)($payload['id'] ?? '')]);
             referrals_json(true, 'Event şüpheli işaretlendi.');
         default:
             referrals_json(false, 'Geçersiz action.', [], 400);
