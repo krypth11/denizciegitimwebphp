@@ -96,6 +96,14 @@ try {
             referrals_json(true, 'Event geri alındı.', ['reversed_count' => referral_reverse_reward_event($pdo, (string)($payload['id'] ?? ''), (string)($payload['note'] ?? 'admin_reverse'))]);
         case 'process_pending':
             referrals_json(true, 'Pending eventler işlendi.', referral_process_pending_rewards($pdo, (int)($payload['limit'] ?? 200)));
+        case 'list_promo_codes':
+            referrals_json(true, 'OK', ['items' => referral_list_promo_codes($pdo, array_merge($_GET, $payload))]);
+        case 'save_promo_code':
+            referrals_json(true, 'Hediye kodu kaydedildi.', ['item' => referral_save_promo_code($pdo, $payload)]);
+        case 'toggle_promo_code':
+            referrals_json(true, 'Hediye kodu durumu güncellendi.', ['item' => referral_toggle_promo_code($pdo, (string)($payload['id'] ?? ''), !empty($payload['is_active']))]);
+        case 'get_promo_redemptions':
+            referrals_json(true, 'OK', ['items' => referral_get_promo_redemptions($pdo, (string)($_GET['id'] ?? $payload['id'] ?? $payload['promo_code_id'] ?? ''))]);
         case 'get_event_detail':
             $st = $pdo->prepare('SELECT * FROM referral_reward_events WHERE id=? LIMIT 1'); $st->execute([(string)($_GET['id'] ?? $payload['id'] ?? '')]);
             referrals_json(true, 'OK', ['item' => $st->fetch(PDO::FETCH_ASSOC) ?: null]);

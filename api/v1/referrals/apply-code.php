@@ -7,11 +7,12 @@ api_require_method('POST');
 try {
     $auth = api_require_auth($pdo);
     $payload = api_get_request_data();
-    $result = referral_apply_code_to_user($pdo, (string)$auth['user']['id'], (string)($payload['referral_code'] ?? ''), isset($payload['device_hash']) ? (string)$payload['device_hash'] : null, $_SERVER['REMOTE_ADDR'] ?? null);
-    api_success('Referans kodu uygulandı.', ['link' => $result]);
+    $code = referral_normalize_code($payload['code'] ?? $payload['referral_code'] ?? '');
+    $result = referral_apply_any_code_to_user($pdo, (string)$auth['user']['id'], $code, isset($payload['device_hash']) ? (string)$payload['device_hash'] : null, $_SERVER['REMOTE_ADDR'] ?? null);
+    api_success((string)($result['message'] ?? 'Kod uygulandı.'), $result);
 } catch (InvalidArgumentException $e) {
     $code = (int)$e->getCode();
     api_error($e->getMessage(), ($code >= 400 && $code < 500) ? $code : 422);
 } catch (Throwable $e) {
-    api_error('Referans kodu uygulanırken hata oluştu.', 500);
+    api_error('Kod uygulanırken hata oluştu.', 500);
 }

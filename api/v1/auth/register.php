@@ -13,7 +13,8 @@ try {
     $fullName = trim((string)($payload['full_name'] ?? ''));
     $email = trim(strtolower((string)($payload['email'] ?? '')));
     $password = (string)($payload['password'] ?? '');
-    $referralCode = strtoupper(trim((string)($payload['referral_code'] ?? '')));
+    $referralCode = referral_normalize_code($payload['code'] ?? $payload['referral_code'] ?? '');
+    $codeApplyResult = null;
 
     if ($fullName === '') {
         api_error('full_name zorunludur.', 422);
@@ -79,7 +80,7 @@ try {
         ]);
 
         if ($referralCode !== '') {
-            referral_apply_code_to_user(
+            $codeApplyResult = referral_apply_any_code_to_user(
                 $pdo,
                 $userId,
                 $referralCode,
@@ -143,6 +144,8 @@ try {
         'email' => $email,
         'token' => $token,
         'user' => api_build_auth_user_payload($pdo, $userId),
+        'code_apply_result' => $codeApplyResult,
+        'referral_apply_result' => $codeApplyResult,
     ]);
 } catch (Throwable $e) {
     if (api_is_duplicate_error($e)) {

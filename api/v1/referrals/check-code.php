@@ -5,20 +5,15 @@ require_once dirname(__DIR__, 3) . '/includes/referral_helper.php';
 
 api_require_method('POST');
 $payload = api_get_request_data();
-$code = strtoupper(trim((string)($payload['referral_code'] ?? '')));
-if ($code === '') api_error('referral_code zorunludur.', 422);
+$code = referral_normalize_code($payload['code'] ?? $payload['referral_code'] ?? '');
+if ($code === '') api_error('code zorunludur.', 422);
 
 try {
-    $stmt = $pdo->prepare('SELECT user_id FROM user_referral_codes WHERE referral_code = ? AND is_active = 1 LIMIT 1');
-    $stmt->execute([$code]);
-    $referrerId = $stmt->fetchColumn();
-    api_success('Kod kontrol edildi.', [
-        'valid' => (bool)$referrerId,
-        'referral_code' => $code,
-        'code' => $code,
-        'referrer' => $referrerId ? ['masked_name' => referral_mask_name($pdo, (string)$referrerId)] : null,
-        'message' => $referrerId ? 'Geçerli referans kodu.' : 'Geçersiz referans kodu.',
-    ]);
+    $check = referral_check_any_code($pdo, $code, null);
+    if (($check['type'] ?? null) === 'referral' && !empty($check['referrer_user_id'])) {
+        $check['referrer'] = ['masked_name' => referral_mask_name($pdo, (string)$check['referrer_user_id'])];
+    }
+    api_success('Kod kontrol edildi.', $check);
 } catch (Throwable $e) {
-    api_error('Referans kodu kontrol edilemedi.', 500);
+    api_error('Kod kontrol edilemedi.', 500);
 }
