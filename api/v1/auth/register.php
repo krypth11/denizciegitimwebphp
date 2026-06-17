@@ -80,7 +80,7 @@ try {
         ]);
 
         if ($referralCode !== '') {
-            $codeApplyResult = referral_apply_any_code_to_user(
+            $codeApplyResult = referral_apply_code_to_user(
                 $pdo,
                 $userId,
                 $referralCode,

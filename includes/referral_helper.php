@@ -53,12 +53,23 @@ function referral_validate_promo_row(PDO $pdo, array $promo, ?string $userId = n
     $remaining = $stockTotal === null ? null : max(0, $stockTotal - $stockUsed);
     $valid = true; $message = 'Bu kod ' . $days . ' gün premium hediye verir.';
     if (empty($promo['is_active'])) { $valid = false; $message = 'Bu hediye kodu aktif değil.'; }
-    elseif ($days <= 0) { $valid = false; $message = 'Bu hediye kodu kullanılamıyor.'; }
-    elseif (!empty($promo['starts_at']) && strtotime((string)$promo['starts_at']) > time()) { $valid = false; $message = 'Bu hediye kodu henüz başlamadı.'; }
+    elseif ($days <= 0) { $valid = false; $message = 'Bu hediye kodu geçersiz.'; }
+    elseif (!empty($promo['starts_at']) && strtotime((string)$promo['starts_at']) > time()) { $valid = false; $message = 'Bu hediye kodu henüz kullanıma açılmadı.'; }
     elseif (!empty($promo['ends_at']) && strtotime((string)$promo['ends_at']) < time()) { $valid = false; $message = 'Bu hediye kodunun süresi dolmuş.'; }
     elseif ($stockTotal !== null && $stockUsed >= $stockTotal) { $valid = false; $message = 'Bu hediye kodunun kullanım hakkı dolmuş.'; }
     elseif (!empty($promo['once_per_user']) && $userId) { $q=$pdo->prepare("SELECT 1 FROM referral_promo_redemptions WHERE promo_code_id=? AND user_id=? AND status='active' LIMIT 1"); $q->execute([$promo['id'],$userId]); if($q->fetchColumn()){ $valid=false; $message='Bu hediye kodunu daha önce kullandınız.'; } }
     return ['valid'=>$valid,'message'=>$message,'reward_days'=>$days,'stock_total'=>$stockTotal,'stock_used'=>$stockUsed,'remaining_stock'=>$remaining];
+}
+
+function referral_check_referral_code(PDO $pdo, string $code): array
+{
+    $code = referral_normalize_code($code);
+    if ($code === '') return ['valid'=>false,'type'=>'referral','code'=>'','message'=>'Referans kodu zorunludur.'];
+    $st = $pdo->prepare('SELECT user_id, referral_code FROM user_referral_codes WHERE referral_code = ? AND is_active = 1 LIMIT 1');
+    $st->execute([$code]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if ($row) return ['valid'=>true,'type'=>'referral','code'=>$code,'referral_code'=>(string)$row['referral_code'],'referrer_user_id'=>(string)$row['user_id'],'message'=>'Referans kodu geçerli.'];
+    return ['valid'=>false,'type'=>'referral','code'=>$code,'message'=>'Geçersiz referans kodu.'];
 }
 
 function referral_check_any_code(PDO $pdo, string $code, ?string $userId = null): array
@@ -208,14 +219,14 @@ function referral_apply_promo_code_to_user(PDO $pdo, string $userId, string $cod
     $ownTx = !$pdo->inTransaction(); if ($ownTx) $pdo->beginTransaction();
     try {
         $st=$pdo->prepare('SELECT * FROM referral_promo_codes WHERE code = ? LIMIT 1 FOR UPDATE'); $st->execute([$code]); $promo=$st->fetch(PDO::FETCH_ASSOC);
-        if(!$promo) throw new InvalidArgumentException('Kod geçersiz veya kullanılamıyor.',422);
+        if(!$promo) throw new InvalidArgumentException('Bu hediye kodu geçersiz.',422);
         $v=referral_validate_promo_row($pdo,$promo,$userId); if(empty($v['valid'])) throw new InvalidArgumentException((string)$v['message'],422);
         $grantId=referral_add_premium_grant($pdo,$userId,(int)$v['reward_days'],'manual',(string)$promo['id'],'promo_code','Promo code: '.$code);
         $redemptionId=generate_uuid(); $ipHash=referral_hash_ip($ipAddress ?? ($_SERVER['REMOTE_ADDR'] ?? null)); $deviceHash=trim((string)$deviceHash) ?: null;
         $pdo->prepare("INSERT INTO referral_promo_redemptions (id,promo_code_id,user_id,code,reward_days,premium_grant_id,status,ip_hash,device_hash,redeemed_at) VALUES (?,?,?,?,?,?,'active',?,?,NOW())")->execute([$redemptionId,$promo['id'],$userId,$code,(int)$v['reward_days'],$grantId,$ipHash,$deviceHash]);
         $pdo->prepare('UPDATE referral_promo_codes SET stock_used = COALESCE(stock_used,0) + 1, updated_at = NOW() WHERE id = ?')->execute([$promo['id']]);
         if ($ownTx) $pdo->commit();
-        return ['success'=>true,'type'=>'promo','message'=>'Hediye kodu uygulandı. '.(int)$v['reward_days'].' gün premium kazandınız.','reward_days'=>(int)$v['reward_days'],'premium_grant_id'=>$grantId,'redemption_id'=>$redemptionId,'data'=>referral_get_user_summary($pdo,$userId)];
+        return ['type'=>'promo','code'=>$code,'message'=>'Hediye kodu uygulandı. '.(int)$v['reward_days'].' gün premium kazandınız.','reward_days'=>(int)$v['reward_days'],'premium_grant_id'=>$grantId,'redemption_id'=>$redemptionId,'data'=>referral_get_user_summary($pdo,$userId)];
     } catch (Throwable $e) { if($ownTx && $pdo->inTransaction()) $pdo->rollBack(); throw $e; }
 }
 
@@ -288,6 +299,6 @@ function referral_get_user_summary(PDO $pdo,string $userId): array
     $st=$pdo->prepare("SELECT status,COUNT(*) c,COALESCE(SUM(referrer_reward_days+referred_reward_days+buyer_bonus_days),0) days FROM referral_reward_events WHERE referrer_user_id=? OR referred_user_id=? OR purchase_user_id=? GROUP BY status");$st->execute([$userId,$userId,$userId]); $cnt=['pending_rewards_count'=>0,'approved_rewards_count'=>0,'pending_days'=>0,'approved_days'=>0]; foreach($st->fetchAll(PDO::FETCH_ASSOC)?:[] as $r){if($r['status']==='pending'){$cnt['pending_rewards_count']=(int)$r['c'];$cnt['pending_days']=(int)$r['days'];} if($r['status']==='approved'){$cnt['approved_rewards_count']=(int)$r['c'];$cnt['approved_days']=(int)$r['days'];}}
     $st=$pdo->prepare("SELECT * FROM referral_reward_events WHERE referrer_user_id=? OR referred_user_id=? OR purchase_user_id=? ORDER BY created_at DESC LIMIT 50");$st->execute([$userId,$userId,$userId]);
     $history=$st->fetchAll(PDO::FETCH_ASSOC)?:[]; $promo=[]; if(referral_table_exists($pdo,'referral_promo_redemptions')){ $ps=$pdo->prepare("SELECT * FROM referral_promo_redemptions WHERE user_id=? ORDER BY redeemed_at DESC LIMIT 50"); $ps->execute([$userId]); $promo=$ps->fetchAll(PDO::FETCH_ASSOC)?:[]; }
-    return array_merge(['code'=>$codeValue,'referral_code'=>$codeValue,'invite_link'=>null,'referral_link'=>$link,'bonus_percent'=>referral_get_user_bonus_percent($pdo,$userId),'max_bonus_percent'=>(int)$g['max_bonus_percent'],'history'=>$history,'promo_redemptions'=>$promo],$cnt);
+    return array_merge(['code'=>$codeValue,'referral_code'=>$codeValue,'invite_link'=>null,'referral_link'=>null,'bonus_percent'=>referral_get_user_bonus_percent($pdo,$userId),'max_bonus_percent'=>(int)$g['max_bonus_percent'],'history'=>$history,'promo_redemptions'=>$promo],$cnt);
 }
 function referral_mask_name(PDO $pdo,string $userId): string { $st=$pdo->prepare('SELECT full_name,email FROM user_profiles WHERE id=? LIMIT 1');$st->execute([$userId]);$r=$st->fetch(PDO::FETCH_ASSOC)?:[]; $n=trim((string)($r['full_name']?:$r['email']??'')); return $n===''?'Kullanıcı':mb_substr($n,0,2).'***'; }

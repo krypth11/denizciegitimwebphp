@@ -113,6 +113,11 @@ try {
         default:
             referrals_json(false, 'Geçersiz action.', [], 400);
     }
+} catch (InvalidArgumentException $e) {
+    $status = (int)$e->getCode();
+    referrals_json(false, $e->getMessage(), [], ($status >= 400 && $status < 500) ? $status : 422);
 } catch (Throwable $e) {
+    $status = (int)$e->getCode();
+    if ($status >= 400 && $status < 500) referrals_json(false, $e->getMessage(), [], $status);
     referrals_json(false, 'Referans işlemi sırasında hata oluştu.', ['error' => $e->getMessage()], 500);
 }
