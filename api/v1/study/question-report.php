@@ -57,7 +57,7 @@ try {
     $isLinkedPayloadScope = false;
 
     if ($hasPayloadScope) {
-        $linkedScope = question_scope_find_link(
+        $linkedScope = question_scope_find_accessible_link(
             $pdo,
             $questionId,
             $payloadQualificationId,
@@ -69,7 +69,9 @@ try {
             $isLinkedPayloadScope = true;
             $selectedQualificationId = $payloadQualificationId;
             $selectedCourseId = $payloadCourseId;
-            $selectedTopicId = ($payloadTopicId !== '') ? $payloadTopicId : null;
+
+            $linkedTopicId = question_scope_normalize_topic_id($linkedScope['topic_id'] ?? '');
+            $selectedTopicId = ($linkedTopicId !== '') ? $linkedTopicId : null;
         }
     }
 
@@ -84,7 +86,7 @@ try {
         api_error('Bu soru için erişim yetkiniz yok.', 403);
     }
 
-    if ($selectedCourseId !== '' && !question_scope_user_can_access_question(
+    if ($selectedCourseId !== '' && !question_scope_user_can_access_question_flexible(
         $pdo,
         $questionId,
         $selectedQualificationId,

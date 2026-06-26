@@ -382,3 +382,78 @@ function question_scope_find_link(
 
     return $row;
 }
+
+function question_scope_find_accessible_link(
+    PDO $pdo,
+    string $questionId,
+    string $qualificationId,
+    string $courseId,
+    ?string $topicId
+): ?array {
+    $exact = question_scope_find_link($pdo, $questionId, $qualificationId, $courseId, $topicId);
+    if ($exact !== null) {
+        return $exact;
+    }
+
+    if (!question_scope_has_links_table($pdo)) {
+        return null;
+    }
+
+    $questionId = trim($questionId);
+    $qualificationId = trim($qualificationId);
+    $courseId = trim($courseId);
+    $normalizedTopicId = question_scope_normalize_topic_id($topicId);
+
+    if ($questionId === '' || $qualificationId === '' || $courseId === '') {
+        return null;
+    }
+
+    // Course-level fallback sadece topic_id boşken çalışır.
+    // Kullanıcı bir dersi tüm konular kapsamında çalışırken payload topic_id boş gelebilir.
+    if ($normalizedTopicId !== '') {
+        return null;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT id, question_id, qualification_id, course_id, topic_id, is_primary
+         FROM question_scope_links
+         WHERE question_id = ?
+           AND qualification_id = ?
+           AND course_id = ?
+         ORDER BY is_primary DESC, id ASC
+         LIMIT 1'
+    );
+    $stmt->execute([$questionId, $qualificationId, $courseId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+
+    $row['topic_id'] = question_scope_normalize_topic_id($row['topic_id'] ?? '');
+    $row['is_primary'] = ((int)($row['is_primary'] ?? 0) === 1) ? 1 : 0;
+
+    return $row;
+}
+
+function question_scope_user_can_access_question_flexible(
+    PDO $pdo,
+    string $questionId,
+    string $qualificationId,
+    string $courseId,
+    ?string $topicId
+): bool {
+    $questionId = trim($questionId);
+    $qualificationId = trim($qualificationId);
+    $courseId = trim($courseId);
+    $topicId = question_scope_normalize_topic_id($topicId);
+
+    if ($questionId === '' || $qualificationId === '' || $courseId === '') {
+        return false;
+    }
+
+    if (question_scope_find_accessible_link($pdo, $questionId, $qualificationId, $courseId, $topicId) !== null) {
+        return true;
+    }
+
+    return question_scope_user_can_access_question($pdo, $questionId, $qualificationId, $courseId, $topicId);
+}
