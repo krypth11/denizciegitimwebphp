@@ -435,6 +435,26 @@ function question_scope_find_accessible_link(
     return $row;
 }
 
+function question_scope_log_question_fallback(string $questionId, string $currentQualificationId): void
+{
+    $context = [
+        'question_id' => $questionId,
+        'current_qualification_id' => $currentQualificationId,
+        'resolved_source' => 'question',
+    ];
+
+    if (isset($GLOBALS['auth']['user']['id'])) {
+        $context['user_id'] = (string)$GLOBALS['auth']['user']['id'];
+    }
+
+    if (function_exists('api_qualification_access_log')) {
+        api_qualification_access_log('question scope fallback resolved', $context);
+        return;
+    }
+
+    error_log('question scope fallback resolved ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+}
+
 function question_scope_resolve_accessible_scope(
     PDO $pdo,
     string $questionId,
@@ -451,51 +471,39 @@ function question_scope_resolve_accessible_scope(
         return null;
     }
 
+    $hasAnyScopeLinks = false;
     if (question_scope_has_links_table($pdo)) {
-        $hasScopeStmt = $pdo->prepare('SELECT 1 FROM question_scope_links WHERE question_id = ? LIMIT 1');
-        $hasScopeStmt->execute([$questionId]);
-        $hasScopeLinks = (bool)$hasScopeStmt->fetchColumn();
+        $hasAnyScopeStmt = $pdo->prepare('SELECT 1 FROM question_scope_links WHERE question_id = ? LIMIT 1');
+        $hasAnyScopeStmt->execute([$questionId]);
+        $hasAnyScopeLinks = (bool)$hasAnyScopeStmt->fetchColumn();
 
-        if ($hasScopeLinks) {
-            if ($requestedCourseId !== '') {
-                $params = [$questionId, $currentQualificationId, $requestedCourseId];
-                $topicFilter = '';
-                $orderBy = 'ORDER BY CASE WHEN COALESCE(topic_id, \'\') = \'\' THEN 0 ELSE 1 END, is_primary DESC, id ASC';
+        $scopeStmt = $pdo->prepare(
+            'SELECT qualification_id, course_id, topic_id
+             FROM question_scope_links
+             WHERE question_id = ?
+               AND qualification_id = ?
+             ORDER BY
+               CASE
+                 WHEN ? <> \'\'
+                  AND course_id = ?
+                  AND COALESCE(topic_id, \'\') = ?
+                 THEN 0
+                 ELSE 1
+               END,
+               is_primary DESC,
+               id ASC
+             LIMIT 1'
+        );
+        $scopeStmt->execute([
+            $questionId,
+            $currentQualificationId,
+            $requestedCourseId,
+            $requestedCourseId,
+            $requestedTopicId,
+        ]);
 
-                if ($requestedTopicId !== '') {
-                    $topicFilter = ' AND topic_id = ?';
-                    $params[] = $requestedTopicId;
-                    $orderBy = 'ORDER BY is_primary DESC, id ASC';
-                }
-
-                $scopeStmt = $pdo->prepare(
-                    'SELECT qualification_id, course_id, topic_id
-                     FROM question_scope_links
-                     WHERE question_id = ?
-                       AND qualification_id = ?
-                       AND course_id = ?'
-                    . $topicFilter . ' '
-                    . $orderBy . '
-                     LIMIT 1'
-                );
-                $scopeStmt->execute($params);
-            } else {
-                $scopeStmt = $pdo->prepare(
-                    'SELECT qualification_id, course_id, topic_id
-                     FROM question_scope_links
-                     WHERE question_id = ?
-                       AND qualification_id = ?
-                     ORDER BY is_primary DESC, id ASC
-                     LIMIT 1'
-                );
-                $scopeStmt->execute([$questionId, $currentQualificationId]);
-            }
-
-            $scope = $scopeStmt->fetch(PDO::FETCH_ASSOC);
-            if (!$scope) {
-                return null;
-            }
-
+        $scope = $scopeStmt->fetch(PDO::FETCH_ASSOC);
+        if ($scope) {
             $topicId = question_scope_normalize_topic_id($scope['topic_id'] ?? '');
             return [
                 'qualification_id' => (string)($scope['qualification_id'] ?? ''),
@@ -530,6 +538,10 @@ function question_scope_resolve_accessible_scope(
     }
 
     $topicId = question_scope_normalize_topic_id($question['topic_id'] ?? '');
+    if ($hasAnyScopeLinks) {
+        question_scope_log_question_fallback($questionId, $currentQualificationId);
+    }
+
     return [
         'qualification_id' => $qualificationId,
         'course_id' => $courseId,
@@ -577,12 +589,10 @@ function question_scope_filter_accessible_question_ids(
     }
 
     $sql = 'SELECT q.id,
-                   MAX(CASE WHEN qsl_any.question_id IS NULL THEN 0 ELSE 1 END) AS has_scope_links,
                    MAX(CASE WHEN qsl_access.question_id IS NULL THEN 0 ELSE 1 END) AS has_current_scope_link,
                    MAX(CASE WHEN c.qualification_id = ? THEN 1 ELSE 0 END) AS has_question_qualification
             FROM questions q
             LEFT JOIN courses c ON c.id = q.course_id
-            LEFT JOIN question_scope_links qsl_any ON qsl_any.question_id = q.id
             LEFT JOIN question_scope_links qsl_access
                    ON qsl_access.question_id = q.id
                   AND qsl_access.qualification_id = ?
@@ -598,11 +608,10 @@ function question_scope_filter_accessible_question_ids(
             continue;
         }
 
-        $hasScopeLinks = ((int)($row['has_scope_links'] ?? 0)) === 1;
         $hasCurrentScopeLink = ((int)($row['has_current_scope_link'] ?? 0)) === 1;
         $hasQuestionQualification = ((int)($row['has_question_qualification'] ?? 0)) === 1;
 
-        if (($hasScopeLinks && $hasCurrentScopeLink) || (!$hasScopeLinks && $hasQuestionQualification)) {
+        if ($hasCurrentScopeLink || $hasQuestionQualification) {
             $accessible[$id] = true;
         }
     }
