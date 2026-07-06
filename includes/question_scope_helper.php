@@ -435,6 +435,181 @@ function question_scope_find_accessible_link(
     return $row;
 }
 
+function question_scope_resolve_accessible_scope(
+    PDO $pdo,
+    string $questionId,
+    string $currentQualificationId,
+    ?string $requestedCourseId = null,
+    ?string $requestedTopicId = null
+): ?array {
+    $questionId = trim($questionId);
+    $currentQualificationId = trim($currentQualificationId);
+    $requestedCourseId = trim((string)($requestedCourseId ?? ''));
+    $requestedTopicId = question_scope_normalize_topic_id($requestedTopicId);
+
+    if ($questionId === '' || $currentQualificationId === '') {
+        return null;
+    }
+
+    if (question_scope_has_links_table($pdo)) {
+        $hasScopeStmt = $pdo->prepare('SELECT 1 FROM question_scope_links WHERE question_id = ? LIMIT 1');
+        $hasScopeStmt->execute([$questionId]);
+        $hasScopeLinks = (bool)$hasScopeStmt->fetchColumn();
+
+        if ($hasScopeLinks) {
+            if ($requestedCourseId !== '') {
+                $params = [$questionId, $currentQualificationId, $requestedCourseId];
+                $topicFilter = '';
+                $orderBy = 'ORDER BY CASE WHEN COALESCE(topic_id, \'\') = \'\' THEN 0 ELSE 1 END, is_primary DESC, id ASC';
+
+                if ($requestedTopicId !== '') {
+                    $topicFilter = ' AND topic_id = ?';
+                    $params[] = $requestedTopicId;
+                    $orderBy = 'ORDER BY is_primary DESC, id ASC';
+                }
+
+                $scopeStmt = $pdo->prepare(
+                    'SELECT qualification_id, course_id, topic_id
+                     FROM question_scope_links
+                     WHERE question_id = ?
+                       AND qualification_id = ?
+                       AND course_id = ?'
+                    . $topicFilter . ' '
+                    . $orderBy . '
+                     LIMIT 1'
+                );
+                $scopeStmt->execute($params);
+            } else {
+                $scopeStmt = $pdo->prepare(
+                    'SELECT qualification_id, course_id, topic_id
+                     FROM question_scope_links
+                     WHERE question_id = ?
+                       AND qualification_id = ?
+                     ORDER BY is_primary DESC, id ASC
+                     LIMIT 1'
+                );
+                $scopeStmt->execute([$questionId, $currentQualificationId]);
+            }
+
+            $scope = $scopeStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$scope) {
+                return null;
+            }
+
+            $topicId = question_scope_normalize_topic_id($scope['topic_id'] ?? '');
+            return [
+                'qualification_id' => (string)($scope['qualification_id'] ?? ''),
+                'course_id' => (string)($scope['course_id'] ?? ''),
+                'topic_id' => ($topicId !== '' ? $topicId : null),
+                'source' => 'scope_link',
+            ];
+        }
+    }
+
+    $fallbackStmt = $pdo->prepare(
+        'SELECT q.course_id, q.topic_id, c.qualification_id
+         FROM questions q
+         LEFT JOIN courses c ON c.id = q.course_id
+         WHERE q.id = ?
+         LIMIT 1'
+    );
+    $fallbackStmt->execute([$questionId]);
+    $question = $fallbackStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$question) {
+        return null;
+    }
+
+    $qualificationId = trim((string)($question['qualification_id'] ?? ''));
+    if ($qualificationId === '' || $qualificationId !== $currentQualificationId) {
+        return null;
+    }
+
+    $courseId = trim((string)($question['course_id'] ?? ''));
+    if ($courseId === '') {
+        return null;
+    }
+
+    $topicId = question_scope_normalize_topic_id($question['topic_id'] ?? '');
+    return [
+        'qualification_id' => $qualificationId,
+        'course_id' => $courseId,
+        'topic_id' => ($topicId !== '' ? $topicId : null),
+        'source' => 'question',
+    ];
+}
+
+function question_scope_filter_accessible_question_ids(
+    PDO $pdo,
+    array $questionIds,
+    string $currentQualificationId
+): array {
+    $currentQualificationId = trim($currentQualificationId);
+    $cleanIds = [];
+    foreach ($questionIds as $questionId) {
+        $id = trim((string)$questionId);
+        if ($id !== '') {
+            $cleanIds[$id] = true;
+        }
+    }
+
+    $questionIds = array_keys($cleanIds);
+    if (!$questionIds || $currentQualificationId === '') {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($questionIds), '?'));
+    $accessible = [];
+
+    if (!question_scope_has_links_table($pdo)) {
+        $sql = 'SELECT q.id
+                FROM questions q
+                LEFT JOIN courses c ON c.id = q.course_id
+                WHERE q.id IN (' . $placeholders . ')
+                  AND c.qualification_id = ?';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array_merge($questionIds, [$currentQualificationId]));
+
+        while ($id = $stmt->fetchColumn()) {
+            $accessible[(string)$id] = true;
+        }
+
+        return array_keys($accessible);
+    }
+
+    $sql = 'SELECT q.id,
+                   MAX(CASE WHEN qsl_any.question_id IS NULL THEN 0 ELSE 1 END) AS has_scope_links,
+                   MAX(CASE WHEN qsl_access.question_id IS NULL THEN 0 ELSE 1 END) AS has_current_scope_link,
+                   MAX(CASE WHEN c.qualification_id = ? THEN 1 ELSE 0 END) AS has_question_qualification
+            FROM questions q
+            LEFT JOIN courses c ON c.id = q.course_id
+            LEFT JOIN question_scope_links qsl_any ON qsl_any.question_id = q.id
+            LEFT JOIN question_scope_links qsl_access
+                   ON qsl_access.question_id = q.id
+                  AND qsl_access.qualification_id = ?
+            WHERE q.id IN (' . $placeholders . ')
+            GROUP BY q.id';
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(array_merge([$currentQualificationId, $currentQualificationId], $questionIds));
+
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        $id = (string)($row['id'] ?? '');
+        if ($id === '') {
+            continue;
+        }
+
+        $hasScopeLinks = ((int)($row['has_scope_links'] ?? 0)) === 1;
+        $hasCurrentScopeLink = ((int)($row['has_current_scope_link'] ?? 0)) === 1;
+        $hasQuestionQualification = ((int)($row['has_question_qualification'] ?? 0)) === 1;
+
+        if (($hasScopeLinks && $hasCurrentScopeLink) || (!$hasScopeLinks && $hasQuestionQualification)) {
+            $accessible[$id] = true;
+        }
+    }
+
+    return array_keys($accessible);
+}
+
 function question_scope_user_can_access_question_flexible(
     PDO $pdo,
     string $questionId,

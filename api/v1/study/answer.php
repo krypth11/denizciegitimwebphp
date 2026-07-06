@@ -127,64 +127,46 @@ try {
         ? trim((string)$payload['topic_id'])
         : '';
 
-    $selectedQualificationId = trim((string)($questionMeta['qualification_id'] ?? ''));
-    if ($selectedQualificationId === '') {
-        $selectedQualificationId = $currentQualificationId;
-    }
-
-    $selectedCourseId = trim((string)($questionMeta['course_id'] ?? ''));
-    $selectedTopicId = trim((string)($questionMeta['topic_id'] ?? ''));
-    if ($selectedTopicId === '') {
-        $selectedTopicId = null;
-    }
-
-    $hasPayloadScope = ($payloadQualificationId !== '' && $payloadCourseId !== '');
-    $isLinkedPayloadScope = false;
-    if ($hasPayloadScope) {
-        $linkedScope = question_scope_find_accessible_link(
-            $pdo,
-            $questionId,
-            $payloadQualificationId,
-            $payloadCourseId,
-            $payloadTopicId
-        );
-
-        if ($linkedScope !== null) {
-            $isLinkedPayloadScope = true;
-            $selectedQualificationId = $payloadQualificationId;
-            $selectedCourseId = $payloadCourseId;
-
-            $linkedTopicId = question_scope_normalize_topic_id($linkedScope['topic_id'] ?? '');
-            $selectedTopicId = ($linkedTopicId !== '') ? $linkedTopicId : null;
-        }
-    }
-
-    if (!$isLinkedPayloadScope && $selectedQualificationId !== $currentQualificationId) {
+    if ($payloadQualificationId !== '' && $payloadQualificationId !== $currentQualificationId) {
         api_qualification_access_log('qualification access rejected', [
-            'context' => 'study.answer.scope_qualification',
-            'requested_qualification_id' => $selectedQualificationId,
+            'context' => 'study.answer.payload_qualification',
+            'requested_qualification_id' => $payloadQualificationId,
             'current_qualification_id' => $currentQualificationId,
             'question_id' => $questionId,
-            'linked_scope' => false,
         ]);
         api_error('Bu soru için erişim yetkiniz yok.', 403);
     }
 
-    if (!question_scope_user_can_access_question_flexible(
+    $resolvedScope = question_scope_resolve_accessible_scope(
         $pdo,
         $questionId,
-        $selectedQualificationId,
-        $selectedCourseId,
-        $selectedTopicId
-    )) {
+        $currentQualificationId,
+        ($payloadCourseId !== '' ? $payloadCourseId : null),
+        $payloadTopicId
+    );
+
+    if ($resolvedScope === null) {
         api_qualification_access_log('qualification access rejected', [
             'context' => 'study.answer.question_scope',
-            'requested_qualification_id' => $selectedQualificationId,
-            'requested_course_id' => $selectedCourseId,
-            'requested_topic_id' => $selectedTopicId,
+            'requested_qualification_id' => ($payloadQualificationId !== '' ? $payloadQualificationId : null),
+            'requested_course_id' => ($payloadCourseId !== '' ? $payloadCourseId : null),
+            'requested_topic_id' => ($payloadTopicId !== '' ? $payloadTopicId : null),
             'current_qualification_id' => $currentQualificationId,
             'question_id' => $questionId,
-            'linked_scope' => $isLinkedPayloadScope,
+        ]);
+        api_error('Bu soru için erişim yetkiniz yok.', 403);
+    }
+
+    $selectedQualificationId = (string)$resolvedScope['qualification_id'];
+    $selectedCourseId = (string)$resolvedScope['course_id'];
+    $selectedTopicId = $resolvedScope['topic_id'] ?? null;
+
+    if ($selectedQualificationId !== $currentQualificationId) {
+        api_qualification_access_log('qualification access rejected', [
+            'context' => 'study.answer.resolved_qualification',
+            'requested_qualification_id' => $selectedQualificationId,
+            'current_qualification_id' => $currentQualificationId,
+            'question_id' => $questionId,
         ]);
         api_error('Bu soru için erişim yetkiniz yok.', 403);
     }

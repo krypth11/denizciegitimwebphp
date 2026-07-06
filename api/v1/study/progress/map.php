@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__, 2) . '/api_bootstrap.php';
 require_once dirname(__DIR__, 2) . '/study_helper.php';
+require_once dirname(__DIR__, 4) . '/includes/question_scope_helper.php';
 
 api_require_method('POST');
 
@@ -34,26 +35,25 @@ try {
     }
 
     if (!empty($cleanIds)) {
-        $placeholders = implode(',', array_fill(0, count($cleanIds), '?'));
-        $sql = 'SELECT q.id AS id, c.qualification_id AS qualification_id
-                FROM questions q
-                LEFT JOIN courses c ON q.course_id = c.id
-                WHERE q.id IN (' . $placeholders . ')';
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($cleanIds);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        foreach ($rows as $row) {
-            $qid = (string)($row['id'] ?? '');
-            $qidQualificationId = trim((string)($row['qualification_id'] ?? ''));
-            if ($qid !== '' && $qidQualificationId !== '' && $qidQualificationId !== $currentQualificationId) {
-                api_qualification_access_log('qualification access rejected', [
-                    'context' => 'study.progress.map.question_ids',
-                    'requested_qualification_id' => $qidQualificationId,
-                    'current_qualification_id' => $currentQualificationId,
-                    'question_id' => $qid,
-                ]);
-                api_error('Bu soru için erişim yetkiniz yok.', 403);
+        $accessibleIds = question_scope_filter_accessible_question_ids($pdo, $cleanIds, $currentQualificationId);
+        $accessibleSet = array_fill_keys($accessibleIds, true);
+        $deniedIds = [];
+
+        foreach (array_values(array_unique($cleanIds)) as $qid) {
+            if (!isset($accessibleSet[$qid])) {
+                $deniedIds[] = $qid;
             }
+        }
+
+        if ($deniedIds) {
+            api_qualification_access_log('qualification access rejected', [
+                'context' => 'study.progress.map.question_ids',
+                'endpoint' => 'api/v1/study/progress/map.php',
+                'user_id' => $userId,
+                'current_qualification_id' => $currentQualificationId,
+                'denied_question_ids' => $deniedIds,
+            ]);
+            api_error('Bu soru için erişim yetkiniz yok.', 403);
         }
     }
 

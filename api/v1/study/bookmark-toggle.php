@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/study_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/question_scope_helper.php';
 
 api_require_method('POST');
 
@@ -26,11 +27,10 @@ try {
         api_error('Soru bulunamadı.', 404);
     }
 
-    $questionQualificationId = trim((string)($questionMeta['qualification_id'] ?? ''));
-    if ($questionQualificationId !== '' && $questionQualificationId !== $currentQualificationId) {
+    $resolvedScope = question_scope_resolve_accessible_scope($pdo, $questionId, $currentQualificationId);
+    if ($resolvedScope === null) {
         api_qualification_access_log('qualification access rejected', [
             'context' => 'study.bookmark-toggle.question_id',
-            'requested_qualification_id' => $questionQualificationId,
             'current_qualification_id' => $currentQualificationId,
             'question_id' => $questionId,
         ]);
