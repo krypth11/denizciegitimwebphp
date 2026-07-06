@@ -169,6 +169,10 @@ include '../includes/sidebar.php';
                 </div>
             </div>
 
+            <div class="alert alert-info py-2 small mb-3">
+                Liste sayıları son eşzamanlama kaydından gelir. Güncel kontrol için Eşzamanla işlemini kullanın.
+            </div>
+
             <div class="table-responsive">
                 <table class="table table-sm align-middle" id="mappingsTable">
                     <thead>
@@ -179,10 +183,10 @@ include '../includes/sidebar.php';
                             <th>Kaynak</th>
                             <th>Hedef</th>
                             <th>Filtre</th>
-                            <th class="text-end">Kaynaktaki soru</th>
-                            <th class="text-end">Hedefte bağlı</th>
-                            <th class="text-end">Eksik</th>
-                            <th>Durum</th>
+                            <th class="text-end">Kaynak soru (son kontrol)</th>
+                            <th class="text-end">Hedef bağlı (son kontrol)</th>
+                            <th class="text-end">Eksik (son kontrol)</th>
+                            <th>Son kontrol durumu</th>
                             <th>Son eşzamanlama</th>
                             <th style="min-width: 180px;">İşlemler</th>
                         </tr>
@@ -193,6 +197,14 @@ include '../includes/sidebar.php';
                         </tr>
                     </tbody>
                 </table>
+            </div>
+
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mt-3" id="mappingsPagination">
+                <div class="small text-muted" id="mappingsPaginationInfo">Sayfa 1 / 1 • Toplam 0 eşleştirme</div>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Eşleştirme sayfalama">
+                    <button class="btn btn-outline-secondary" id="prevMappingsPageBtn" type="button" disabled>Önceki</button>
+                    <button class="btn btn-outline-secondary" id="nextMappingsPageBtn" type="button" disabled>Sonraki</button>
+                </div>
             </div>
         </div>
     </div>
@@ -207,7 +219,15 @@ $(function () {
 
     const endpoint = '../ajax/question-scope-bulk.php';
     const lookupEndpoint = '../ajax/questions.php';
+    const mappingsPerPage = 50;
     let mappingsCache = [];
+    let currentMappingsPage = 1;
+    let mappingsPagination = {
+        page: 1,
+        per_page: mappingsPerPage,
+        total: 0,
+        total_pages: 0
+    };
 
     function appAlert(title, message, type = 'info') {
         if (typeof window.showAppAlert === 'function') {
@@ -263,6 +283,9 @@ $(function () {
             'Güncel': 'bg-success-subtle text-success',
             'Güncelleme var': 'bg-warning-subtle text-warning-emphasis',
             'Kaynak boş': 'bg-secondary-subtle text-secondary'
+            , 'Henüz kontrol edilmedi': 'bg-light text-dark'
+            , 'Son kontrolde eksik var': 'bg-warning-subtle text-warning-emphasis'
+            , 'Son kontrolde güncel': 'bg-success-subtle text-success'
         };
         const cls = map[label] || 'bg-light text-dark';
         return '<span class="badge rounded-pill ' + cls + '">' + esc(label || '-') + '</span>';
@@ -286,6 +309,29 @@ $(function () {
         return $('#mappingsTable tbody .mapping-check:checked').map(function () {
             return $(this).val();
         }).get();
+    }
+
+    function normalizePagination(pagination) {
+        return {
+            page: Math.max(1, Number(pagination?.page || 1)),
+            per_page: Math.max(1, Number(pagination?.per_page || mappingsPerPage)),
+            total: Math.max(0, Number(pagination?.total || 0)),
+            total_pages: Math.max(0, Number(pagination?.total_pages || 0))
+        };
+    }
+
+    function renderMappingsPagination(pagination) {
+        mappingsPagination = normalizePagination(pagination);
+        currentMappingsPage = mappingsPagination.page;
+
+        const totalPagesForLabel = Math.max(1, mappingsPagination.total_pages);
+        $('#mappingsPaginationInfo').text(
+            'Sayfa ' + numberTr(mappingsPagination.page) + ' / ' + numberTr(totalPagesForLabel) +
+            ' • Toplam ' + numberTr(mappingsPagination.total) + ' eşleştirme'
+        );
+
+        $('#prevMappingsPageBtn').prop('disabled', mappingsPagination.page <= 1);
+        $('#nextMappingsPageBtn').prop('disabled', mappingsPagination.total_pages === 0 || mappingsPagination.page >= mappingsPagination.total_pages);
     }
 
     function renderMappingsTable(rows) {
@@ -321,11 +367,17 @@ $(function () {
         $('#selectAllMappings').prop('checked', false);
     }
 
-    async function loadMappings() {
+    async function loadMappings(page = 1) {
+        const requestedPage = Math.max(1, Number(page || 1));
         window.appSetButtonLoading('#refreshMappingsBtn', true, 'Yükleniyor...');
         const res = await window.appAjax({
-            url: endpoint + '?action=mappings',
+            url: endpoint,
             method: 'GET',
+            data: {
+                action: 'mappings',
+                page: requestedPage,
+                per_page: mappingsPerPage
+            },
             dataType: 'json'
         });
         window.appSetButtonLoading('#refreshMappingsBtn', false);
@@ -336,6 +388,12 @@ $(function () {
         }
 
         mappingsCache = res.data?.mappings || [];
+        renderMappingsPagination(res.data?.pagination || {
+            page: requestedPage,
+            per_page: mappingsPerPage,
+            total: mappingsCache.length,
+            total_pages: mappingsCache.length ? 1 : 0
+        });
         renderMappingsTable(mappingsCache);
     }
 
@@ -373,7 +431,7 @@ $(function () {
             '\nKalan eksik: ' + numberTr(d.missing_count_after),
             'success'
         );
-        await loadMappings();
+        await loadMappings(currentMappingsPage);
     }
 
     async function cancelSingleMapping(mappingId) {
@@ -409,7 +467,7 @@ $(function () {
             '\nAtlanan primary: ' + numberTr(d.skipped_primary_count),
             'success'
         );
-        await loadMappings();
+        await loadMappings(currentMappingsPage);
     }
 
     async function bulkSyncMappings(ids) {
@@ -446,7 +504,7 @@ $(function () {
             '\nHatalı: ' + numberTr(d.failed),
             'success'
         );
-        await loadMappings();
+        await loadMappings(currentMappingsPage);
     }
 
     async function bulkCancelMappings(ids) {
@@ -483,7 +541,7 @@ $(function () {
             '\nHatalı: ' + numberTr(d.failed),
             'success'
         );
-        await loadMappings();
+        await loadMappings(currentMappingsPage);
     }
 
     function validatePayload(payload) {
@@ -690,7 +748,7 @@ $(function () {
 
         await appAlert('Başarılı', (res.message || 'İşlem tamamlandı.') + '\n\n' + detailMessage, 'success');
         await doPreview();
-        await loadMappings();
+        await loadMappings(currentMappingsPage);
     }
 
     $('#sourceQualification').on('change', function () {
@@ -722,7 +780,19 @@ $(function () {
     });
 
     $('#refreshMappingsBtn').on('click', async function () {
-        await loadMappings();
+        await loadMappings(currentMappingsPage);
+    });
+
+    $('#prevMappingsPageBtn').on('click', async function () {
+        if (currentMappingsPage > 1) {
+            await loadMappings(currentMappingsPage - 1);
+        }
+    });
+
+    $('#nextMappingsPageBtn').on('click', async function () {
+        if (mappingsPagination.total_pages > 0 && currentMappingsPage < mappingsPagination.total_pages) {
+            await loadMappings(currentMappingsPage + 1);
+        }
     });
 
     $('#selectAllMappings').on('change', function () {
@@ -769,7 +839,7 @@ $(function () {
     });
 
     loadQualifications();
-    loadMappings();
+    loadMappings(1);
 });
 </script>
 JS;

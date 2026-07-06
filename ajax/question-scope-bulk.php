@@ -485,11 +485,19 @@ function question_scope_bulk_get_mapping(PDO $pdo, string $id): ?array
     return $row ?: null;
 }
 
-function question_scope_bulk_list_mappings(PDO $pdo): array
+function question_scope_bulk_list_mappings(PDO $pdo, int $page, int $perPage): array
 {
     if (!question_scope_bulk_has_mappings_table($pdo)) {
         throw new RuntimeException('question_scope_bulk_mappings tablosu bulunamadı.');
     }
+
+    $page = max(1, $page);
+    $perPage = min(100, max(1, $perPage));
+    $offset = ($page - 1) * $perPage;
+
+    $countStmt = $pdo->query('SELECT COUNT(*) FROM question_scope_bulk_mappings');
+    $total = $countStmt ? (int)$countStmt->fetchColumn() : 0;
+    $totalPages = $total > 0 ? (int)ceil($total / $perPage) : 0;
 
     $sql = 'SELECT m.*,
                    sq.name AS source_qualification_name,
@@ -505,17 +513,29 @@ function question_scope_bulk_list_mappings(PDO $pdo): array
             LEFT JOIN qualifications tq ON tq.id = m.target_qualification_id
             LEFT JOIN courses tc ON tc.id = m.target_course_id
             LEFT JOIN topics tt ON tt.id = NULLIF(m.target_topic_id, \'\')
-            ORDER BY COALESCE(m.updated_at, m.last_synced_at) DESC, m.id DESC';
-    $stmt = $pdo->query($sql);
+            ORDER BY COALESCE(m.updated_at, m.last_synced_at) DESC, m.id DESC
+            LIMIT :limit OFFSET :offset';
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
     $rows = $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
 
     $out = [];
     foreach ($rows as $row) {
-        $summary = question_scope_bulk_compute_mapping_summary($pdo, $row);
+        $sourceCount = (int)($row['last_source_count'] ?? 0);
+        $targetLinkedCount = (int)($row['last_target_linked_count'] ?? 0);
+        $missingCount = (int)($row['last_missing_count'] ?? 0);
+        $lastSyncedAt = $row['last_synced_at'] ?? null;
 
-        // Aktif eşleşme listesinde boş/eski mappingleri gizle.
-        if ((int)$summary['target_linked_count'] <= 0 || (int)$summary['source_count'] <= 0) {
-            continue;
+        if (empty($lastSyncedAt)) {
+            $statusLabel = 'Henüz kontrol edilmedi';
+        } elseif ($sourceCount === 0) {
+            $statusLabel = 'Kaynak boş';
+        } elseif ($missingCount > 0) {
+            $statusLabel = 'Son kontrolde eksik var';
+        } else {
+            $statusLabel = 'Son kontrolde güncel';
         }
 
         $out[] = [
@@ -528,16 +548,24 @@ function question_scope_bulk_list_mappings(PDO $pdo): array
             'target_topic_name' => (string)($row['target_topic_name'] ?? ''),
             'question_type' => (string)($row['question_type'] ?? ''),
             'search_text' => (string)($row['search_text'] ?? ''),
-            'source_count' => (int)$summary['source_count'],
-            'target_linked_count' => (int)$summary['target_linked_count'],
-            'missing_count' => (int)$summary['missing_count'],
-            'removable_count' => (int)$summary['removable_count'],
-            'status_label' => (string)$summary['status_label'],
-            'last_synced_at' => $row['last_synced_at'] ?? null,
+            'source_count' => $sourceCount,
+            'target_linked_count' => $targetLinkedCount,
+            'missing_count' => $missingCount,
+            'removable_count' => 0,
+            'status_label' => $statusLabel,
+            'last_synced_at' => $lastSyncedAt,
         ];
     }
 
-    return $out;
+    return [
+        'mappings' => $out,
+        'pagination' => [
+            'page' => $page,
+            'per_page' => $perPage,
+            'total' => $total,
+            'total_pages' => $totalPages,
+        ],
+    ];
 }
 
 function question_scope_bulk_sync_mapping(PDO $pdo, string $mappingId): array
@@ -934,9 +962,12 @@ try {
             break;
 
         case 'mappings':
-            $mappings = question_scope_bulk_list_mappings($pdo);
+            $page = (int)($_GET['page'] ?? 1);
+            $perPage = (int)($_GET['per_page'] ?? 50);
+            $result = question_scope_bulk_list_mappings($pdo, $page, $perPage);
             question_scope_bulk_json(true, '', [
-                'mappings' => $mappings,
+                'mappings' => $result['mappings'],
+                'pagination' => $result['pagination'],
             ]);
             break;
 
