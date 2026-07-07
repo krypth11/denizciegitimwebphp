@@ -10,6 +10,8 @@ api_require_method('GET');
 
 try {
     $auth = api_require_auth($pdo);
+    questions_send_private_no_store_headers();
+
     $userId = (string)$auth['user']['id'];
     $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'questions.list');
 
@@ -69,6 +71,8 @@ try {
     $params = $filterBuild['params'];
     $scopeLinksAvailable = !empty($filterBuild['scope_links_available']);
     $normalizedTopicIds = questions_normalize_topic_ids($topicIds);
+    $filterContext = questions_build_filter_context($filterBuild, $poolType, $courseId, $normalizedTopicIds);
+    $filterSignature = questions_build_filter_signature($filterContext);
 
     $scopedCourseExpr = $hasCol('course_id') ? $qc('course_id') : 'NULL';
     $scopedTopicExpr = $hasCol('topic_id') ? $qc('topic_id') : 'NULL';
@@ -495,6 +499,8 @@ try {
         'pagination' => [
             'total' => max(0, (int)$totalAvailableCount),
         ],
+        'filter_context' => $filterContext,
+        'filter_signature' => $filterSignature,
     ]);
 } catch (Throwable $e) {
     error_log('questions.list failed: ' . $e->getMessage());

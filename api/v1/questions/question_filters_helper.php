@@ -1,5 +1,13 @@
 <?php
 
+function questions_send_private_no_store_headers(): void
+{
+    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0, private');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+    header('Vary: Authorization');
+}
+
 function questions_normalize_pool_type(string $rawPoolType): ?string
 {
     $value = strtolower(trim($rawPoolType));
@@ -137,6 +145,49 @@ function questions_normalize_topic_ids(array $rawTopicIds): array
     }
 
     return $normalized;
+}
+
+/**
+ * @param array<string,mixed> $filterBuild
+ * @param array<int,string> $topicIds
+ * @return array{qualification_id: string, course_id: string, topic_ids: array<int,string>, question_type: string, source_type: string, pool_type: string}
+ */
+function questions_build_filter_context(array $filterBuild, string $poolType, string $courseId, array $topicIds): array
+{
+    $normalizedTopicIds = questions_normalize_topic_ids($topicIds);
+    $normalizedTopicIds = array_values(array_unique($normalizedTopicIds));
+    sort($normalizedTopicIds, SORT_STRING);
+
+    $normalizedQuestionType = questions_normalize_question_type_token((string)($filterBuild['normalized_question_type'] ?? ''));
+    if ($normalizedQuestionType === '' || in_array($normalizedQuestionType, ['tumu', 'tumuu', 'tum', 'all', 'hepsi'], true)) {
+        $contextQuestionType = 'all';
+    } elseif ($normalizedQuestionType === 'sayisal') {
+        $contextQuestionType = 'sayisal';
+    } elseif ($normalizedQuestionType === 'sozel') {
+        $contextQuestionType = 'sozel';
+    } else {
+        $contextQuestionType = $normalizedQuestionType;
+    }
+
+    $normalizedSourceType = (string)($filterBuild['normalized_source_type'] ?? '');
+    $contextSourceType = $normalizedSourceType !== '' ? $normalizedSourceType : 'all';
+
+    return [
+        'qualification_id' => (string)($filterBuild['requested_qualification_id'] ?? ''),
+        'course_id' => trim($courseId),
+        'topic_ids' => $normalizedTopicIds,
+        'question_type' => $contextQuestionType,
+        'source_type' => $contextSourceType,
+        'pool_type' => $poolType,
+    ];
+}
+
+/**
+ * @param array<string,mixed> $filterContext
+ */
+function questions_build_filter_signature(array $filterContext): string
+{
+    return hash('sha256', json_encode($filterContext, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 }
 
 /**

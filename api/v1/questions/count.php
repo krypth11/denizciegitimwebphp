@@ -9,6 +9,8 @@ api_require_method('GET');
 
 try {
     $auth = api_require_auth($pdo);
+    questions_send_private_no_store_headers();
+
     $userId = (string)$auth['user']['id'];
     $currentQualificationId = api_require_current_user_qualification_id($pdo, $auth, 'questions.count');
 
@@ -55,6 +57,8 @@ try {
     $baseWhere = $filterBuild['where'];
     $baseParams = $filterBuild['params'];
     $normalizedTopicIds = questions_normalize_topic_ids($topicIds);
+    $filterContext = questions_build_filter_context($filterBuild, $poolType, $courseId, $normalizedTopicIds);
+    $filterSignature = questions_build_filter_signature($filterContext);
 
     $countQuery = static function (PDO $pdo, string $sql, array $params): int {
         $stmt = $pdo->prepare($sql);
@@ -216,6 +220,8 @@ try {
     $payload = [
         'available_count' => max(0, (int)$availableCount),
         'pool_type' => $poolType,
+        'filter_context' => $filterContext,
+        'filter_signature' => $filterSignature,
     ];
 
     if ($debugEnabled) {
