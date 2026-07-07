@@ -84,6 +84,26 @@ function question_scope_bulk_parse_filters(): array
     ];
 }
 
+function question_scope_bulk_parse_mapping_list_filters(): array
+{
+    $sourceQualificationId = question_scope_bulk_normalize_id($_REQUEST['mapping_source_qualification_id'] ?? '');
+    $targetQualificationId = question_scope_bulk_normalize_id($_REQUEST['mapping_target_qualification_id'] ?? '');
+    $status = trim((string)($_REQUEST['mapping_status'] ?? ''));
+    $search = trim((string)($_REQUEST['mapping_search'] ?? ''));
+
+    $allowedStatuses = ['', 'unchecked', 'source_empty', 'missing', 'current'];
+    if (!in_array($status, $allowedStatuses, true)) {
+        $status = '';
+    }
+
+    return [
+        'source_qualification_id' => $sourceQualificationId,
+        'target_qualification_id' => $targetQualificationId,
+        'status' => $status,
+        'search' => $search,
+    ];
+}
+
 function question_scope_bulk_parse_ids($value): array
 {
     if (is_string($value)) {
@@ -115,6 +135,26 @@ function question_scope_bulk_parse_ids($value): array
     }
 
     return array_keys($ids);
+}
+
+function question_scope_bulk_parse_batch_size($value): int
+{
+    $batchSize = (int)$value;
+    if ($batchSize <= 0) {
+        $batchSize = 5;
+    }
+
+    return min(10, max(1, $batchSize));
+}
+
+function question_scope_bulk_safe_batch_error(Throwable $e, string $mappingId): array
+{
+    error_log('question-scope-bulk sync_all_mappings_batch mapping error: mapping_id=' . $mappingId . ' message=' . $e->getMessage());
+
+    return [
+        'id' => $mappingId,
+        'message' => 'Bu eşleştirme işlenirken hata oluştu.',
+    ];
 }
 
 function question_scope_bulk_parse_target_scope(): array
@@ -485,7 +525,47 @@ function question_scope_bulk_get_mapping(PDO $pdo, string $id): ?array
     return $row ?: null;
 }
 
-function question_scope_bulk_list_mappings(PDO $pdo, int $page, int $perPage): array
+function question_scope_bulk_build_mapping_list_where(array $filters): array
+{
+    $where = [];
+    $params = [];
+
+    $sourceQualificationId = question_scope_bulk_normalize_id($filters['source_qualification_id'] ?? '');
+    if ($sourceQualificationId !== '') {
+        $where[] = 'm.source_qualification_id = ?';
+        $params[] = $sourceQualificationId;
+    }
+
+    $targetQualificationId = question_scope_bulk_normalize_id($filters['target_qualification_id'] ?? '');
+    if ($targetQualificationId !== '') {
+        $where[] = 'm.target_qualification_id = ?';
+        $params[] = $targetQualificationId;
+    }
+
+    $status = trim((string)($filters['status'] ?? ''));
+    if ($status === 'unchecked') {
+        $where[] = 'm.last_synced_at IS NULL';
+    } elseif ($status === 'source_empty') {
+        $where[] = 'm.last_synced_at IS NOT NULL AND COALESCE(m.last_source_count, 0) = 0';
+    } elseif ($status === 'missing') {
+        $where[] = 'm.last_synced_at IS NOT NULL AND COALESCE(m.last_source_count, 0) > 0 AND COALESCE(m.last_missing_count, 0) > 0';
+    } elseif ($status === 'current') {
+        $where[] = 'm.last_synced_at IS NOT NULL AND COALESCE(m.last_source_count, 0) > 0 AND COALESCE(m.last_missing_count, 0) = 0';
+    }
+
+    $search = trim((string)($filters['search'] ?? ''));
+    if ($search !== '') {
+        $where[] = '(m.id LIKE ? OR sq.name LIKE ? OR sc.name LIKE ? OR st.name LIKE ? OR tq.name LIKE ? OR tc.name LIKE ? OR tt.name LIKE ? OR m.question_type LIKE ? OR m.search_text LIKE ?)';
+        $like = '%' . $search . '%';
+        for ($i = 0; $i < 9; $i++) {
+            $params[] = $like;
+        }
+    }
+
+    return [$where, $params];
+}
+
+function question_scope_bulk_list_mappings(PDO $pdo, int $page, int $perPage, array $filters = []): array
 {
     if (!question_scope_bulk_has_mappings_table($pdo)) {
         throw new RuntimeException('question_scope_bulk_mappings tablosu bulunamadı.');
@@ -493,11 +573,27 @@ function question_scope_bulk_list_mappings(PDO $pdo, int $page, int $perPage): a
 
     $page = max(1, $page);
     $perPage = min(100, max(1, $perPage));
-    $offset = ($page - 1) * $perPage;
+    [$where, $whereParams] = question_scope_bulk_build_mapping_list_where($filters);
+    $whereSql = empty($where) ? '' : ' WHERE ' . implode(' AND ', $where);
 
-    $countStmt = $pdo->query('SELECT COUNT(*) FROM question_scope_bulk_mappings');
+    $fromSql = ' FROM question_scope_bulk_mappings m
+            LEFT JOIN qualifications sq ON sq.id = m.source_qualification_id
+            LEFT JOIN courses sc ON sc.id = m.source_course_id
+            LEFT JOIN topics st ON st.id = NULLIF(m.source_topic_id, \'\')
+            LEFT JOIN qualifications tq ON tq.id = m.target_qualification_id
+            LEFT JOIN courses tc ON tc.id = m.target_course_id
+            LEFT JOIN topics tt ON tt.id = NULLIF(m.target_topic_id, \'\')';
+
+    $countStmt = $pdo->prepare('SELECT COUNT(*)' . $fromSql . $whereSql);
+    $countStmt->execute($whereParams);
     $total = $countStmt ? (int)$countStmt->fetchColumn() : 0;
     $totalPages = $total > 0 ? (int)ceil($total / $perPage) : 0;
+
+    if ($totalPages > 0 && $page > $totalPages) {
+        $page = $totalPages;
+    }
+
+    $offset = ($page - 1) * $perPage;
 
     $sql = 'SELECT m.*,
                    sq.name AS source_qualification_name,
@@ -506,18 +602,15 @@ function question_scope_bulk_list_mappings(PDO $pdo, int $page, int $perPage): a
                    tq.name AS target_qualification_name,
                    tc.name AS target_course_name,
                    tt.name AS target_topic_name
-            FROM question_scope_bulk_mappings m
-            LEFT JOIN qualifications sq ON sq.id = m.source_qualification_id
-            LEFT JOIN courses sc ON sc.id = m.source_course_id
-            LEFT JOIN topics st ON st.id = NULLIF(m.source_topic_id, \'\')
-            LEFT JOIN qualifications tq ON tq.id = m.target_qualification_id
-            LEFT JOIN courses tc ON tc.id = m.target_course_id
-            LEFT JOIN topics tt ON tt.id = NULLIF(m.target_topic_id, \'\')
+            ' . $fromSql . $whereSql . '
             ORDER BY COALESCE(m.updated_at, m.last_synced_at) DESC, m.id DESC
-            LIMIT :limit OFFSET :offset';
+            LIMIT ? OFFSET ?';
     $stmt = $pdo->prepare($sql);
-    $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
-    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    foreach ($whereParams as $index => $value) {
+        $stmt->bindValue($index + 1, $value);
+    }
+    $stmt->bindValue(count($whereParams) + 1, $perPage, PDO::PARAM_INT);
+    $stmt->bindValue(count($whereParams) + 2, $offset, PDO::PARAM_INT);
     $stmt->execute();
     $rows = $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
 
@@ -964,7 +1057,8 @@ try {
         case 'mappings':
             $page = (int)($_GET['page'] ?? 1);
             $perPage = (int)($_GET['per_page'] ?? 50);
-            $result = question_scope_bulk_list_mappings($pdo, $page, $perPage);
+            $filters = question_scope_bulk_parse_mapping_list_filters();
+            $result = question_scope_bulk_list_mappings($pdo, $page, $perPage, $filters);
             question_scope_bulk_json(true, '', [
                 'mappings' => $result['mappings'],
                 'pagination' => $result['pagination'],
@@ -1016,6 +1110,75 @@ try {
                 'total_inserted' => $totalInserted,
                 'failed' => $failed,
                 'errors' => $errors,
+            ]);
+            break;
+
+        case 'sync_all_mappings_batch':
+            @set_time_limit(180);
+
+            $cursor = trim((string)($_REQUEST['cursor'] ?? ''));
+            $batchSize = question_scope_bulk_parse_batch_size($_REQUEST['batch_size'] ?? 5);
+
+            $totalMappings = null;
+            if ($cursor === '') {
+                $totalStmt = $pdo->query('SELECT COUNT(*) FROM question_scope_bulk_mappings');
+                $totalMappings = $totalStmt ? (int)$totalStmt->fetchColumn() : 0;
+
+                $stmt = $pdo->prepare('SELECT id FROM question_scope_bulk_mappings ORDER BY id ASC LIMIT :limit');
+                $stmt->bindValue(':limit', $batchSize, PDO::PARAM_INT);
+            } else {
+                $stmt = $pdo->prepare('SELECT id FROM question_scope_bulk_mappings WHERE id > :cursor ORDER BY id ASC LIMIT :limit');
+                $stmt->bindValue(':cursor', $cursor, PDO::PARAM_STR);
+                $stmt->bindValue(':limit', $batchSize, PDO::PARAM_INT);
+            }
+
+            $stmt->execute();
+            $ids = [];
+            while ($id = $stmt->fetchColumn()) {
+                $id = trim((string)$id);
+                if ($id !== '') {
+                    $ids[] = $id;
+                }
+            }
+
+            $processed = 0;
+            $failed = 0;
+            $totalInserted = 0;
+            $errors = [];
+            $nextCursor = $cursor;
+
+            foreach ($ids as $id) {
+                $nextCursor = $id;
+                try {
+                    $res = question_scope_bulk_sync_mapping($pdo, $id);
+                    $processed++;
+                    $totalInserted += (int)($res['inserted_count'] ?? 0);
+                } catch (Throwable $e) {
+                    $failed++;
+                    if (count($errors) < 10) {
+                        $errors[] = question_scope_bulk_safe_batch_error($e, $id);
+                    } else {
+                        error_log('question-scope-bulk sync_all_mappings_batch mapping error: mapping_id=' . $id . ' message=' . $e->getMessage());
+                    }
+                }
+            }
+
+            $hasMore = false;
+            if ($nextCursor !== '') {
+                $moreStmt = $pdo->prepare('SELECT id FROM question_scope_bulk_mappings WHERE id > :cursor ORDER BY id ASC LIMIT 1');
+                $moreStmt->bindValue(':cursor', $nextCursor, PDO::PARAM_STR);
+                $moreStmt->execute();
+                $hasMore = trim((string)$moreStmt->fetchColumn()) !== '';
+            }
+
+            question_scope_bulk_json(true, 'Batch eşzamanlama tamamlandı.', [
+                'processed' => $processed,
+                'failed' => $failed,
+                'total_inserted' => $totalInserted,
+                'errors' => $errors,
+                'next_cursor' => $nextCursor,
+                'has_more' => $hasMore,
+                'total_mappings' => $totalMappings,
             ]);
             break;
 

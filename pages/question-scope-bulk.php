@@ -160,6 +160,9 @@ include '../includes/sidebar.php';
                     <button class="btn btn-outline-primary" id="refreshMappingsBtn">
                         <i class="bi bi-arrow-clockwise"></i> Listeyi Yenile
                     </button>
+                    <button class="btn btn-outline-success" id="syncAllMappingsBtn">
+                        <i class="bi bi-arrow-repeat"></i> Tümünü Eşzamanla
+                    </button>
                     <button class="btn btn-primary" id="bulkSyncMappingsBtn">
                         <i class="bi bi-arrow-repeat"></i> Seçilenleri Eşzamanla
                     </button>
@@ -171,6 +174,60 @@ include '../includes/sidebar.php';
 
             <div class="alert alert-info py-2 small mb-3">
                 Liste sayıları son eşzamanlama kaydından gelir. Güncel kontrol için Eşzamanla işlemini kullanın.
+            </div>
+
+            <div class="small text-muted mb-3">
+                <i class="bi bi-info-circle"></i> Tüm kayıtlı eşleştirmeler küçük partiler halinde güncellenir.
+            </div>
+
+            <div id="syncAllProgressBox" class="border rounded-3 bg-light-subtle p-3 mb-3 d-none">
+                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                    <div>
+                        <strong>Tümünü Eşzamanla</strong>
+                        <div class="small text-muted" id="syncAllProgressText">İşlenen: 0 / 0 • Yeni eklenen: 0 • Hata: 0</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" id="syncAllStopBtn" type="button">
+                        <i class="bi bi-stop-circle"></i> Durdur
+                    </button>
+                </div>
+                <div class="progress" role="progressbar" aria-label="Tüm eşleştirmeleri eşzamanlama ilerlemesi" aria-valuemin="0" aria-valuemax="100">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" id="syncAllProgressBar" style="width: 0%">0%</div>
+                </div>
+            </div>
+
+            <div class="border rounded-3 bg-light-subtle p-3 mb-3">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label small mb-1">Kaynak yeterlilik</label>
+                        <select class="form-select form-select-sm" id="mappingSourceQualificationFilter">
+                            <option value="">Tüm kaynak yeterlilikler</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small mb-1">Hedef yeterlilik</label>
+                        <select class="form-select form-select-sm" id="mappingTargetQualificationFilter">
+                            <option value="">Tüm hedef yeterlilikler</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-1">Durum</label>
+                        <select class="form-select form-select-sm" id="mappingStatusFilter">
+                            <option value="">Tüm durumlar</option>
+                            <option value="unchecked">Henüz kontrol edilmedi</option>
+                            <option value="source_empty">Kaynak boş</option>
+                            <option value="missing">Son kontrolde eksik var</option>
+                            <option value="current">Son kontrolde güncel</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small mb-1">Genel arama</label>
+                        <div class="input-group input-group-sm">
+                            <input type="search" class="form-control" id="mappingListSearch" placeholder="Kaynak/hedef yeterlilik, ders, konu, soru tipi veya mapping araması...">
+                            <button class="btn btn-outline-primary" id="filterMappingsBtn" type="button">Filtrele</button>
+                            <button class="btn btn-outline-secondary" id="clearMappingsFiltersBtn" type="button">Temizle</button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="table-responsive">
@@ -228,6 +285,8 @@ $(function () {
         total: 0,
         total_pages: 0
     };
+    let isAllMappingsSyncRunning = false;
+    let stopAllMappingsSyncRequested = false;
 
     function appAlert(title, message, type = 'info') {
         if (typeof window.showAppAlert === 'function') {
@@ -311,6 +370,71 @@ $(function () {
         }).get();
     }
 
+    function clearSelectedMappings() {
+        $('#selectAllMappings').prop('checked', false);
+        $('#mappingsTable tbody .mapping-check').prop('checked', false);
+    }
+
+    function setAllMappingsSyncControlsDisabled(disabled) {
+        $('#syncAllMappingsBtn').prop('disabled', disabled);
+        $('#bulkSyncMappingsBtn').prop('disabled', disabled);
+        $('#bulkCancelMappingsBtn').prop('disabled', disabled);
+        $('#refreshMappingsBtn').prop('disabled', disabled);
+        $('.sync-mapping-btn').prop('disabled', disabled);
+        $('.cancel-mapping-btn').prop('disabled', disabled);
+    }
+
+    function updateSyncAllProgress(processed, total, inserted, failed, statusMessage = '') {
+        const safeTotal = Math.max(0, Number(total || 0));
+        const safeProcessed = Math.max(0, Number(processed || 0));
+        const percent = safeTotal > 0 ? Math.min(100, Math.round((safeProcessed / safeTotal) * 100)) : 0;
+
+        $('#syncAllProgressText').text(
+            'İşlenen: ' + numberTr(safeProcessed) + ' / ' + numberTr(safeTotal) +
+            ' • Yeni eklenen: ' + numberTr(inserted) +
+            ' • Hata: ' + numberTr(failed) +
+            (statusMessage ? ' • ' + statusMessage : '')
+        );
+        $('#syncAllProgressBar')
+            .css('width', percent + '%')
+            .attr('aria-valuenow', percent)
+            .text(percent + '%');
+    }
+
+    function setSyncAllProgressFinalState(state) {
+        const $bar = $('#syncAllProgressBar');
+        $bar.removeClass('progress-bar-animated progress-bar-striped bg-success bg-warning bg-danger');
+        if (state === 'completed') {
+            $bar.addClass('bg-success');
+        } else if (state === 'stopped') {
+            $bar.addClass('bg-warning');
+        } else if (state === 'error') {
+            $bar.addClass('bg-danger');
+        }
+    }
+
+    function getMappingListFilters() {
+        return {
+            mapping_source_qualification_id: $('#mappingSourceQualificationFilter').val() || '',
+            mapping_target_qualification_id: $('#mappingTargetQualificationFilter').val() || '',
+            mapping_status: $('#mappingStatusFilter').val() || '',
+            mapping_search: $('#mappingListSearch').val().trim()
+        };
+    }
+
+    function hasMappingListFilters() {
+        const filters = getMappingListFilters();
+        return Object.values(filters).some((value) => String(value || '') !== '');
+    }
+
+    function clearMappingListFilters() {
+        $('#mappingSourceQualificationFilter').val('');
+        $('#mappingTargetQualificationFilter').val('');
+        $('#mappingStatusFilter').val('');
+        $('#mappingListSearch').val('');
+        clearSelectedMappings();
+    }
+
     function normalizePagination(pagination) {
         return {
             page: Math.max(1, Number(pagination?.page || 1)),
@@ -325,9 +449,10 @@ $(function () {
         currentMappingsPage = mappingsPagination.page;
 
         const totalPagesForLabel = Math.max(1, mappingsPagination.total_pages);
+        const totalLabel = hasMappingListFilters() ? 'Filtre sonucu ' : 'Toplam ';
         $('#mappingsPaginationInfo').text(
             'Sayfa ' + numberTr(mappingsPagination.page) + ' / ' + numberTr(totalPagesForLabel) +
-            ' • Toplam ' + numberTr(mappingsPagination.total) + ' eşleştirme'
+            ' • ' + totalLabel + numberTr(mappingsPagination.total) + ' eşleştirme'
         );
 
         $('#prevMappingsPageBtn').prop('disabled', mappingsPagination.page <= 1);
@@ -338,8 +463,11 @@ $(function () {
         const $tbody = $('#mappingsTable tbody');
 
         if (!rows.length) {
-            $tbody.html('<tr><td colspan="10" class="text-muted">Kayıtlı eşleştirme bulunamadı.</td></tr>');
-            $('#selectAllMappings').prop('checked', false);
+            const emptyMessage = hasMappingListFilters()
+                ? 'Seçilen filtrelere uygun kayıtlı eşleştirme bulunamadı.'
+                : 'Kayıtlı eşleştirme bulunamadı.';
+            $tbody.html('<tr><td colspan="10" class="text-muted">' + esc(emptyMessage) + '</td></tr>');
+            clearSelectedMappings();
             return;
         }
 
@@ -364,7 +492,10 @@ $(function () {
         });
 
         $tbody.html(html.join(''));
-        $('#selectAllMappings').prop('checked', false);
+        if (isAllMappingsSyncRunning) {
+            setAllMappingsSyncControlsDisabled(true);
+        }
+        clearSelectedMappings();
     }
 
     async function loadMappings(page = 1) {
@@ -376,7 +507,8 @@ $(function () {
             data: {
                 action: 'mappings',
                 page: requestedPage,
-                per_page: mappingsPerPage
+                per_page: mappingsPerPage,
+                ...getMappingListFilters()
             },
             dataType: 'json'
         });
@@ -544,6 +676,115 @@ $(function () {
         await loadMappings(currentMappingsPage);
     }
 
+    async function syncAllMappings() {
+        if (isAllMappingsSyncRunning) {
+            return;
+        }
+
+        const confirmed = await appConfirm({
+            title: 'Tümünü Eşzamanla',
+            message: 'Tüm kayıtlı eşleştirmeler sırayla kontrol edilip eksik bağlantılar eklenecek. İşlem uzun sürebilir. Devam etmek istiyor musunuz?',
+            confirmText: 'Tümünü Eşzamanla',
+            cancelText: 'İptal',
+            type: 'confirm'
+        });
+        if (!confirmed) {
+            return;
+        }
+
+        isAllMappingsSyncRunning = true;
+        stopAllMappingsSyncRequested = false;
+
+        let cursor = '';
+        let totalMappings = 0;
+        let processedTotal = 0;
+        let insertedTotal = 0;
+        let failedTotal = 0;
+        let stoppedByUser = false;
+
+        $('#syncAllProgressBox').removeClass('d-none');
+        $('#syncAllStopBtn').prop('disabled', false).html('<i class="bi bi-stop-circle"></i> Durdur');
+        $('#syncAllProgressBar')
+            .removeClass('bg-success bg-warning bg-danger')
+            .addClass('progress-bar-striped progress-bar-animated')
+            .css('width', '0%')
+            .attr('aria-valuenow', 0)
+            .text('0%');
+        updateSyncAllProgress(0, 0, 0, 0, 'Başlatılıyor...');
+        setAllMappingsSyncControlsDisabled(true);
+        window.appSetButtonLoading('#syncAllMappingsBtn', true, 'Eşzamanlanıyor...');
+
+        try {
+            while (true) {
+                const res = await window.appAjax({
+                    url: endpoint + '?action=sync_all_mappings_batch',
+                    method: 'POST',
+                    data: {
+                        cursor,
+                        batch_size: 5
+                    },
+                    dataType: 'json'
+                });
+
+                if (!res.success) {
+                    throw new Error(parseRespError(res, 'Batch eşzamanlama başarısız oldu.'));
+                }
+
+                const d = res.data || {};
+                if (d.total_mappings !== null && d.total_mappings !== undefined) {
+                    totalMappings = Number(d.total_mappings || 0);
+                }
+
+                processedTotal += Number(d.processed || 0) + Number(d.failed || 0);
+                insertedTotal += Number(d.total_inserted || 0);
+                failedTotal += Number(d.failed || 0);
+                cursor = d.next_cursor || cursor;
+
+                updateSyncAllProgress(processedTotal, totalMappings, insertedTotal, failedTotal);
+
+                if (stopAllMappingsSyncRequested) {
+                    stoppedByUser = true;
+                    updateSyncAllProgress(processedTotal, totalMappings, insertedTotal, failedTotal, 'Kullanıcı tarafından durduruldu.');
+                    break;
+                }
+
+                if (!d.has_more) {
+                    break;
+                }
+            }
+
+            setSyncAllProgressFinalState(stoppedByUser ? 'stopped' : 'completed');
+            $('#syncAllStopBtn').prop('disabled', true);
+            updateSyncAllProgress(
+                processedTotal,
+                totalMappings,
+                insertedTotal,
+                failedTotal,
+                stoppedByUser ? 'Durduruldu.' : 'Tamamlandı.'
+            );
+
+            await appAlert(
+                stoppedByUser ? 'İşlem Durduruldu' : 'Başarılı',
+                (stoppedByUser ? 'İşlem kullanıcı tarafından durduruldu.' : 'Tümünü eşzamanlama tamamlandı.') +
+                '\n\nİşlenen: ' + numberTr(processedTotal) +
+                '\nYeni eklenen: ' + numberTr(insertedTotal) +
+                '\nHata: ' + numberTr(failedTotal),
+                stoppedByUser ? 'warning' : 'success'
+            );
+        } catch (error) {
+            setSyncAllProgressFinalState('error');
+            $('#syncAllStopBtn').prop('disabled', true);
+            updateSyncAllProgress(processedTotal, totalMappings, insertedTotal, failedTotal, 'Hata nedeniyle durdu.');
+            await appAlert('Hata', error?.message || 'Tümünü eşzamanlama sırasında hata oluştu.', 'error');
+        } finally {
+            isAllMappingsSyncRunning = false;
+            stopAllMappingsSyncRequested = false;
+            window.appSetButtonLoading('#syncAllMappingsBtn', false);
+            setAllMappingsSyncControlsDisabled(false);
+            await loadMappings(currentMappingsPage);
+        }
+    }
+
     function validatePayload(payload) {
         if (!payload.source_qualification_id || !payload.source_course_id) {
             return 'Kaynak yeterlilik ve kaynak ders seçilmelidir.';
@@ -588,6 +829,16 @@ $(function () {
 
         $('#sourceQualification').html(options.join(''));
         $('#targetQualification').html(options.join(''));
+
+        const sourceFilterOptions = ['<option value="">Tüm kaynak yeterlilikler</option>'];
+        const targetFilterOptions = ['<option value="">Tüm hedef yeterlilikler</option>'];
+        rows.forEach((r) => {
+            sourceFilterOptions.push('<option value="' + esc(r.id) + '">' + esc(r.name) + '</option>');
+            targetFilterOptions.push('<option value="' + esc(r.id) + '">' + esc(r.name) + '</option>');
+        });
+
+        $('#mappingSourceQualificationFilter').html(sourceFilterOptions.join(''));
+        $('#mappingTargetQualificationFilter').html(targetFilterOptions.join(''));
     }
 
     async function loadCourses(qualificationId, $courseSelect, $topicSelect, topicEmptyLabel) {
@@ -780,7 +1031,41 @@ $(function () {
     });
 
     $('#refreshMappingsBtn').on('click', async function () {
+        if (isAllMappingsSyncRunning) {
+            return;
+        }
         await loadMappings(currentMappingsPage);
+    });
+
+    $('#syncAllMappingsBtn').on('click', async function () {
+        await syncAllMappings();
+    });
+
+    $('#syncAllStopBtn').on('click', function () {
+        if (!isAllMappingsSyncRunning) {
+            return;
+        }
+        stopAllMappingsSyncRequested = true;
+        $(this).prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> Durdurulacak');
+        $('#syncAllProgressText').text($('#syncAllProgressText').text() + ' • Mevcut batch tamamlandıktan sonra işlem durdurulacak.');
+    });
+
+    $('#filterMappingsBtn').on('click', async function () {
+        clearSelectedMappings();
+        await loadMappings(1);
+    });
+
+    $('#clearMappingsFiltersBtn').on('click', async function () {
+        clearMappingListFilters();
+        await loadMappings(1);
+    });
+
+    $('#mappingListSearch').on('keydown', async function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            clearSelectedMappings();
+            await loadMappings(1);
+        }
     });
 
     $('#prevMappingsPageBtn').on('click', async function () {
@@ -807,6 +1092,9 @@ $(function () {
     });
 
     $(document).on('click', '.sync-mapping-btn', async function () {
+        if (isAllMappingsSyncRunning) {
+            return;
+        }
         const id = $(this).data('id') || '';
         if (id) {
             await syncSingleMapping(id);
@@ -814,6 +1102,9 @@ $(function () {
     });
 
     $(document).on('click', '.cancel-mapping-btn', async function () {
+        if (isAllMappingsSyncRunning) {
+            return;
+        }
         const id = $(this).data('id') || '';
         if (id) {
             await cancelSingleMapping(id);
@@ -821,6 +1112,9 @@ $(function () {
     });
 
     $('#bulkSyncMappingsBtn').on('click', async function () {
+        if (isAllMappingsSyncRunning) {
+            return;
+        }
         const ids = getSelectedMappingIds();
         if (!ids.length) {
             await appAlert('Uyarı', 'Lütfen eşzamanlamak için en az bir kayıt seçin.', 'warning');
@@ -830,6 +1124,9 @@ $(function () {
     });
 
     $('#bulkCancelMappingsBtn').on('click', async function () {
+        if (isAllMappingsSyncRunning) {
+            return;
+        }
         const ids = getSelectedMappingIds();
         if (!ids.length) {
             await appAlert('Uyarı', 'Lütfen iptal etmek için en az bir kayıt seçin.', 'warning');
