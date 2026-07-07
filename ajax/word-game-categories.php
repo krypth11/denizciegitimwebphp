@@ -37,8 +37,18 @@ try {
             $id = trim((string)($_POST['id'] ?? ''));
             if($id==='') wg_cat_json(false,'ID zorunludur.',[],422);
             if(!word_game_get_category($pdo,$id)) wg_cat_json(false,'Kayıt bulunamadı.',[],404);
-            $ok = word_game_delete_category($pdo,$id);
-            if(!$ok) wg_cat_json(false,'Silme başarısız.',[],500);
+            $res = word_game_delete_category($pdo,$id);
+            if(!($res['success']??false)) {
+                if (($res['code'] ?? '') === 'category_has_questions') {
+                    wg_cat_json(false,'Bu başlık silinemez. Önce bağlı soruları başka başlığa taşıyın veya başlığı pasife alın.',[
+                        'code'=>'category_has_questions',
+                        'question_count'=>(int)($res['question_count']??0),
+                        'active_question_count'=>(int)($res['active_question_count']??0),
+                        'session_snapshot_count'=>(int)($res['session_snapshot_count']??0),
+                    ],409);
+                }
+                wg_cat_json(false,'Silme başarısız.',[],500);
+            }
             wg_cat_json(true,'Başlık silindi.');
             break;
         case 'toggle_active':

@@ -2,13 +2,41 @@
 
 require_once __DIR__ . '/word_game_question_helper.php';
 
-if (!defined('WORD_GAME_FORCE_DEBUG')) {
-    define('WORD_GAME_FORCE_DEBUG', true);
-}
-
 function word_game_debug_log(string $stage, array $context = []): void
 {
-    $line = '[word_game][' . $stage . '] ' . json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $blockedKeys = [
+        'answer_text' => true,
+        'answer_normalized' => true,
+        'submitted_answer' => true,
+        'answer_text_debug' => true,
+        'correct_answer' => true,
+        'answer_template' => true,
+        'answer_pattern' => true,
+        'solution' => true,
+        'revealed_letter' => true,
+        'revealed_letter_normalized' => true,
+        'raw_response_body' => true,
+        'response_body' => true,
+    ];
+
+    $sanitize = static function ($value) use (&$sanitize, $blockedKeys) {
+        if (!is_array($value)) {
+            return $value;
+        }
+
+        $safe = [];
+        foreach ($value as $key => $item) {
+            $keyString = is_string($key) ? strtolower($key) : (string)$key;
+            if (isset($blockedKeys[$keyString])) {
+                continue;
+            }
+            $safe[$key] = $sanitize($item);
+        }
+
+        return $safe;
+    };
+
+    $line = '[word_game][' . $stage . '] ' . json_encode($sanitize($context), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     error_log($line !== false ? $line : ('[word_game][' . $stage . ']'));
 }
 
@@ -46,62 +74,22 @@ function word_game_pick_column(array $columns, array $candidates, bool $required
 
 function word_game_is_debug_enabled(): bool
 {
-    if (defined('WORD_GAME_FORCE_DEBUG') && WORD_GAME_FORCE_DEBUG === true) {
-        return true;
+    $environment = strtolower(trim((string)(getenv('APP_ENV') ?: getenv('ENV') ?: 'production')));
+    if (in_array($environment, ['prod', 'production'], true)) {
+        return false;
     }
 
-    $flags = [
-        getenv('APP_DEBUG'),
-        getenv('DEBUG'),
-        ini_get('display_errors'),
-    ];
-
-    foreach ($flags as $flag) {
-        if ($flag === null || $flag === false) {
-            continue;
-        }
-
-        $normalized = strtolower(trim((string)$flag));
-        if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
-            return true;
-        }
-    }
-
-    return false;
+    $flag = getenv('APP_DEBUG');
+    return $flag !== false && in_array(strtolower(trim((string)$flag)), ['1', 'true', 'yes', 'on'], true);
 }
 
 function word_game_build_error_response(string $message, Throwable $e): array
 {
-    $errorMessage = (string)$e->getMessage();
-
-    $firstTrace = $e->getTrace()[0] ?? [];
-    $traceHint = '';
-    if (is_array($firstTrace) && !empty($firstTrace)) {
-        $traceHint = trim((string)(
-            ($firstTrace['class'] ?? '')
-            . ($firstTrace['type'] ?? '')
-            . ($firstTrace['function'] ?? '')
-        ));
-    }
-
-    $response = [
+    return [
         'success' => false,
         'message' => $message,
-        'error' => $errorMessage,
         'data' => null,
     ];
-
-    if (word_game_is_debug_enabled()) {
-        $response['debug'] = [
-            'error' => $errorMessage,
-            'message' => $errorMessage,
-            'file' => $e->getFile(),
-            'line' => $e->getLine(),
-            'trace_hint' => $traceHint,
-        ];
-    }
-
-    return $response;
 }
 
 function word_game_session_initial_remaining_seconds(): int
@@ -400,6 +388,47 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
     return $selected;
 }
 
+function word_game_build_word_break_indexes(string $answerText): array
+{
+    $breaks = [];
+    $logicalIndex = 0;
+    $inWord = false;
+    $length = mb_strlen($answerText, 'UTF-8');
+
+    for ($i = 0; $i < $length; $i++) {
+        $char = mb_substr($answerText, $i, 1, 'UTF-8');
+        $normalized = word_game_normalize_answer($char);
+        if ($normalized === '') {
+            if ($inWord && $logicalIndex > 0) {
+                $breaks[$logicalIndex] = true;
+            }
+            $inWord = false;
+            continue;
+        }
+
+        $logicalIndex += max(1, mb_strlen($normalized, 'UTF-8'));
+        $inWord = true;
+    }
+
+    unset($breaks[$logicalIndex]);
+    $indexes = array_keys($breaks);
+    sort($indexes, SORT_NUMERIC);
+
+    return array_values(array_map('intval', $indexes));
+}
+
+function word_game_build_public_session_question(array $sessionQuestion): array
+{
+    return [
+        'session_question_id' => (string)($sessionQuestion['session_question_id'] ?? $sessionQuestion['id'] ?? ''),
+        'question_order' => (int)($sessionQuestion['question_order'] ?? 0),
+        'question_text' => (string)($sessionQuestion['question_text'] ?? ''),
+        'answer_length' => (int)($sessionQuestion['answer_length'] ?? 0),
+        'max_score' => (int)($sessionQuestion['max_score'] ?? 0),
+        'word_break_indexes' => array_values(array_map('intval', $sessionQuestion['word_break_indexes'] ?? word_game_build_word_break_indexes((string)($sessionQuestion['answer_text'] ?? '')))),
+    ];
+}
+
 function word_game_question_max_score(int $answerLength, int $pointsPerChar = 10): int
 {
     return max(0, $answerLength * max(1, $pointsPerChar));
@@ -445,45 +474,75 @@ function word_game_find_best_category_for_qualification(PDO $pdo, string $qualif
         return null;
     }
 
+    $settings = word_game_get_runtime_settings($pdo);
+    $pointsPerChar = max(1, (int)($settings['points_per_char'] ?? 100));
+    $targetChars = (int)floor(max(1, (int)($settings['target_score'] ?? 10000)) / $pointsPerChar);
+    $minQ = max(1, (int)($settings['min_questions'] ?? 8));
+
     $placeholders = implode(',', array_fill(0, count($allowed), '?'));
     $sql = 'SELECT c.id AS category_id,
                    c.name AS category_name,
                    c.order_index AS order_index,
-                   COUNT(q.id) AS eligible_count
+                   COUNT(q.id) AS eligible_count,
+                   COALESCE(SUM(q.answer_length), 0) AS eligible_chars
             FROM word_game_categories c
             INNER JOIN word_game_category_qualifications cq
-                    ON cq.category_id = c.id
+                    ON cq.category_id = c.id AND cq.qualification_id = ?
             INNER JOIN word_game_questions q
                     ON q.category_id = c.id
+                   AND q.qualification_id = ?
                    AND q.is_active = 1
                    AND q.answer_length IN (' . $placeholders . ')
             WHERE c.is_active = 1
-              AND cq.qualification_id = ?
             GROUP BY c.id, c.name, c.order_index
-            HAVING COUNT(q.id) > 0
-            ORDER BY eligible_count DESC, c.order_index ASC, c.name ASC
-            LIMIT 1';
+            HAVING eligible_count >= ? AND eligible_chars >= ?
+            ORDER BY c.order_index ASC, c.name ASC';
 
     $stmt = $pdo->prepare($sql);
-    $stmt->execute(array_merge($allowed, [$qualificationId]));
-    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $stmt->execute(array_merge([$qualificationId, $qualificationId], $allowed, [$minQ, $targetChars]));
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    foreach ($rows as $row) {
+        $categoryId = trim((string)($row['category_id'] ?? ''));
+        if ($categoryId === '') {
+            continue;
+        }
+        try {
+            word_game_pick_questions_for_category($pdo, '', $qualificationId, $categoryId);
+            word_game_debug_log('best category lookup for qualification', [
+                'qualification_id' => $qualificationId,
+                'selected_category_id' => $categoryId,
+                'eligible_count' => (int)($row['eligible_count'] ?? 0),
+            ]);
+            return $categoryId;
+        } catch (Throwable $ignored) {
+            word_game_debug_log('best category candidate skipped', [
+                'qualification_id' => $qualificationId,
+                'category_id' => $categoryId,
+                'error_class' => get_class($ignored),
+            ]);
+        }
+    }
 
     word_game_debug_log('best category lookup for qualification', [
         'qualification_id' => $qualificationId,
-        'allowed_lengths' => $allowed,
-        'selected_category_id' => $row['category_id'] ?? null,
-        'selected_category_name' => $row['category_name'] ?? null,
-        'eligible_count' => isset($row['eligible_count']) ? (int)$row['eligible_count'] : 0,
+        'candidate_count' => count($rows),
+        'selected_category_id' => null,
     ]);
 
-    return $row ? trim((string)$row['category_id']) : null;
+    return null;
 }
 
 function word_game_sort_pool_for_selection(array $pool): array
 {
+    foreach ($pool as &$row) {
+        $row['_selection_random'] = random_int(0, PHP_INT_MAX);
+    }
+    unset($row);
+
     usort($pool, static function (array $a, array $b): int {
-        $aSeen = isset($a['seen_count']) ? (int)$a['seen_count'] : -1;
-        $bSeen = isset($b['seen_count']) ? (int)$b['seen_count'] : -1;
+        $aSeen = isset($a['seen_count']) ? (int)$a['seen_count'] : 0;
+        $bSeen = isset($b['seen_count']) ? (int)$b['seen_count'] : 0;
         if ($aSeen !== $bSeen) {
             return $aSeen <=> $bSeen;
         }
@@ -500,13 +559,13 @@ function word_game_sort_pool_for_selection(array $pool): array
             return strcmp($aLastSeen, $bLastSeen);
         }
 
-        $lenCmp = ((int)($a['answer_length'] ?? 0)) <=> ((int)($b['answer_length'] ?? 0));
-        if ($lenCmp !== 0) {
-            return $lenCmp;
-        }
-
-        return strcmp((string)($a['id'] ?? ''), (string)($b['id'] ?? ''));
+        return ((int)($a['_selection_random'] ?? 0)) <=> ((int)($b['_selection_random'] ?? 0));
     });
+
+    foreach ($pool as &$row) {
+        unset($row['_selection_random']);
+    }
+    unset($row);
 
     return $pool;
 }
@@ -606,11 +665,12 @@ function word_game_pick_questions_for_category(PDO $pdo, string $userId, string 
             LEFT JOIN word_game_user_question_history h
               ON h.user_id = ? AND h.word_game_question_id = q.`' . $qSchema['id'] . '` 
             WHERE q.`' . $qSchema['category_id'] . '` = ?
+              AND q.`' . $qSchema['qualification_id'] . '` = ?
               AND q.`' . $qSchema['is_active'] . '` = 1
               AND q.`' . $qSchema['answer_length'] . '` IN (' . $in . ')
-            ORDER BY (h.word_game_question_id IS NULL) DESC, h.last_seen_at ASC, RAND()';
+            ORDER BY COALESCE(h.seen_count, 0) ASC, h.last_seen_at ASC';
 
-    $params = array_merge([$userId, $categoryId], $allowed);
+    $params = array_merge([$userId, $categoryId, $qualificationId], $allowed);
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $pool = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -618,40 +678,7 @@ function word_game_pick_questions_for_category(PDO $pdo, string $userId, string 
         throw new RuntimeException('Bu yeterlilik için kelime oyunu oluşturulamadı. Başlık eşleştirmesi, aktif sorular ve karakter uzunluğu ayarlarını kontrol edin.');
     }
 
-    $best = [];
-    for ($try = 0; $try < 500; $try++) {
-        $selected = [];
-        $sum = 0;
-        $used = [];
-        $candidates = $pool;
-        shuffle($candidates);
-
-        foreach ($candidates as $row) {
-            $id = (string)$row['id'];
-            $len = (int)$row['answer_length'];
-            if (isset($used[$id])) continue;
-            if ($sum + $len > $targetChars) continue;
-            $selected[] = $row;
-            $used[$id] = true;
-            $sum += $len;
-
-            if ($sum === $targetChars && count($selected) >= $minQ && count($selected) <= $maxQ) {
-                break;
-            }
-            if (count($selected) >= $maxQ) {
-                break;
-            }
-        }
-
-        if ($sum === $targetChars && count($selected) >= $minQ && count($selected) <= $maxQ) {
-            $best = $selected;
-            break;
-        }
-    }
-
-    if (empty($best)) {
-        $best = word_game_find_exact_question_subset($pool, $targetChars, $minQ, $maxQ);
-    }
+    $best = word_game_find_exact_question_subset($pool, $targetChars, $minQ, $maxQ);
 
     if (empty($best)) {
         word_game_debug_log('question selection failed', [
@@ -689,6 +716,77 @@ function word_game_pick_questions_for_category(PDO $pdo, string $userId, string 
     }, $best);
 }
 
+function word_game_calculate_server_remaining_seconds(array $session, ?int $durationSeconds = null): int
+{
+    $duration = $durationSeconds ?? (int)($session['remaining_seconds'] ?? word_game_session_initial_remaining_seconds());
+    $duration = max(0, $duration);
+    $startedAt = strtotime((string)($session['started_at'] ?? '')) ?: time();
+    $elapsed = max(0, time() - $startedAt);
+
+    return max(0, $duration - $elapsed);
+}
+
+function word_game_abandon_active_sessions_for_user_qualification(PDO $pdo, string $userId, string $qualificationId): void
+{
+    $schema = word_game_session_schema($pdo);
+    $stmt = $pdo->prepare(
+        'SELECT `' . $schema['id'] . '` AS id, `' . $schema['remaining_seconds'] . '` AS remaining_seconds, `' . $schema['started_at'] . '` AS started_at
+         FROM `' . $schema['table'] . '`
+         WHERE `' . $schema['user_id'] . '` = ?
+           AND `' . $schema['qualification_id'] . '` = ?
+           AND `' . $schema['status'] . '` = \'active\'
+         FOR UPDATE'
+    );
+    $stmt->execute([$userId, $qualificationId]);
+    $activeSessions = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    if (empty($activeSessions)) {
+        return;
+    }
+
+    $set = [
+        '`' . $schema['status'] . '` = \'abandoned\'',
+        '`' . $schema['total_score'] . '` = 0',
+        '`' . $schema['remaining_seconds'] . '` = ?',
+        '`' . $schema['finished_at'] . '` = NOW()',
+    ];
+    if ($schema['updated_at']) {
+        $set[] = '`' . $schema['updated_at'] . '` = NOW()';
+    }
+    $update = $pdo->prepare('UPDATE `' . $schema['table'] . '` SET ' . implode(', ', $set) . ' WHERE `' . $schema['id'] . '` = ?');
+    foreach ($activeSessions as $session) {
+        $update->execute([word_game_calculate_server_remaining_seconds($session), (string)$session['id']]);
+    }
+
+    word_game_debug_log('active sessions abandoned before new game', [
+        'user_id' => $userId,
+        'qualification_id' => $qualificationId,
+        'session_count' => count($activeSessions),
+    ]);
+}
+
+function word_game_mark_session_question_seen_if_first_interaction(PDO $pdo, array $lockedSessionQuestion, string $userId): void
+{
+    $questionId = trim((string)($lockedSessionQuestion['word_game_question_id'] ?? ''));
+    if ($questionId === '' || trim($userId) === '') {
+        return;
+    }
+
+    $revealed = json_decode((string)($lockedSessionQuestion['revealed_indexes_json'] ?? '[]'), true);
+    $alreadyInteracted = (int)($lockedSessionQuestion['letters_taken_count'] ?? 0) > 0
+        || (int)($lockedSessionQuestion['wrong_attempt_count'] ?? 0) > 0
+        || (int)($lockedSessionQuestion['is_completed'] ?? 0) === 1
+        || trim((string)($lockedSessionQuestion['submitted_answer'] ?? '')) !== ''
+        || (is_array($revealed) && count($revealed) > 0);
+    if ($alreadyInteracted) {
+        return;
+    }
+
+    $hist = $pdo->prepare('INSERT INTO word_game_user_question_history (id, user_id, word_game_question_id, seen_count, last_seen_at, created_at, updated_at)
+                           VALUES (?, ?, ?, 1, NOW(), NOW(), NOW())
+                           ON DUPLICATE KEY UPDATE seen_count = seen_count + 1, last_seen_at = NOW(), updated_at = NOW()');
+    $hist->execute([function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16)), $userId, $questionId]);
+}
+
 function word_game_session_create(PDO $pdo, string $userId, string $qualificationId, array $questions): array
 {
     $userId = trim($userId);
@@ -714,6 +812,8 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
 
     $pdo->beginTransaction();
     try {
+        word_game_abandon_active_sessions_for_user_qualification($pdo, $userId, $qualificationId);
+
         $payload = [
             'id' => $sessionId,
             'user_id' => $userId,
@@ -794,12 +894,11 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
             $snapshotAnswerText = (string)($question['answer_text'] ?? '');
             $snapshotAnswerNormalized = word_game_normalize_answer((string)($question['answer_normalized'] ?? $question['answer_text'] ?? ''));
 
-            word_game_debug_log('session snapshot answer_text', [
+            word_game_debug_log('session question snapshot prepared', [
                 'session_id' => $sessionId,
                 'question_id' => (string)($question['id'] ?? ''),
                 'question_order' => $questionOrder,
-                'answer_text' => $snapshotAnswerText,
-                'answer_normalized' => $snapshotAnswerNormalized,
+                'answer_length' => $answerLength,
             ]);
 
             $snapshot = [
@@ -841,19 +940,14 @@ function word_game_session_create(PDO $pdo, string $userId, string $qualificatio
             $insertSqStmt = $pdo->prepare($insertSqSql);
             $insertSqStmt->execute($valuesSq);
 
-            $createdQuestions[] = [
+            $createdQuestions[] = word_game_build_public_session_question([
                 'session_question_id' => $sessionQuestionId,
                 'question_order' => $questionOrder,
                 'question_text' => (string)($question['question_text'] ?? ''),
                 'answer_length' => $answerLength,
                 'max_score' => $maxScore,
-                'answer_text_debug' => $snapshotAnswerText,
-            ];
-
-            $hist = $pdo->prepare('INSERT INTO word_game_user_question_history (id, user_id, word_game_question_id, seen_count, last_seen_at, created_at, updated_at)
-                                   VALUES (?, ?, ?, 1, NOW(), NOW(), NOW())
-                                   ON DUPLICATE KEY UPDATE seen_count = seen_count + 1, last_seen_at = NOW(), updated_at = NOW()');
-            $hist->execute([function_exists('generate_uuid') ? generate_uuid() : bin2hex(random_bytes(16)), $userId, (string)$question['id']]);
+                'answer_text' => $snapshotAnswerText,
+            ]);
         }
 
         $pdo->commit();
@@ -906,6 +1000,28 @@ function word_game_find_session(PDO $pdo, string $sessionId, string $userId): ?a
         'SELECT ' . $selectSql
         . ' FROM `' . $schema['table'] . '`'
         . ' WHERE `' . $schema['id'] . '` = ? AND `' . $schema['user_id'] . '` = ? LIMIT 1'
+    );
+    $stmt->execute([trim($sessionId), trim($userId)]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $row ?: null;
+}
+
+function word_game_find_session_for_update(PDO $pdo, string $sessionId, string $userId): ?array
+{
+    $schema = word_game_session_schema($pdo);
+
+    $selectKeys = [
+        'id', 'user_id', 'qualification_id', 'total_score', 'remaining_seconds',
+        'total_questions', 'completed_questions', 'correct_questions', 'wrong_questions',
+        'total_letters_taken', 'status', 'started_at', 'finished_at',
+    ];
+    $selectSql = implode(', ', array_map(static fn(string $key): string => '`' . $schema[$key] . '` AS `' . $key . '`', $selectKeys));
+
+    $stmt = $pdo->prepare(
+        'SELECT ' . $selectSql
+        . ' FROM `' . $schema['table'] . '`'
+        . ' WHERE `' . $schema['id'] . '` = ? AND `' . $schema['user_id'] . '` = ? LIMIT 1 FOR UPDATE'
     );
     $stmt->execute([trim($sessionId), trim($userId)]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -1181,6 +1297,7 @@ function word_game_check_answer(PDO $pdo, array $sessionQuestion, string $submit
             'wrong_attempt_count' => $wrongAttemptCount,
             'remaining_attempts' => max(0, 1 - $wrongAttemptCount),
             'question_completed' => true,
+            'answer_reveal' => (string)($sessionQuestion['answer_text'] ?? ''),
         ];
 
         word_game_debug_log('check answer result', [
@@ -1237,6 +1354,9 @@ function word_game_check_answer(PDO $pdo, array $sessionQuestion, string $submit
         'remaining_attempts' => $remainingAttempts,
         'question_completed' => $isCompleted,
     ];
+    if ($isCompleted) {
+        $result['answer_reveal'] = (string)($sessionQuestion['answer_text'] ?? '');
+    }
 
     word_game_debug_log('check answer result', [
         'session_question_id' => $sessionQuestionId,
@@ -1290,7 +1410,7 @@ function word_game_refresh_session_totals(PDO $pdo, string $sessionId): void
     ]);
 }
 
-function word_game_finish_session(PDO $pdo, string $sessionId, string $userId, int $remainingSeconds, string $status): array
+function word_game_finish_session(PDO $pdo, string $sessionId, string $userId, string $status): array
 {
     $sessionId = trim($sessionId);
     $userId = trim($userId);
@@ -1300,56 +1420,89 @@ function word_game_finish_session(PDO $pdo, string $sessionId, string $userId, i
         throw new InvalidArgumentException('status geçersiz.');
     }
 
-    $settings = word_game_get_runtime_settings($pdo);
-    $remainingSeconds = max(0, min(max(30, (int)($settings['duration_seconds'] ?? 400)), $remainingSeconds));
-    word_game_refresh_session_totals($pdo, $sessionId);
-
-    $session = word_game_find_session($pdo, $sessionId, $userId);
-    if (!$session) {
-        throw new RuntimeException('Oturum bulunamadı.');
-    }
-
-    $totalScore = (int)($session['total_score'] ?? 0);
-    if ($status === 'abandoned') {
-        $totalScore = 0;
-    }
-
     $schema = word_game_session_schema($pdo);
-    $set = [
-        '`' . $schema['status'] . '` = ?',
-        '`' . $schema['remaining_seconds'] . '` = ?',
-        '`' . $schema['total_score'] . '` = ?',
-        '`' . $schema['finished_at'] . '` = NOW()',
-    ];
-    if ($schema['updated_at']) {
-        $set[] = '`' . $schema['updated_at'] . '` = NOW()';
+    $pdo->beginTransaction();
+    try {
+        $session = word_game_find_session_for_update($pdo, $sessionId, $userId);
+        if (!$session) {
+            throw new RuntimeException('Oturum bulunamadı.');
+        }
+        if ((string)($session['status'] ?? '') !== 'active') {
+            throw new RuntimeException('Bu oturum zaten tamamlanmış.');
+        }
+
+        word_game_refresh_session_totals($pdo, $sessionId);
+        $session = word_game_find_session_for_update($pdo, $sessionId, $userId);
+        if (!$session) {
+            throw new RuntimeException('Oturum bulunamadı.');
+        }
+
+        $initialRemaining = max(0, (int)($session['remaining_seconds'] ?? word_game_session_initial_remaining_seconds()));
+        $timeStmt = $pdo->prepare('SELECT GREATEST(0, ? - TIMESTAMPDIFF(SECOND, `' . $schema['started_at'] . '`, NOW())) FROM `' . $schema['table'] . '` WHERE `' . $schema['id'] . '` = ? LIMIT 1');
+        $timeStmt->execute([$initialRemaining, $sessionId]);
+        $serverRemaining = max(0, (int)$timeStmt->fetchColumn());
+
+        $completedQuestions = (int)($session['completed_questions'] ?? 0);
+        $totalQuestions = (int)($session['total_questions'] ?? 0);
+        $finalStatus = 'abandoned';
+        if ($serverRemaining <= 0) {
+            $finalStatus = 'timeout';
+        } elseif ($status === 'abandoned') {
+            $finalStatus = 'abandoned';
+        } elseif ($status === 'completed' && $totalQuestions > 0 && $completedQuestions >= $totalQuestions) {
+            $finalStatus = 'completed';
+        }
+
+        $totalScore = ($finalStatus === 'abandoned') ? 0 : (int)($session['total_score'] ?? 0);
+        $set = [
+            '`' . $schema['status'] . '` = ?',
+            '`' . $schema['remaining_seconds'] . '` = ?',
+            '`' . $schema['total_score'] . '` = ?',
+            '`' . $schema['finished_at'] . '` = NOW()',
+        ];
+        if ($schema['updated_at']) {
+            $set[] = '`' . $schema['updated_at'] . '` = NOW()';
+        }
+
+        $stmt = $pdo->prepare(
+            'UPDATE `' . $schema['table'] . '`
+             SET ' . implode(', ', $set) . '
+             WHERE `' . $schema['id'] . '` = ?
+               AND `' . $schema['user_id'] . '` = ?'
+        );
+        $stmt->execute([$finalStatus, $serverRemaining, $totalScore, $sessionId, $userId]);
+
+        $updated = word_game_find_session_for_update($pdo, $sessionId, $userId);
+        if (!$updated) {
+            throw new RuntimeException('Oturum sonucu okunamadı.');
+        }
+
+        $result = [
+            'session_id' => (string)$updated['id'],
+            'status' => (string)$updated['status'],
+            'total_score' => (int)$updated['total_score'],
+            'remaining_seconds' => (int)$updated['remaining_seconds'],
+            'correct_questions' => (int)$updated['correct_questions'],
+            'wrong_questions' => (int)$updated['wrong_questions'],
+            'total_letters_taken' => (int)$updated['total_letters_taken'],
+            'finished_at' => (string)($updated['finished_at'] ?? ''),
+        ];
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
     }
 
-    $stmt = $pdo->prepare(
-        'UPDATE `' . $schema['table'] . '`
-         SET ' . implode(', ', $set) . '
-         WHERE `' . $schema['id'] . '` = ?
-           AND `' . $schema['user_id'] . '` = ?'
-    );
-    $stmt->execute([$status, $remainingSeconds, $totalScore, $sessionId, $userId]);
-
-    $updated = word_game_find_session($pdo, $sessionId, $userId);
-    if (!$updated) {
-        throw new RuntimeException('Oturum sonucu okunamadı.');
-    }
-
-    $result = [
-        'session_id' => (string)$updated['id'],
-        'status' => (string)$updated['status'],
-        'total_score' => (int)$updated['total_score'],
-        'remaining_seconds' => (int)$updated['remaining_seconds'],
-        'correct_questions' => (int)$updated['correct_questions'],
-        'wrong_questions' => (int)$updated['wrong_questions'],
-        'total_letters_taken' => (int)$updated['total_letters_taken'],
-        'finished_at' => (string)($updated['finished_at'] ?? ''),
-    ];
-
-    word_game_debug_log('finish session result', $result);
+    word_game_debug_log('finish session result', [
+        'session_id' => $sessionId,
+        'user_id' => $userId,
+        'status' => $result['status'],
+        'total_score' => $result['total_score'],
+        'remaining_seconds' => $result['remaining_seconds'],
+    ]);
 
     return $result;
 }
@@ -1360,18 +1513,20 @@ function word_game_get_leaderboard(PDO $pdo, string $qualificationId, int $limit
     $limit = max(1, min(100, (int)$limit));
     $schema = word_game_session_schema($pdo);
 
-    $sql = 'SELECT `' . $schema['id'] . '` AS id,
-                   `' . $schema['user_id'] . '` AS user_id,
-                   `' . $schema['total_score'] . '` AS total_score,
-                   `' . $schema['remaining_seconds'] . '` AS remaining_seconds,
-                   `' . $schema['finished_at'] . '` AS finished_at
-            FROM `' . $schema['table'] . '`
-            WHERE `' . $schema['qualification_id'] . '` = ?
-              AND `' . $schema['status'] . '` IN (\'completed\', \'timeout\')
-              AND `' . $schema['finished_at'] . '` IS NOT NULL
-            ORDER BY `' . $schema['total_score'] . '` DESC,
-                     `' . $schema['remaining_seconds'] . '` DESC,
-                     `' . $schema['finished_at'] . '` ASC
+    $sql = 'SELECT s.`' . $schema['id'] . '` AS id,
+                   s.`' . $schema['user_id'] . '` AS user_id,
+                   s.`' . $schema['total_score'] . '` AS total_score,
+                   s.`' . $schema['remaining_seconds'] . '` AS remaining_seconds,
+                   s.`' . $schema['finished_at'] . '` AS finished_at,
+                   COALESCE(NULLIF(TRIM(u.full_name), \'\'), NULLIF(TRIM(u.email), \'\'), s.`' . $schema['user_id'] . '`) AS display_name
+            FROM `' . $schema['table'] . '` s
+            LEFT JOIN user_profiles u ON u.id = s.`' . $schema['user_id'] . '`
+            WHERE s.`' . $schema['qualification_id'] . '` = ?
+              AND s.`' . $schema['status'] . '` IN (\'completed\', \'timeout\')
+              AND s.`' . $schema['finished_at'] . '` IS NOT NULL
+            ORDER BY s.`' . $schema['total_score'] . '` DESC,
+                     s.`' . $schema['remaining_seconds'] . '` DESC,
+                     s.`' . $schema['finished_at'] . '` ASC
             LIMIT ' . $limit;
     $stmt = $pdo->prepare($sql);
     $stmt->execute([$qualificationId]);
@@ -1380,22 +1535,10 @@ function word_game_get_leaderboard(PDO $pdo, string $qualificationId, int $limit
     $items = [];
     foreach ($rows as $idx => $row) {
         $userId = (string)($row['user_id'] ?? '');
-        $displayName = $userId;
-
-        if (function_exists('api_find_profile_by_user_id')) {
-            $profile = api_find_profile_by_user_id($pdo, $userId);
-            if ($profile) {
-                $displayName = trim((string)($profile['full_name'] ?? ''));
-                if ($displayName === '') {
-                    $displayName = trim((string)($profile['email'] ?? $userId));
-                }
-            }
-        }
-
         $items[] = [
             'rank' => $idx + 1,
             'user_id' => $userId,
-            'display_name' => $displayName,
+            'display_name' => (string)($row['display_name'] ?? $userId),
             'total_score' => (int)($row['total_score'] ?? 0),
             'remaining_seconds' => (int)($row['remaining_seconds'] ?? 0),
             'finished_at' => (string)($row['finished_at'] ?? ''),

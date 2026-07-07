@@ -39,30 +39,41 @@ try {
         ], 422);
     }
 
-    $session = word_game_find_session($pdo, $sessionId, $userId);
-    if (!$session) {
-        api_send_json(['success' => false, 'message' => 'Oturum bulunamadı.', 'data' => null], 404);
-    }
+    $pdo->beginTransaction();
+    try {
+        $session = word_game_find_session_for_update($pdo, $sessionId, $userId);
+        if (!$session) {
+            throw new RuntimeException('Oturum bulunamadı.');
+        }
 
-    if ((string)($session['qualification_id'] ?? '') !== $currentQualificationId) {
-        api_send_json(['success' => false, 'message' => 'Bu yeterlilik için erişim yetkiniz yok.', 'data' => null], 403);
-    }
+        if ((string)($session['qualification_id'] ?? '') !== $currentQualificationId) {
+            throw new RuntimeException('Bu yeterlilik için erişim yetkiniz yok.');
+        }
 
-    if ((string)($session['status'] ?? '') !== 'active') {
-        api_send_json(['success' => false, 'message' => 'Sadece aktif oturumda işlem yapılabilir.', 'data' => null], 422);
-    }
+        if ((string)($session['status'] ?? '') !== 'active') {
+            throw new RuntimeException('Sadece aktif oturumda işlem yapılabilir.');
+        }
 
-    $sessionQuestion = word_game_find_session_question($pdo, $sessionQuestionId, $sessionId);
-    if (!$sessionQuestion) {
-        api_send_json(['success' => false, 'message' => 'Oturum sorusu bulunamadı.', 'data' => null], 404);
-    }
+        $sessionQuestion = word_game_find_session_question_for_update($pdo, $sessionQuestionId, $sessionId);
+        if (!$sessionQuestion) {
+            throw new RuntimeException('Oturum sorusu bulunamadı.');
+        }
 
-    if ((int)($sessionQuestion['is_completed'] ?? 0) === 1) {
-        api_send_json(['success' => false, 'message' => 'Bu soru zaten tamamlandı.', 'data' => null], 422);
-    }
+        if ((int)($sessionQuestion['is_completed'] ?? 0) === 1) {
+            throw new RuntimeException('Bu soru zaten tamamlandı.');
+        }
 
-    $result = word_game_check_answer($pdo, $sessionQuestion, $submittedAnswer);
-    word_game_refresh_session_totals($pdo, $sessionId);
+        word_game_mark_session_question_seen_if_first_interaction($pdo, $sessionQuestion, $userId);
+        $result = word_game_check_answer($pdo, $sessionQuestion, $submittedAnswer);
+        word_game_refresh_session_totals($pdo, $sessionId);
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
 
     $response = [
         'is_correct' => (bool)$result['is_correct'],
@@ -76,6 +87,10 @@ try {
         $response['remaining_attempts'] = (int)$result['remaining_attempts'];
     }
 
+    if (!empty($result['answer_reveal']) && (bool)$result['question_completed'] === true) {
+        $response['answer_reveal'] = (string)$result['answer_reveal'];
+    }
+
     api_send_json([
         'success' => true,
         'data' => $response,
@@ -83,7 +98,7 @@ try {
 } catch (Throwable $e) {
     word_game_debug_log('SQL error', [
         'endpoint' => 'word-game/check-answer',
-        'message' => $e->getMessage(),
+        'error_class' => get_class($e),
     ]);
 
     api_send_json(word_game_build_error_response('Cevap kontrolü yapılamadı.', $e), 422);

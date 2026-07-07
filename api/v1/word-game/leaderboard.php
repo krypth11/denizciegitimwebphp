@@ -33,7 +33,7 @@ try {
 } catch (Throwable $e) {
     word_game_debug_log('SQL error', [
         'endpoint' => 'word-game/leaderboard',
-        'message' => $e->getMessage(),
+        'error_class' => get_class($e),
     ]);
 
     api_send_json(word_game_build_error_response('Liderlik tablosu yüklenemedi.', $e), 422);

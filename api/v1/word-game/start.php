@@ -125,18 +125,6 @@ try {
         'target_chars' => $targetChars,
     ]);
 
-    word_game_debug_log('response debug answer_text', [
-        'session_id' => (string)($created['session_id'] ?? ''),
-        'items' => array_values(array_map(
-            static fn(array $q): array => [
-                'session_question_id' => (string)($q['session_question_id'] ?? ''),
-                'question_order' => (int)($q['question_order'] ?? 0),
-                'answer_text_debug' => (string)($q['answer_text_debug'] ?? ''),
-            ],
-            array_values($created['questions'] ?? [])
-        )),
-    ]);
-
     api_send_json([
         'success' => true,
         'data' => [
@@ -150,7 +138,7 @@ try {
 } catch (Throwable $e) {
     word_game_debug_log('SQL error', [
         'endpoint' => 'word-game/start',
-        'message' => $e->getMessage(),
+        'error_class' => get_class($e),
     ]);
 
     api_send_json(word_game_build_error_response('Word game başlatılamadı.', $e), 422);

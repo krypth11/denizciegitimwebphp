@@ -83,8 +83,11 @@ try {
             'revealed_indexes_json_before' => (string)($lockedSessionQuestion['revealed_indexes_json'] ?? '[]'),
         ]);
 
+        word_game_mark_session_question_seen_if_first_interaction($pdo, $lockedSessionQuestion, $userId);
         $result = word_game_reveal_letter($pdo, $lockedSessionQuestion);
         word_game_refresh_session_totals($pdo, $sessionId);
+
+        $sessionAfterReveal = word_game_find_session_for_update($pdo, $sessionId, $userId) ?: [];
 
         $pdo->commit();
     } catch (Throwable $e) {
@@ -113,10 +116,8 @@ try {
             'revealed_logical_index' => (int)$result['revealed_logical_index'],
             'revealed_index_legacy_1_based' => (int)$result['revealed_index_legacy_1_based'],
             'revealed_letter' => (string)$result['revealed_letter'],
-            'revealed_letter_normalized' => (string)$result['revealed_letter_normalized'],
             'letters_taken_count' => (int)$result['letters_taken_count'],
-            'remaining_question_score' => (int)$result['remaining_question_score'],
-            'revealed_indexes' => array_values($result['revealed_indexes'] ?? []),
+            'total_letters_taken' => (int)($sessionAfterReveal['total_letters_taken'] ?? 0),
         ],
     ]);
 } catch (Throwable $e) {
@@ -126,7 +127,7 @@ try {
 
     word_game_debug_log('SQL error', [
         'endpoint' => 'word-game/reveal-letter',
-        'message' => $e->getMessage(),
+        'error_class' => get_class($e),
     ]);
 
     api_send_json(word_game_build_error_response('Harf açma işlemi başarısız oldu.', $e), 422);

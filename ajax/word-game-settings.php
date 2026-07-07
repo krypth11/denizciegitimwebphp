@@ -10,24 +10,31 @@ $action = trim((string)($_GET['action'] ?? $_POST['action'] ?? ''));
 try {
     if ($action === 'get') {
         $settings = word_game_get_settings($pdo);
-        $counts = [];
-        $stmt = $pdo->query('SELECT answer_length, COUNT(*) AS c FROM word_game_questions WHERE answer_length BETWEEN 1 AND 64 GROUP BY answer_length');
-        foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $r) { $counts[(int)$r['answer_length']] = (int)$r['c']; }
-        wg_set_json(true, '', ['settings'=>$settings,'length_counts'=>$counts]);
+        $counts = word_game_length_counts($pdo);
+        wg_set_json(true, '', ['settings'=>$settings] + $counts);
     }
     if ($action === 'save') {
+        $allowedLengths = $_POST['allowed_lengths'] ?? [];
+        if (!is_array($allowedLengths)) $allowedLengths = [];
+        $poolCheck = word_game_validate_allowed_lengths_change($pdo, $allowedLengths);
+        if (!($poolCheck['success'] ?? false)) {
+            wg_set_json(false, 'Seçilen karakter uzunlukları dışında kalan aktif kelime oyunu soruları var. Önce bu soruları pasife alın veya karakter uzunluğu seçimini genişletin.', [
+                'blocked_active_question_count' => (int)($poolCheck['blocked_active_question_count'] ?? 0),
+                'blocked_lengths' => $poolCheck['blocked_lengths'] ?? [],
+            ], 422);
+        }
         $res = word_game_settings_update($pdo, [
             'target_score' => $_POST['target_score'] ?? 0,
             'points_per_char' => $_POST['points_per_char'] ?? 0,
             'min_questions' => $_POST['min_questions'] ?? 0,
             'max_questions' => $_POST['max_questions'] ?? 0,
             'duration_seconds' => $_POST['duration_seconds'] ?? 0,
-            'allowed_lengths' => $_POST['allowed_lengths'] ?? [],
+            'allowed_lengths' => $allowedLengths,
         ]);
         if (!($res['success'] ?? false)) {
             wg_set_json(false, $res['message'] ?? 'Kayıt başarısız.', ['errors'=>$res['errors'] ?? []], 422);
         }
-        wg_set_json(true, 'Ayarlar kaydedildi.', ['settings'=>$res['settings'] ?? word_game_get_settings($pdo)]);
+        wg_set_json(true, 'Ayarlar kaydedildi.', ['settings'=>$res['settings'] ?? word_game_get_settings($pdo)] + word_game_length_counts($pdo));
     }
     wg_set_json(false, 'Geçersiz işlem.', [], 400);
 } catch (Throwable $e) {

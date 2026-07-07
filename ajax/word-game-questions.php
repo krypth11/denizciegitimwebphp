@@ -56,26 +56,30 @@ try {
 
             $categoryId = $filters['category_id'];
             if ($categoryId !== '') {
-                $where[] = 'wq.category_id = ?';
-                $params[] = $categoryId;
+                $where[] = 'wq.category_id = :category_id';
+                $params[':category_id'] = $categoryId;
             }
 
             $qualificationId = $filters['qualification_id'];
             if ($qualificationId !== '') {
-                $where[] = 'wq.qualification_id = ?';
-                $params[] = $qualificationId;
+                $where[] = 'wq.qualification_id = :qualification_id';
+                $params[':qualification_id'] = $qualificationId;
             }
 
             if (isset($filters['is_active']) && $filters['is_active'] !== '') {
-                $where[] = 'wq.is_active = ?';
-                $params[] = ((int)$filters['is_active'] === 1 ? 1 : 0);
+                $where[] = 'wq.is_active = :is_active';
+                $params[':is_active'] = ((int)$filters['is_active'] === 1 ? 1 : 0);
             }
 
             $search = trim((string)$filters['search']);
             if ($search !== '') {
-                $where[] = '(wq.question_text LIKE ? OR wq.question_text_en LIKE ? OR wq.answer_text LIKE ? OR wq.answer_text_en LIKE ? OR wq.answer_normalized LIKE ?)';
+                $where[] = '(wq.question_text LIKE :search_q OR wq.question_text_en LIKE :search_q_en OR wq.answer_text LIKE :search_a OR wq.answer_text_en LIKE :search_a_en OR wq.answer_normalized LIKE :search_norm)';
                 $like = '%' . $search . '%';
-                array_push($params, $like, $like, $like, $like, $like);
+                $params[':search_q'] = $like;
+                $params[':search_q_en'] = $like;
+                $params[':search_a'] = $like;
+                $params[':search_a_en'] = $like;
+                $params[':search_norm'] = $like;
             }
 
             $whereSql = implode(' AND ', $where);
@@ -86,7 +90,10 @@ try {
                          LEFT JOIN word_game_categories c ON c.id = wq.category_id
                          WHERE ' . $whereSql;
             $countStmt = $pdo->prepare($countSql);
-            $countStmt->execute($params);
+            foreach ($params as $name => $value) {
+                $countStmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+            }
+            $countStmt->execute();
             $totalCount = (int)$countStmt->fetchColumn();
             $totalPages = max(1, (int)ceil($totalCount / $perPage));
 
@@ -103,8 +110,8 @@ try {
                         ORDER BY c.order_index ASC, c.name ASC, wq.order_index ASC, wq.created_at DESC
                         LIMIT :limit OFFSET :offset';
             $dataStmt = $pdo->prepare($dataSql);
-            foreach ($params as $idx => $value) {
-                $dataStmt->bindValue($idx + 1, $value);
+            foreach ($params as $name => $value) {
+                $dataStmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
             }
             $dataStmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
             $dataStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -121,6 +128,22 @@ try {
                     'total_count' => $totalCount,
                     'total_pages' => $totalPages,
                 ],
+            ]);
+            break;
+
+        case 'get_category_qualifications':
+            $categoryId = trim((string)($_GET['category_id'] ?? $_POST['category_id'] ?? ''));
+            if ($categoryId === '') {
+                word_game_json(false, 'Başlık seçimi zorunludur.', [], 422);
+            }
+            $category = word_game_get_category($pdo, $categoryId);
+            if (!$category) {
+                word_game_json(false, 'Başlık bulunamadı.', [], 404);
+            }
+            word_game_json(true, '', [
+                'category' => $category,
+                'qualifications' => word_game_list_category_qualifications($pdo, $categoryId),
+                'category_stats' => word_game_get_category_stats($pdo, $categoryId),
             ]);
             break;
 
@@ -279,16 +302,26 @@ try {
             break;
 
         case 'parse_bulk_pattern':
+            $categoryId = trim((string)($_POST['category_id'] ?? ''));
+            $qualificationId = trim((string)($_POST['qualification_id'] ?? ''));
             $pattern = (string)($_POST['pattern'] ?? '');
             $parsed = word_game_parse_bulk_pattern_text($pattern);
-            word_game_json(true, '', $parsed);
+            $records = [];
+            foreach (($parsed['items'] ?? []) as $item) {
+                if (isset($item['record']) && is_array($item['record'])) {
+                    $records[] = $item['record'];
+                }
+            }
+            $validation = word_game_validate_bulk_questions($pdo, $categoryId, $qualificationId, $records);
+            if (!empty($parsed['errors']) && empty($records)) {
+                $validation['errors'] = $parsed['errors'];
+            }
+            word_game_json(true, '', $validation);
             break;
 
         case 'create_bulk_questions':
             $categoryId = trim((string)($_POST['category_id'] ?? ''));
-            if ($categoryId === '') {
-                word_game_json(false, 'Başlık seçimi zorunludur.', [], 422);
-            }
+            $qualificationId = trim((string)($_POST['qualification_id'] ?? ''));
 
             $itemsRaw = $_POST['items'] ?? '[]';
             if (is_string($itemsRaw)) {
@@ -299,38 +332,50 @@ try {
             if (!is_array($items)) {
                 word_game_json(false, 'Geçersiz kayıt listesi.', [], 422);
             }
-
-            $created = [];
-            $errors = [];
-            foreach ($items as $idx => $item) {
-                $record = is_array($item) ? $item : [];
-                $result = word_game_create($pdo, [
-                    'category_id' => $categoryId,
-                    'question_text' => $record['tr_question'] ?? '',
-                    'question_text_en' => $record['en_question'] ?? '',
-                    'answer_text' => $record['tr_answer'] ?? '',
-                    'answer_text_en' => $record['en_answer'] ?? '',
-                    'notes' => $record['note'] ?? '',
-                    'is_active' => 1,
-                    'order_index' => 0,
-                ]);
-
-                if (!($result['success'] ?? false)) {
-                    $errors[] = [
-                        'index' => $idx,
-                        'message' => $result['message'] ?? 'Kayıt oluşturulamadı.',
-                        'errors' => $result['errors'] ?? [],
-                    ];
-                    continue;
-                }
-                $created[] = $result['item'] ?? null;
+            $requestedCount = count($items);
+            $validation = word_game_validate_bulk_questions($pdo, $categoryId, $qualificationId, $items);
+            if (!($validation['valid'] ?? false)) {
+                word_game_json(false, 'Toplu kayıt doğrulamasında hatalar var. Hiçbir kayıt eklenmedi.', [
+                    'requested_count' => $requestedCount,
+                    'created_count' => 0,
+                    'error_count' => (int)($validation['invalid_count'] ?? 0),
+                    'validation' => $validation,
+                ], 422);
             }
 
-            word_game_json(true, 'Toplu kayıt işlemi tamamlandı.', [
-                'created_count' => count($created),
-                'error_count' => count($errors),
-                'created' => $created,
-                'errors' => $errors,
+            $createdIds = [];
+            $pdo->beginTransaction();
+            try {
+                $nextOrder = word_game_next_order_index($pdo, $categoryId, $qualificationId);
+                foreach (($validation['normalized_records'] ?? []) as $idx => $validatedData) {
+                    $validatedData['order_index'] = $nextOrder + (int)$idx;
+                    $inserted = word_game_insert_validated_question($pdo, $validatedData);
+                    $createdIds[] = $inserted['id'];
+                }
+                if (count($createdIds) !== $requestedCount) {
+                    throw new RuntimeException('Bulk created count mismatch.');
+                }
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                if (word_game_is_duplicate_exception($e)) {
+                    word_game_json(false, 'Bu yeterlilik altında aynı cevap zaten mevcut.', [
+                        'requested_count' => $requestedCount,
+                        'created_count' => 0,
+                        'created_ids' => [],
+                        'error_count' => $requestedCount,
+                    ], 422);
+                }
+                throw $e;
+            }
+
+            word_game_json(true, 'Toplu kayıt başarıyla tamamlandı.', [
+                'requested_count' => $requestedCount,
+                'created_count' => count($createdIds),
+                'created_ids' => $createdIds,
+                'error_count' => 0,
             ]);
             break;
 
@@ -339,5 +384,8 @@ try {
             break;
     }
 } catch (Throwable $e) {
+    if (word_game_is_duplicate_exception($e)) {
+        word_game_json(false, 'Bu yeterlilik altında aynı cevap zaten mevcut.', [], 422);
+    }
     word_game_json(false, 'İşlem sırasında bir sunucu hatası oluştu.', [], 500);
 }

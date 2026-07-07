@@ -22,7 +22,6 @@ try {
 
     $payload = api_get_request_data();
     $sessionId = trim((string)($payload['session_id'] ?? ''));
-    $remainingSeconds = filter_var($payload['remaining_seconds'] ?? null, FILTER_VALIDATE_INT);
     $status = strtolower(trim((string)($payload['status'] ?? '')));
 
     word_game_debug_log('reveal/check/finish session ids', [
@@ -30,10 +29,10 @@ try {
         'session_id' => $sessionId,
     ]);
 
-    if ($sessionId === '' || $remainingSeconds === false || $status === '') {
+    if ($sessionId === '' || $status === '') {
         api_send_json([
             'success' => false,
-            'message' => 'session_id, remaining_seconds ve status zorunludur.',
+            'message' => 'session_id ve status zorunludur.',
             'data' => null,
         ], 422);
     }
@@ -59,7 +58,7 @@ try {
         api_send_json(['success' => false, 'message' => 'Bu oturum zaten tamamlanmış.', 'data' => null], 422);
     }
 
-    $result = word_game_finish_session($pdo, $sessionId, $userId, (int)$remainingSeconds, $status);
+    $result = word_game_finish_session($pdo, $sessionId, $userId, $status);
 
     api_send_json([
         'success' => true,
@@ -68,7 +67,7 @@ try {
 } catch (Throwable $e) {
     word_game_debug_log('SQL error', [
         'endpoint' => 'word-game/finish',
-        'message' => $e->getMessage(),
+        'error_class' => get_class($e),
     ]);
 
     api_send_json(word_game_build_error_response('Oturum bitirme işlemi başarısız oldu.', $e), 422);

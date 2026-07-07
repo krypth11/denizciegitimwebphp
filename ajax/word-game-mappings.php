@@ -17,8 +17,20 @@ try {
         if (!word_game_get_category($pdo, $categoryId)) wg_map_json(false, 'Kategori bulunamadı.', [], 404);
         $ids = $_POST['qualification_ids'] ?? [];
         if (!is_array($ids)) $ids = [];
-        word_game_save_category_qualifications($pdo, $categoryId, $ids);
-        wg_map_json(true, 'Eşleştirmeler güncellendi.');
+        $res = word_game_save_category_qualifications($pdo, $categoryId, $ids);
+        if (!($res['success'] ?? false)) {
+            wg_map_json(false, $res['message'] ?? 'Eşleştirme kaydı reddedildi.', [
+                'code' => $res['code'] ?? 'mapping_rejected',
+                'affected_question_count' => (int)($res['affected_question_count'] ?? 0),
+                'blocked_qualification_ids' => $res['blocked_qualification_ids'] ?? [],
+                'blocked_qualification_names' => $res['blocked_qualification_names'] ?? [],
+                'errors' => $res['errors'] ?? [],
+            ], 422);
+        }
+        wg_map_json(true, 'Eşleştirmeler güncellendi.', [
+            'stats' => $res['stats'] ?? word_game_get_category_stats($pdo, $categoryId),
+            'mapping' => word_game_category_qualification_map($pdo),
+        ]);
     }
     wg_map_json(false, 'Geçersiz işlem.', [], 400);
 } catch (Throwable $e) {
