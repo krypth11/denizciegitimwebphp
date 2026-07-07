@@ -26,6 +26,7 @@ try {
     $topicIdsRaw = trim((string)($_GET['topic_ids'] ?? ''));
     $topicIds = $topicIdsRaw !== '' ? explode(',', $topicIdsRaw) : [];
     $questionType = trim((string)($_GET['question_type'] ?? ''));
+    $sourceType = (string)($_GET['source_type'] ?? '');
     $poolTypeRaw = (string)($_GET['pool_type'] ?? 'all');
     $poolType = questions_normalize_pool_type($poolTypeRaw);
     if ($poolType === null) {
@@ -56,6 +57,7 @@ try {
         'topic_id' => $topicId,
         'topic_ids' => $topicIds,
         'question_type' => $questionType,
+        'source_type' => $sourceType,
         'question_columns' => $columns,
         'question_alias' => 'q',
         'qualification_guard_context' => 'questions.list.qualification_guard',
@@ -97,6 +99,7 @@ try {
         $hasCol('topic_id') ? ($qc('topic_id') . ' AS original_topic_id') : 'NULL AS original_topic_id',
         $hasCol('course_id') ? ($qc('course_id') . ' AS original_course_id') : 'NULL AS original_course_id',
         $hasCol('question_type') ? ($qc('question_type') . ' AS question_type') : "'' AS question_type",
+        $hasCol('source_type') ? ($qc('source_type') . ' AS source_type') : "'' AS source_type",
         $hasCol('question_text') ? ($qc('question_text') . ' AS question_text') : "'' AS question_text",
         $hasCol('option_a') ? ($qc('option_a') . ' AS option_a') : "'' AS option_a",
         $hasCol('option_b') ? ($qc('option_b') . ' AS option_b') : "'' AS option_b",
@@ -451,6 +454,7 @@ try {
             'original_topic_id' => (($row['original_topic_id'] ?? null) === '' ? null : ($row['original_topic_id'] ?? null)),
             'original_course_id' => $row['original_course_id'] ?? null,
             'question_type' => (string)($row['question_type'] ?? ''),
+            'source_type' => (string)($row['source_type'] ?? ''),
             'question_text' => (string)($row['question_text'] ?? ''),
             'option_a' => (string)($row['option_a'] ?? ''),
             'option_b' => (string)($row['option_b'] ?? ''),

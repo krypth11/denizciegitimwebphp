@@ -29,6 +29,7 @@ try {
     $topicIds = $topicIdsRaw !== '' ? explode(',', $topicIdsRaw) : [];
     $debugEnabled = ((string)($_GET['debug'] ?? '') === '1');
     $questionType = trim((string)($_GET['question_type'] ?? ''));
+    $sourceType = (string)($_GET['source_type'] ?? '');
     $poolType = questions_normalize_pool_type((string)($_GET['pool_type'] ?? 'all'));
 
     if ($poolType === null) {
@@ -43,6 +44,7 @@ try {
         'topic_id' => $topicId,
         'topic_ids' => $topicIds,
         'question_type' => $questionType,
+        'source_type' => $sourceType,
         'question_columns' => $questionColumns,
         'question_alias' => 'q',
         'qualification_guard_context' => 'questions.count.qualification_guard',

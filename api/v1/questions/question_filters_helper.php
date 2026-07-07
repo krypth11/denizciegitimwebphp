@@ -22,6 +22,28 @@ function questions_normalize_pool_type(string $rawPoolType): ?string
     return $map[$value] ?? null;
 }
 
+function questions_normalize_source_type(string $rawSourceType): ?string
+{
+    $value = questions_normalize_question_type_token($rawSourceType);
+    if ($value === '') {
+        return '';
+    }
+
+    if (in_array($value, ['all', 'tumu', 'tum', 'hepsi'], true)) {
+        return '';
+    }
+
+    if ($value === 'gasm') {
+        return 'gasm';
+    }
+
+    if (in_array($value, ['scenario', 'senaryo'], true)) {
+        return 'scenario';
+    }
+
+    return null;
+}
+
 function questions_normalize_question_type_token(string $value): string
 {
     $v = strtolower(trim($value));
@@ -118,7 +140,7 @@ function questions_normalize_topic_ids(array $rawTopicIds): array
 }
 
 /**
- * @return array{where: array<int,string>, params: array<int,mixed>, normalized_question_type: string, requested_qualification_id: string}
+ * @return array{where: array<int,string>, params: array<int,mixed>, normalized_question_type: string, normalized_source_type: string, requested_qualification_id: string}
  */
 function build_question_filters(PDO $pdo, array $params): array
 {
@@ -130,6 +152,7 @@ function build_question_filters(PDO $pdo, array $params): array
     $topicId = trim((string)($params['topic_id'] ?? ''));
     $topicIds = questions_normalize_topic_ids((array)($params['topic_ids'] ?? []));
     $questionType = trim((string)($params['question_type'] ?? ''));
+    $sourceType = (string)($params['source_type'] ?? '');
     $questionAlias = trim((string)($params['question_alias'] ?? 'q'));
     $courseGuardContext = (string)($params['course_guard_context'] ?? 'questions.filter.course_guard');
     $topicGuardContext = (string)($params['topic_guard_context'] ?? 'questions.filter.topic_guard');
@@ -144,6 +167,11 @@ function build_question_filters(PDO $pdo, array $params): array
 
     if ($questionType !== '' && mb_strlen($questionType) > 50) {
         api_error('Geçersiz question_type.', 422);
+    }
+
+    $normalizedSourceType = questions_normalize_source_type($sourceType);
+    if ($normalizedSourceType === null) {
+        api_error('Geçersiz source_type.', 422);
     }
 
     if ($qualificationId !== '') {
@@ -316,10 +344,20 @@ function build_question_filters(PDO $pdo, array $params): array
         }
     }
 
+    if ($normalizedSourceType !== '') {
+        if (!$hasQ('source_type')) {
+            api_error('Soru tipi filtresi şu anda kullanılamıyor.', 500);
+        }
+
+        $where[] = 'LOWER(TRIM(' . $qc('source_type') . ')) = ?';
+        $queryParams[] = $normalizedSourceType;
+    }
+
     return [
         'where' => $where,
         'params' => $queryParams,
         'normalized_question_type' => questions_normalize_question_type_token($questionType),
+        'normalized_source_type' => $normalizedSourceType,
         'requested_qualification_id' => $effectiveQualificationId,
         'scope_links_available' => $scopeLinksAvailable,
     ];
