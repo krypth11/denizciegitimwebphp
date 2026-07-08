@@ -15,7 +15,7 @@ include '../includes/sidebar.php';
     <div class="page-header">
         <div>
             <h2>Yasal Metinler</h2>
-            <p class="text-muted mb-0">Kullanım Koşulları ve Gizlilik Politikası metinlerini yönetin.</p>
+            <p class="text-muted mb-0">Kullanım Koşulları, Gizlilik Politikası ve Çerez Politikası metinlerini yönetin.</p>
         </div>
         <div class="page-actions d-flex gap-2 flex-wrap">
             <button class="btn btn-primary" id="saveLegalBtn"><i class="bi bi-save"></i> Kaydet</button>
@@ -28,6 +28,9 @@ include '../includes/sidebar.php';
         </li>
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="privacy-tab" data-bs-toggle="tab" data-bs-target="#privacyPane" type="button" role="tab">Gizlilik Politikası</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="cookiePolicy-tab" data-bs-toggle="tab" data-bs-target="#cookiePolicyPane" type="button" role="tab">Çerez Politikası</button>
         </li>
     </ul>
 
@@ -117,6 +120,49 @@ include '../includes/sidebar.php';
                 </div>
             </div>
         </div>
+
+        <div class="tab-pane fade" id="cookiePolicyPane" role="tabpanel" aria-labelledby="cookiePolicy-tab">
+            <div class="row g-3">
+                <div class="col-12 col-lg-7">
+                    <div class="card">
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <label class="form-label">Başlık</label>
+                                <input type="text" class="form-control" id="cookiePolicyTitle" maxlength="255">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Durum</label>
+                                <select class="form-select" id="cookiePolicyStatus">
+                                    <option value="draft">Draft</option>
+                                    <option value="published">Published</option>
+                                </select>
+                            </div>
+                            <div class="mb-0">
+                                <label class="form-label">İçerik</label>
+                                <textarea class="form-control" id="cookiePolicyContent" rows="14" placeholder="Çerez politikası metnini girin..."></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-lg-5">
+                    <div class="card mb-3">
+                        <div class="card-header bg-white"><h6 class="mb-0">Meta Bilgiler</h6></div>
+                        <div class="card-body small">
+                            <div class="mb-2"><strong>Versiyon:</strong> <span id="cookiePolicyVersion">1</span></div>
+                            <div class="mb-2"><strong>Son güncelleme:</strong> <span id="cookiePolicyUpdatedAt">-</span></div>
+                            <div><strong>Son düzenleyen:</strong> <span id="cookiePolicyUpdatedBy">-</span></div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header bg-white"><h6 class="mb-0">Preview</h6></div>
+                        <div class="card-body">
+                            <h5 id="cookiePolicyPreviewTitle" class="mb-3"></h5>
+                            <div id="cookiePolicyPreview" class="legal-preview-area"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -125,12 +171,26 @@ $extra_js = <<<'JAVASCRIPT'
 <script>
 $(function () {
     const endpoint = '../ajax/legal-documents.php';
-    let docs = { terms: null, privacy: null };
+    let docs = { terms: null, privacy: null, cookie_policy: null };
+    const docUiPrefixMap = {
+        terms: 'terms',
+        privacy: 'privacy',
+        cookie_policy: 'cookiePolicy'
+    };
+    const tabDocKeyMap = {
+        'terms-tab': 'terms',
+        'privacy-tab': 'privacy',
+        'cookiePolicy-tab': 'cookie_policy'
+    };
 
     const appAlert = (title, message, type = 'info') =>
         window.showAppAlert ? window.showAppAlert({ title, message, type }) : Promise.resolve();
 
     const esc = (txt) => $('<div>').text(txt ?? '').html();
+
+    function getUiPrefix(key) {
+        return docUiPrefixMap[key] || 'terms';
+    }
 
     const api = async (action, method = 'GET', data = {}) => {
         try {
@@ -146,32 +206,36 @@ $(function () {
     };
 
     function getDocKeyFromActiveTab() {
-        return $('#legalTabs .nav-link.active').attr('id') === 'privacy-tab' ? 'privacy' : 'terms';
+        const activeTabId = $('#legalTabs .nav-link.active').attr('id');
+        return tabDocKeyMap[activeTabId] || 'terms';
     }
 
     function fillDoc(key, data) {
-        $('#' + key + 'Title').val(data?.title || '');
-        $('#' + key + 'Content').val(data?.content || '');
-        $('#' + key + 'Status').val(data?.status || 'draft');
-        $('#' + key + 'Version').text(data?.version || 1);
-        $('#' + key + 'UpdatedAt').text(data?.updated_at || '-');
-        $('#' + key + 'UpdatedBy').text(data?.updated_by_label || '-');
+        const prefix = getUiPrefix(key);
+        $('#' + prefix + 'Title').val(data?.title || '');
+        $('#' + prefix + 'Content').val(data?.content || '');
+        $('#' + prefix + 'Status').val(data?.status || 'draft');
+        $('#' + prefix + 'Version').text(data?.version || 1);
+        $('#' + prefix + 'UpdatedAt').text(data?.updated_at || '-');
+        $('#' + prefix + 'UpdatedBy').text(data?.updated_by_label || '-');
         renderPreview(key);
     }
 
     function collectDoc(key) {
+        const prefix = getUiPrefix(key);
         return {
-            title: ($('#' + key + 'Title').val() || '').trim(),
-            content: ($('#' + key + 'Content').val() || '').trim(),
-            status: ($('#' + key + 'Status').val() || 'draft')
+            title: ($('#' + prefix + 'Title').val() || '').trim(),
+            content: ($('#' + prefix + 'Content').val() || '').trim(),
+            status: ($('#' + prefix + 'Status').val() || 'draft')
         };
     }
 
     function renderPreview(key) {
-        const title = $('#' + key + 'Title').val() || '';
-        const content = $('#' + key + 'Content').val() || '';
-        $('#' + key + 'PreviewTitle').text(title);
-        $('#' + key + 'Preview').html(content || '<span class="text-muted">Preview için içerik girin.</span>');
+        const prefix = getUiPrefix(key);
+        const title = $('#' + prefix + 'Title').val() || '';
+        const content = $('#' + prefix + 'Content').val() || '';
+        $('#' + prefix + 'PreviewTitle').text(title);
+        $('#' + prefix + 'Preview').html(content || '<span class="text-muted">Preview için içerik girin.</span>');
     }
 
     async function loadList() {
@@ -183,8 +247,10 @@ $(function () {
 
         docs.terms = res.data?.terms || {};
         docs.privacy = res.data?.privacy || {};
+        docs.cookie_policy = res.data?.cookie_policy || {};
         fillDoc('terms', docs.terms);
         fillDoc('privacy', docs.privacy);
+        fillDoc('cookie_policy', docs.cookie_policy);
     }
 
     async function saveActiveDoc() {
@@ -213,6 +279,7 @@ $(function () {
     $('#saveLegalBtn').on('click', saveActiveDoc);
     $('#termsTitle, #termsContent').on('input', function () { renderPreview('terms'); });
     $('#privacyTitle, #privacyContent').on('input', function () { renderPreview('privacy'); });
+    $('#cookiePolicyTitle, #cookiePolicyContent').on('input', function () { renderPreview('cookie_policy'); });
 
     loadList();
 });

@@ -36,6 +36,19 @@ function legal_default_document($docKey)
         ];
     }
 
+    if ($docKey === 'cookie_policy') {
+        return [
+            'doc_key' => 'cookie_policy',
+            'title' => 'Denizci Eğitim – Çerez Politikası',
+            'content' => '<h3>Denizci Eğitim – Çerez Politikası</h3><p>Bu alan için güncel çerez politikası metnini admin panelden güncelleyebilirsiniz.</p><p>Çerez politikası; zorunlu çerezler, tercih çerezleri, analitik/performance çerezleri ve kullanıcı tercih yönetimi hakkında bilgilendirme içerir.</p>',
+            'status' => 'draft',
+            'version' => 1,
+            'updated_at' => null,
+            'updated_by' => null,
+            'updated_by_label' => '-',
+        ];
+    }
+
     return [
         'doc_key' => 'privacy',
         'title' => 'Denizci Eğitim – Gizlilik Politikası',
@@ -50,7 +63,7 @@ function legal_default_document($docKey)
 
 function legal_validate_doc_key($docKey)
 {
-    return in_array($docKey, ['terms', 'privacy'], true);
+    return in_array($docKey, ['terms', 'privacy', 'cookie_policy'], true);
 }
 
 $action = trim((string)($_GET['action'] ?? $_POST['action'] ?? ''));
@@ -61,7 +74,7 @@ try {
             'SELECT ld.doc_key, ld.title, ld.content, ld.status, ld.version, ld.updated_at, ld.updated_by, up.email AS updated_by_email
              FROM ' . LEGAL_DOCS_TABLE . ' ld
              LEFT JOIN user_profiles up ON up.id = ld.updated_by
-             WHERE ld.doc_key IN (\'terms\', \'privacy\')'
+             WHERE ld.doc_key IN (\'terms\', \'privacy\', \'cookie_policy\')'
         );
         $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -69,6 +82,7 @@ try {
         $mapped = [
             'terms' => legal_default_document('terms'),
             'privacy' => legal_default_document('privacy'),
+            'cookie_policy' => legal_default_document('cookie_policy'),
         ];
 
         foreach ($rows as $row) {
@@ -92,6 +106,7 @@ try {
         legal_json(true, '', [
             'terms' => $mapped['terms'],
             'privacy' => $mapped['privacy'],
+            'cookie_policy' => $mapped['cookie_policy'],
         ]);
     }
 
