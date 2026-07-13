@@ -226,13 +226,8 @@ function word_game_list_categories(PDO $pdo, array $filters = []): array
             (SELECT COUNT(*) FROM word_game_questions q WHERE q.category_id = c.id AND q.is_active = 1) AS active_question_count,
             (SELECT COUNT(*) FROM word_game_questions q WHERE q.category_id = c.id AND q.is_active <> 1) AS inactive_question_count,
             (SELECT COUNT(*) FROM word_game_questions q WHERE q.category_id = c.id AND q.is_active = 1 AND q.answer_length IN (' . $allowedSql . ')) AS eligible_active_question_count,
-            (SELECT COUNT(*) FROM word_game_questions q
-              WHERE q.category_id = c.id
-                AND q.qualification_id IS NOT NULL
-                AND EXISTS (SELECT 1 FROM word_game_category_qualifications m WHERE m.category_id = c.id AND m.qualification_id = q.qualification_id)) AS mapped_question_count,
-            (SELECT COUNT(*) FROM word_game_questions q
-              WHERE q.category_id = c.id
-                AND (q.qualification_id IS NULL OR NOT EXISTS (SELECT 1 FROM word_game_category_qualifications m WHERE m.category_id = c.id AND m.qualification_id = q.qualification_id))) AS unmapped_question_count,
+            (SELECT COUNT(*) FROM word_game_questions q WHERE q.category_id = c.id) AS mapped_question_count,
+            0 AS unmapped_question_count,
             (SELECT COUNT(*) FROM word_game_session_questions sq
                INNER JOIN word_game_questions q ON q.id = sq.`' . $sessionQuestionFk . '`
               WHERE q.category_id = c.id) AS session_snapshot_count
@@ -382,7 +377,9 @@ function word_game_save_category_qualifications(PDO $pdo, string $categoryId, ar
     $ids = [];
     foreach ($qualificationIds as $qid) {
         $qid = trim((string)$qid);
-        if ($qid !== '') $ids[$qid] = true;
+        if ($qid !== '') {
+            $ids[$qid] = true;
+        }
     }
     $ids = array_keys($ids);
 
@@ -412,39 +409,8 @@ function word_game_save_category_qualifications(PDO $pdo, string $categoryId, ar
         }
     }
 
-    $blockedSql = 'SELECT q.qualification_id, COALESCE(qu.name, q.qualification_id) AS qualification_name, COUNT(*) AS question_count
-                   FROM word_game_questions q
-                   LEFT JOIN qualifications qu ON qu.id = q.qualification_id
-                   WHERE q.category_id = ?';
-    $blockedParams = [$categoryId];
-    if (!empty($ids)) {
-        $blockedSql .= ' AND (q.qualification_id IS NULL OR q.qualification_id NOT IN (' . implode(',', array_fill(0, count($ids), '?')) . '))';
-        array_push($blockedParams, ...$ids);
-    }
-    $blockedSql .= ' GROUP BY q.qualification_id, qu.name';
-    $blockedStmt = $pdo->prepare($blockedSql);
-    $blockedStmt->execute($blockedParams);
-    $blockedRows = $blockedStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    if (!empty($blockedRows)) {
-        $blockedIds = [];
-        $blockedNames = [];
-        $affected = 0;
-        foreach ($blockedRows as $row) {
-            $qid = trim((string)($row['qualification_id'] ?? ''));
-            $blockedIds[] = $qid !== '' ? $qid : null;
-            $blockedNames[] = (string)($row['qualification_name'] ?? 'Bilinmeyen yeterlilik');
-            $affected += (int)($row['question_count'] ?? 0);
-        }
-        return [
-            'success' => false,
-            'code' => 'category_questions_outside_mapping',
-            'message' => 'Bu eşleştirme değişikliği mevcut soruların yeterlilik bağlantısını geçersiz bırakır. Önce ilgili soruları taşıyın veya pasife alın.',
-            'affected_question_count' => $affected,
-            'blocked_qualification_ids' => $blockedIds,
-            'blocked_qualification_names' => array_values(array_unique($blockedNames)),
-        ];
-    }
-
+    // Sorular artık doğrudan başlığa bağlıdır. Yeterlilik eşleştirmesi değişirken
+    // başlığın soru havuzu taşınmaz veya geçersiz kalmaz.
     $pdo->beginTransaction();
     try {
         $pdo->prepare('DELETE FROM word_game_category_qualifications WHERE category_id = ?')->execute([$categoryId]);
@@ -457,7 +423,9 @@ function word_game_save_category_qualifications(PDO $pdo, string $categoryId, ar
         $pdo->commit();
         return ['success' => true, 'stats' => word_game_get_category_stats($pdo, $categoryId)];
     } catch (Throwable $e) {
-        if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
         throw $e;
     }
 }
@@ -561,7 +529,6 @@ function word_game_validate_question(PDO $pdo, array $data, ?string $ignoreId = 
     $errors = [];
 
     $categoryId = trim((string)($data['category_id'] ?? ''));
-    $qualificationId = trim((string)($data['qualification_id'] ?? ''));
     $questionTextRaw = trim((string)($data['question_text'] ?? ''));
     $questionTextEnRaw = trim((string)($data['question_text_en'] ?? ''));
     $answerTextRaw = trim((string)($data['answer_text'] ?? ''));
@@ -580,38 +547,27 @@ function word_game_validate_question(PDO $pdo, array $data, ?string $ignoreId = 
     $answerLengthEn = word_game_answer_length($normalizedEn);
 
     $orderIndex = filter_var($data['order_index'] ?? 0, FILTER_VALIDATE_INT);
-    if ($orderIndex === false) $orderIndex = 0;
+    if ($orderIndex === false) {
+        $orderIndex = 0;
+    }
     $isActive = in_array((string)($data['is_active'] ?? 0), ['1', 'true', 'on'], true) ? 1 : 0;
 
-    if ($categoryId === '') $errors['category_id'] = 'Başlık seçimi zorunludur.';
-    if ($qualificationId === '') $errors['qualification_id'] = 'Yeterlilik seçimi zorunludur.';
-    if ($questionTextRaw === '') $errors['question_text'] = 'Türkçe soru metni zorunludur.';
-    if ($answerTextRaw === '') $errors['answer_text'] = 'Türkçe doğru cevap zorunludur.';
-    if ($normalized === '') $errors['answer_text'] = 'Türkçe cevap normalize edilemedi. Sadece harflerden oluşmalı.';
-    if ($answerLength < 1) $errors['answer_length'] = 'Türkçe cevap uzunluğu en az 1 olmalıdır.';
-    if ($answerTextEnRaw !== '' && $normalizedEn === '') $errors['answer_text_en'] = 'İngilizce cevap normalize edilemedi.';
-
-    $categoryExists = false;
-    if ($categoryId !== '') {
-        $cat = word_game_get_category($pdo, $categoryId);
-        if (!$cat) {
-            $errors['category_id'] = 'Seçilen başlık bulunamadı.';
-        } else {
-            $categoryExists = true;
-        }
+    if ($categoryId === '') {
+        $errors['category_id'] = 'Başlık seçimi zorunludur.';
+    } elseif (!word_game_get_category($pdo, $categoryId)) {
+        $errors['category_id'] = 'Seçilen başlık bulunamadı.';
     }
 
-    $qualificationExists = false;
-    if ($qualificationId !== '') {
-        if (!word_game_get_qualification($pdo, $qualificationId)) {
-            $errors['qualification_id'] = 'Geçerli bir yeterlilik seçiniz.';
-        } else {
-            $qualificationExists = true;
-        }
+    if ($questionTextRaw === '') {
+        $errors['question_text'] = 'Türkçe soru metni zorunludur.';
     }
-
-    if ($categoryExists && $qualificationExists && !word_game_category_qualification_exists($pdo, $categoryId, $qualificationId)) {
-        $errors['qualification_id'] = 'Seçilen yeterlilik bu başlığa bağlı değildir.';
+    if ($answerTextRaw === '') {
+        $errors['answer_text'] = 'Türkçe doğru cevap zorunludur.';
+    } elseif ($normalized === '') {
+        $errors['answer_text'] = 'Türkçe cevap normalize edilemedi. Sadece harflerden oluşmalı.';
+    }
+    if ($answerTextEnRaw !== '' && $normalizedEn === '') {
+        $errors['answer_text_en'] = 'İngilizce cevap normalize edilemedi.';
     }
 
     if ($isActive === 1 && $answerLength > 0) {
@@ -621,9 +577,9 @@ function word_game_validate_question(PDO $pdo, array $data, ?string $ignoreId = 
         }
     }
 
-    if ($qualificationId !== '' && $normalized !== '') {
-        $sql = 'SELECT id FROM word_game_questions WHERE qualification_id = ? AND answer_normalized = ?';
-        $params = [$qualificationId, $normalized];
+    if ($categoryId !== '' && $normalized !== '') {
+        $sql = 'SELECT id FROM word_game_questions WHERE category_id = ? AND answer_normalized = ?';
+        $params = [$categoryId, $normalized];
         if ($ignoreId !== null && trim($ignoreId) !== '') {
             $sql .= ' AND id <> ?';
             $params[] = trim($ignoreId);
@@ -632,7 +588,7 @@ function word_game_validate_question(PDO $pdo, array $data, ?string $ignoreId = 
         $dup = $pdo->prepare($sql);
         $dup->execute($params);
         if ($dup->fetchColumn()) {
-            $errors['answer_text'] = 'Bu yeterlilik altında aynı cevap zaten mevcut.';
+            $errors['answer_text'] = 'Bu başlık altında aynı cevap zaten mevcut.';
         }
     }
 
@@ -641,7 +597,7 @@ function word_game_validate_question(PDO $pdo, array $data, ?string $ignoreId = 
         'errors' => $errors,
         'data' => [
             'category_id' => $categoryId,
-            'qualification_id' => $qualificationId,
+            'qualification_id' => null,
             'question_text' => $questionText,
             'question_text_en' => $questionTextEn !== '' ? $questionTextEn : null,
             'answer_text' => $answerText,
@@ -657,10 +613,9 @@ function word_game_validate_question(PDO $pdo, array $data, ?string $ignoreId = 
     ];
 }
 
-function word_game_validate_bulk_questions(PDO $pdo, string $categoryId, string $qualificationId, array $records): array
+function word_game_validate_bulk_questions(PDO $pdo, string $categoryId, array $records): array
 {
     $categoryId = trim($categoryId);
-    $qualificationId = trim($qualificationId);
     $globalErrors = [];
     $items = [];
     $normalizedRecords = [];
@@ -669,16 +624,6 @@ function word_game_validate_bulk_questions(PDO $pdo, string $categoryId, string 
         $globalErrors[] = 'Başlık seçimi zorunludur.';
     } elseif (!word_game_get_category($pdo, $categoryId)) {
         $globalErrors[] = 'Seçilen başlık bulunamadı.';
-    }
-
-    if ($qualificationId === '') {
-        $globalErrors[] = 'Yeterlilik seçimi zorunludur.';
-    } elseif (!word_game_get_qualification($pdo, $qualificationId)) {
-        $globalErrors[] = 'Seçilen yeterlilik bulunamadı.';
-    }
-
-    if ($categoryId !== '' && $qualificationId !== '' && empty($globalErrors) && !word_game_category_qualification_exists($pdo, $categoryId, $qualificationId)) {
-        $globalErrors[] = 'Seçilen yeterlilik bu başlığa bağlı değildir.';
     }
 
     $allowed = array_flip(array_map('intval', word_game_get_settings($pdo)['allowed_lengths'] ?? word_game_default_settings()['allowed_lengths']));
@@ -698,11 +643,20 @@ function word_game_validate_bulk_questions(PDO $pdo, string $categoryId, string 
         $answerLengthEn = word_game_answer_length($normalizedEn);
         $errors = $globalErrors;
 
-        if ($trQuestionRaw === '') $errors[] = 'TR_SORU zorunludur.';
-        if ($trAnswerRaw === '') $errors[] = 'TR_CEVAP zorunludur.';
-        if ($trAnswerRaw !== '' && $normalized === '') $errors[] = 'TR_CEVAP normalize edilemedi. Sadece harflerden oluşmalı.';
-        if ($normalized !== '' && !isset($allowed[$answerLength])) $errors[] = 'Aktif soru cevap uzunluğu izin verilen uzunluklar dışında.';
-        if ($enAnswerRaw !== '' && $normalizedEn === '') $errors[] = 'EN_ANSWER normalize edilemedi.';
+        if ($trQuestionRaw === '') {
+            $errors[] = 'TR_SORU zorunludur.';
+        }
+        if ($trAnswerRaw === '') {
+            $errors[] = 'TR_CEVAP zorunludur.';
+        } elseif ($normalized === '') {
+            $errors[] = 'TR_CEVAP normalize edilemedi. Sadece harflerden oluşmalı.';
+        }
+        if ($normalized !== '' && !isset($allowed[$answerLength])) {
+            $errors[] = 'Aktif soru cevap uzunluğu izin verilen uzunluklar dışında.';
+        }
+        if ($enAnswerRaw !== '' && $normalizedEn === '') {
+            $errors[] = 'EN_ANSWER normalize edilemedi.';
+        }
 
         if ($normalized !== '') {
             $answerBuckets[$normalized][] = $idx;
@@ -710,7 +664,7 @@ function word_game_validate_bulk_questions(PDO $pdo, string $categoryId, string 
 
         $validated = [
             'category_id' => $categoryId,
-            'qualification_id' => $qualificationId,
+            'qualification_id' => null,
             'question_text' => sanitize_input($trQuestionRaw),
             'question_text_en' => $enQuestionRaw !== '' ? sanitize_input($enQuestionRaw) : null,
             'answer_text' => sanitize_input($trAnswerRaw),
@@ -744,15 +698,15 @@ function word_game_validate_bulk_questions(PDO $pdo, string $categoryId, string 
         }
     }
 
-    if ($qualificationId !== '' && !empty($answerBuckets)) {
+    if ($categoryId !== '' && !empty($answerBuckets)) {
         $answers = array_keys($answerBuckets);
         $placeholders = implode(',', array_fill(0, count($answers), '?'));
-        $stmt = $pdo->prepare('SELECT answer_normalized FROM word_game_questions WHERE qualification_id = ? AND answer_normalized IN (' . $placeholders . ')');
-        $stmt->execute(array_merge([$qualificationId], $answers));
+        $stmt = $pdo->prepare('SELECT answer_normalized FROM word_game_questions WHERE category_id = ? AND answer_normalized IN (' . $placeholders . ')');
+        $stmt->execute(array_merge([$categoryId], $answers));
         $existing = array_flip(array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []));
         foreach ($existing as $normalized => $_) {
             foreach ($answerBuckets[$normalized] ?? [] as $idx) {
-                $items[$idx]['errors'][] = 'Bu yeterlilik altında aynı cevap zaten mevcut.';
+                $items[$idx]['errors'][] = 'Bu başlık altında aynı cevap zaten mevcut.';
                 $items[$idx]['valid'] = false;
             }
         }
@@ -778,10 +732,10 @@ function word_game_validate_bulk_questions(PDO $pdo, string $categoryId, string 
     ];
 }
 
-function word_game_next_order_index(PDO $pdo, string $categoryId, string $qualificationId): int
+function word_game_next_order_index(PDO $pdo, string $categoryId): int
 {
-    $stmt = $pdo->prepare('SELECT COALESCE(MAX(order_index), 0) FROM word_game_questions WHERE category_id = ? AND qualification_id = ?');
-    $stmt->execute([trim($categoryId), trim($qualificationId)]);
+    $stmt = $pdo->prepare('SELECT COALESCE(MAX(order_index), 0) FROM word_game_questions WHERE category_id = ?');
+    $stmt->execute([trim($categoryId)]);
     return ((int)$stmt->fetchColumn()) + 1;
 }
 
@@ -796,7 +750,7 @@ function word_game_insert_validated_question(PDO $pdo, array $validatedData): ar
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())');
     $stmt->execute([
         $id,
-        $validatedData['qualification_id'],
+        null,
         $validatedData['category_id'],
         $validatedData['question_text'],
         $validatedData['question_text_en'] ?? null,
@@ -823,11 +777,6 @@ function word_game_list(PDO $pdo, array $filters = []): array
         $where[] = 'wq.category_id = ?';
         $params[] = $categoryId;
     }
-    $qualificationId = trim((string)($filters['qualification_id'] ?? ''));
-    if ($qualificationId !== '') {
-        $where[] = 'wq.qualification_id = ?';
-        $params[] = $qualificationId;
-    }
     if (isset($filters['is_active']) && $filters['is_active'] !== '') {
         $where[] = 'wq.is_active = ?';
         $params[] = ((int)$filters['is_active'] === 1 ? 1 : 0);
@@ -839,9 +788,8 @@ function word_game_list(PDO $pdo, array $filters = []): array
         array_push($params, $like, $like, $like, $like, $like);
     }
 
-    $sql = 'SELECT wq.*, q.name AS qualification_name, c.name AS category_name
+    $sql = 'SELECT wq.*, NULL AS qualification_name, c.name AS category_name
             FROM word_game_questions wq
-            LEFT JOIN qualifications q ON q.id = wq.qualification_id
             LEFT JOIN word_game_categories c ON c.id = wq.category_id
             WHERE ' . implode(' AND ', $where) . '
             ORDER BY c.order_index ASC, c.name ASC, wq.order_index ASC, wq.created_at DESC';
@@ -874,14 +822,14 @@ function word_game_create(PDO $pdo, array $data): array
             is_active, order_index, notes, created_at, updated_at
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())');
         $stmt->execute([
-            $id, $p['qualification_id'], $p['category_id'], $p['question_text'], $p['question_text_en'],
+            $id, null, $p['category_id'], $p['question_text'], $p['question_text_en'],
             $p['answer_text'], $p['answer_normalized'], $p['answer_length'],
             $p['answer_text_en'], $p['answer_normalized_en'], $p['answer_length_en'],
             $p['is_active'], $p['order_index'], $p['notes'],
         ]);
     } catch (Throwable $e) {
         if (word_game_is_duplicate_exception($e)) {
-            return ['success' => false, 'message' => 'Bu yeterlilik altında aynı cevap zaten mevcut.', 'errors' => ['answer_text' => 'Bu yeterlilik altında aynı cevap zaten mevcut.']];
+            return ['success' => false, 'message' => 'Bu başlık altında aynı cevap zaten mevcut.', 'errors' => ['answer_text' => 'Bu başlık altında aynı cevap zaten mevcut.']];
         }
         throw $e;
     }
@@ -906,20 +854,20 @@ function word_game_update(PDO $pdo, string $id, array $data): array
     $p = $validation['data'];
     try {
         $stmt = $pdo->prepare('UPDATE word_game_questions SET
-            qualification_id=?, category_id=?, question_text=?, question_text_en=?,
+            qualification_id=NULL, category_id=?, question_text=?, question_text_en=?,
             answer_text=?, answer_normalized=?, answer_length=?,
             answer_text_en=?, answer_normalized_en=?, answer_length_en=?,
             is_active=?, order_index=?, notes=?, updated_at=NOW()
             WHERE id=?');
         $stmt->execute([
-            $p['qualification_id'], $p['category_id'], $p['question_text'], $p['question_text_en'],
+            $p['category_id'], $p['question_text'], $p['question_text_en'],
             $p['answer_text'], $p['answer_normalized'], $p['answer_length'],
             $p['answer_text_en'], $p['answer_normalized_en'], $p['answer_length_en'],
             $p['is_active'], $p['order_index'], $p['notes'], $id,
         ]);
     } catch (Throwable $e) {
         if (word_game_is_duplicate_exception($e)) {
-            return ['success' => false, 'message' => 'Bu yeterlilik altında aynı cevap zaten mevcut.', 'errors' => ['answer_text' => 'Bu yeterlilik altında aynı cevap zaten mevcut.']];
+            return ['success' => false, 'message' => 'Bu başlık altında aynı cevap zaten mevcut.', 'errors' => ['answer_text' => 'Bu başlık altında aynı cevap zaten mevcut.']];
         }
         throw $e;
     }

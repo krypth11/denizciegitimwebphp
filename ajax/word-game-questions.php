@@ -35,7 +35,6 @@ try {
         case 'list_questions':
             $filters = [
                 'category_id' => trim((string)($_GET['category_id'] ?? '')),
-                'qualification_id' => trim((string)($_GET['qualification_id'] ?? '')),
                 'is_active' => isset($_GET['is_active']) ? (string)$_GET['is_active'] : '',
                 'search' => trim((string)($_GET['search'] ?? '')),
             ];
@@ -60,12 +59,6 @@ try {
                 $params[':category_id'] = $categoryId;
             }
 
-            $qualificationId = $filters['qualification_id'];
-            if ($qualificationId !== '') {
-                $where[] = 'wq.qualification_id = :qualification_id';
-                $params[':qualification_id'] = $qualificationId;
-            }
-
             if (isset($filters['is_active']) && $filters['is_active'] !== '') {
                 $where[] = 'wq.is_active = :is_active';
                 $params[':is_active'] = ((int)$filters['is_active'] === 1 ? 1 : 0);
@@ -86,7 +79,6 @@ try {
 
             $countSql = 'SELECT COUNT(*)
                          FROM word_game_questions wq
-                         LEFT JOIN qualifications q ON q.id = wq.qualification_id
                          LEFT JOIN word_game_categories c ON c.id = wq.category_id
                          WHERE ' . $whereSql;
             $countStmt = $pdo->prepare($countSql);
@@ -102,9 +94,8 @@ try {
                 $offset = ($page - 1) * $perPage;
             }
 
-            $dataSql = 'SELECT wq.*, q.name AS qualification_name, c.name AS category_name
+            $dataSql = 'SELECT wq.*, NULL AS qualification_name, c.name AS category_name
                         FROM word_game_questions wq
-                        LEFT JOIN qualifications q ON q.id = wq.qualification_id
                         LEFT JOIN word_game_categories c ON c.id = wq.category_id
                         WHERE ' . $whereSql . '
                         ORDER BY c.order_index ASC, c.name ASC, wq.order_index ASC, wq.created_at DESC
@@ -164,7 +155,6 @@ try {
         case 'create_question':
             $result = word_game_create($pdo, [
                 'category_id' => $_POST['category_id'] ?? '',
-                'qualification_id' => $_POST['qualification_id'] ?? '',
                 'question_text' => $_POST['question_text'] ?? '',
                 'question_text_en' => $_POST['question_text_en'] ?? '',
                 'answer_text' => $_POST['answer_text'] ?? '',
@@ -190,7 +180,6 @@ try {
             $id = trim((string)($_POST['id'] ?? ''));
             $result = word_game_update($pdo, $id, [
                 'category_id' => $_POST['category_id'] ?? '',
-                'qualification_id' => $_POST['qualification_id'] ?? '',
                 'question_text' => $_POST['question_text'] ?? '',
                 'question_text_en' => $_POST['question_text_en'] ?? '',
                 'answer_text' => $_POST['answer_text'] ?? '',
@@ -303,7 +292,6 @@ try {
 
         case 'parse_bulk_pattern':
             $categoryId = trim((string)($_POST['category_id'] ?? ''));
-            $qualificationId = trim((string)($_POST['qualification_id'] ?? ''));
             $pattern = (string)($_POST['pattern'] ?? '');
             $parsed = word_game_parse_bulk_pattern_text($pattern);
             $records = [];
@@ -312,7 +300,7 @@ try {
                     $records[] = $item['record'];
                 }
             }
-            $validation = word_game_validate_bulk_questions($pdo, $categoryId, $qualificationId, $records);
+            $validation = word_game_validate_bulk_questions($pdo, $categoryId, $records);
             if (!empty($parsed['errors']) && empty($records)) {
                 $validation['errors'] = $parsed['errors'];
             }
@@ -321,7 +309,6 @@ try {
 
         case 'create_bulk_questions':
             $categoryId = trim((string)($_POST['category_id'] ?? ''));
-            $qualificationId = trim((string)($_POST['qualification_id'] ?? ''));
 
             $itemsRaw = $_POST['items'] ?? '[]';
             if (is_string($itemsRaw)) {
@@ -333,7 +320,7 @@ try {
                 word_game_json(false, 'Geçersiz kayıt listesi.', [], 422);
             }
             $requestedCount = count($items);
-            $validation = word_game_validate_bulk_questions($pdo, $categoryId, $qualificationId, $items);
+            $validation = word_game_validate_bulk_questions($pdo, $categoryId, $items);
             if (!($validation['valid'] ?? false)) {
                 word_game_json(false, 'Toplu kayıt doğrulamasında hatalar var. Hiçbir kayıt eklenmedi.', [
                     'requested_count' => $requestedCount,
@@ -346,7 +333,7 @@ try {
             $createdIds = [];
             $pdo->beginTransaction();
             try {
-                $nextOrder = word_game_next_order_index($pdo, $categoryId, $qualificationId);
+                $nextOrder = word_game_next_order_index($pdo, $categoryId);
                 foreach (($validation['normalized_records'] ?? []) as $idx => $validatedData) {
                     $validatedData['order_index'] = $nextOrder + (int)$idx;
                     $inserted = word_game_insert_validated_question($pdo, $validatedData);
@@ -361,7 +348,7 @@ try {
                     $pdo->rollBack();
                 }
                 if (word_game_is_duplicate_exception($e)) {
-                    word_game_json(false, 'Bu yeterlilik altında aynı cevap zaten mevcut.', [
+                    word_game_json(false, 'Bu başlık altında aynı cevap zaten mevcut.', [
                         'requested_count' => $requestedCount,
                         'created_count' => 0,
                         'created_ids' => [],
@@ -385,7 +372,7 @@ try {
     }
 } catch (Throwable $e) {
     if (word_game_is_duplicate_exception($e)) {
-        word_game_json(false, 'Bu yeterlilik altında aynı cevap zaten mevcut.', [], 422);
+        word_game_json(false, 'Bu başlık altında aynı cevap zaten mevcut.', [], 422);
     }
     word_game_json(false, 'İşlem sırasında bir sunucu hatası oluştu.', [], 500);
 }

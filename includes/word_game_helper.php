@@ -140,7 +140,7 @@ function word_game_questions_schema(PDO $pdo): array
     $schema = [
         'table' => 'word_game_questions',
         'id' => word_game_pick_column($columns, ['id']),
-        'qualification_id' => word_game_pick_column($columns, ['qualification_id']),
+        'qualification_id' => word_game_pick_column($columns, ['qualification_id'], false),
         'category_id' => word_game_pick_column($columns, ['category_id'], false),
         'question_text' => word_game_pick_column($columns, ['question_text']),
         'answer_text' => word_game_pick_column($columns, ['answer_text']),
@@ -226,166 +226,12 @@ function word_game_pick_questions(PDO $pdo, string $qualificationId): array
         throw new InvalidArgumentException('qualification_id zorunludur.');
     }
 
-    $qSchema = word_game_questions_schema($pdo);
-    $distribution = word_game_required_distribution();
-    $insufficient = [];
-    $selected = [];
-    $selectedCountByLength = [];
-    $pickIndex = 0;
-
-    $countStmt = $pdo->prepare(
-        'SELECT COUNT(*) FROM `' . $qSchema['table'] . '`
-         WHERE `' . $qSchema['qualification_id'] . '` = ?
-           AND `' . $qSchema['is_active'] . '` = 1
-           AND `' . $qSchema['answer_length'] . '` = ?'
-    );
-
-    foreach ($distribution as $answerLength => $requiredCount) {
-        $countStmt->execute([$qualificationId, (int)$answerLength]);
-        $available = (int)$countStmt->fetchColumn();
-
-        word_game_debug_log('word game length pool count', [
-            'qualification_id' => $qualificationId,
-            'answer_length' => (int)$answerLength,
-            'required_count' => (int)$requiredCount,
-            'available_count' => $available,
-        ]);
-
-        if ($available < $requiredCount) {
-            $insufficient[] = [
-                'answer_length' => (int)$answerLength,
-                'required' => (int)$requiredCount,
-                'available' => $available,
-                'missing' => (int)($requiredCount - $available),
-            ];
-        }
+    $categoryIds = word_game_get_accessible_category_ids_for_qualification($pdo, $qualificationId);
+    if (empty($categoryIds)) {
+        throw new RuntimeException('Bu yeterlilik için aktif kelime oyunu başlığı bulunamadı.');
     }
 
-    if (!empty($insufficient)) {
-        throw new RuntimeException('WORD_GAME_INSUFFICIENT_QUESTIONS|' . json_encode($insufficient, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-    }
-
-    foreach ($distribution as $answerLength => $requiredCount) {
-        $finalLimit = (int)$requiredCount;
-        $sql = 'SELECT `' . $qSchema['id'] . '` AS id,
-                       `' . $qSchema['qualification_id'] . '` AS qualification_id,
-                       `' . $qSchema['question_text'] . '` AS question_text,
-                       `' . $qSchema['answer_text'] . '` AS answer_text,
-                       `' . $qSchema['answer_normalized'] . '` AS answer_normalized,
-                       `' . $qSchema['answer_length'] . '` AS answer_length
-                FROM `' . $qSchema['table'] . '`
-                WHERE `' . $qSchema['qualification_id'] . '` = ?
-                  AND `' . $qSchema['is_active'] . '` = 1
-                  AND `' . $qSchema['answer_length'] . '` = ?
-                ORDER BY RAND()
-                LIMIT ' . $finalLimit;
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([$qualificationId, (int)$answerLength]);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        $selectedCountByLength[(string)$answerLength] = count($rows);
-
-        word_game_debug_log('word game length selection result', [
-            'qualification_id' => $qualificationId,
-            'answer_length' => (int)$answerLength,
-            'required_count' => (int)$requiredCount,
-            'selected_count' => count($rows),
-            'final_sql_limit' => $finalLimit,
-        ]);
-
-        word_game_debug_log('selected question ids by length', [
-            'qualification_id' => $qualificationId,
-            'answer_length' => (int)$answerLength,
-            'question_ids' => array_values(array_map(
-                static fn(array $r): string => (string)($r['id'] ?? ''),
-                $rows
-            )),
-        ]);
-
-        foreach ($rows as $row) {
-            $originalAnswerText = (string)$row['answer_text'];
-            $normalizedAnswer = (string)$row['answer_normalized'];
-
-            word_game_debug_log('original answer_text from pool', [
-                'qualification_id' => $qualificationId,
-                'question_id' => (string)$row['id'],
-                'answer_length' => (int)$row['answer_length'],
-                'answer_text' => $originalAnswerText,
-            ]);
-
-            word_game_debug_log('normalized answer', [
-                'qualification_id' => $qualificationId,
-                'question_id' => (string)$row['id'],
-                'answer_normalized' => $normalizedAnswer,
-            ]);
-
-            $selected[] = [
-                'id' => (string)$row['id'],
-                'qualification_id' => (string)$row['qualification_id'],
-                'question_text' => (string)$row['question_text'],
-                'answer_text' => $originalAnswerText,
-                'answer_normalized' => $normalizedAnswer,
-                'answer_length' => (int)$row['answer_length'],
-                '_pick_index' => $pickIndex++,
-            ];
-        }
-    }
-
-    if (count($selected) !== 10) {
-        $details = [
-            'expected_total' => 10,
-            'actual_total' => count($selected),
-            'selected_counts_by_length' => $selectedCountByLength,
-        ];
-        throw new RuntimeException(
-            'WORD_GAME_SELECTION_MISMATCH|' . json_encode($details, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-        );
-    }
-
-    word_game_debug_log('selected questions before sort', [
-        'qualification_id' => $qualificationId,
-        'items' => array_values(array_map(
-            static fn(array $q): array => [
-                'id' => (string)($q['id'] ?? ''),
-                'answer_length' => (int)($q['answer_length'] ?? 0),
-                'pick_index' => (int)($q['_pick_index'] ?? 0),
-            ],
-            $selected
-        )),
-    ]);
-
-    usort($selected, static function (array $a, array $b): int {
-        $lenCmp = ((int)($a['answer_length'] ?? 0)) <=> ((int)($b['answer_length'] ?? 0));
-        if ($lenCmp !== 0) {
-            return $lenCmp;
-        }
-
-        return ((int)($a['_pick_index'] ?? 0)) <=> ((int)($b['_pick_index'] ?? 0));
-    });
-
-    word_game_debug_log('selected questions after sort', [
-        'qualification_id' => $qualificationId,
-        'items' => array_values(array_map(
-            static fn(array $q): array => [
-                'id' => (string)($q['id'] ?? ''),
-                'answer_length' => (int)($q['answer_length'] ?? 0),
-                'pick_index' => (int)($q['_pick_index'] ?? 0),
-            ],
-            $selected
-        )),
-    ]);
-
-    foreach ($selected as &$selectedQuestion) {
-        unset($selectedQuestion['_pick_index']);
-    }
-    unset($selectedQuestion);
-
-    word_game_debug_log('selected question counts by length', [
-        'qualification_id' => $qualificationId,
-        'selected_counts' => $selectedCountByLength,
-        'total' => count($selected),
-    ]);
-
-    return $selected;
+    return word_game_pick_questions_from_category_pool($pdo, '', $qualificationId, $categoryIds);
 }
 
 function word_game_build_word_break_indexes(string $answerText): array
@@ -469,66 +315,18 @@ function word_game_find_best_category_for_qualification(PDO $pdo, string $qualif
         return null;
     }
 
-    $allowed = word_game_get_allowed_lengths_from_settings($pdo);
-    if (empty($allowed)) {
-        return null;
-    }
-
-    $settings = word_game_get_runtime_settings($pdo);
-    $pointsPerChar = max(1, (int)($settings['points_per_char'] ?? 100));
-    $targetChars = (int)floor(max(1, (int)($settings['target_score'] ?? 10000)) / $pointsPerChar);
-    $minQ = max(1, (int)($settings['min_questions'] ?? 8));
-
-    $placeholders = implode(',', array_fill(0, count($allowed), '?'));
-    $sql = 'SELECT c.id AS category_id,
-                   c.name AS category_name,
-                   c.order_index AS order_index,
-                   COUNT(q.id) AS eligible_count,
-                   COALESCE(SUM(q.answer_length), 0) AS eligible_chars
-            FROM word_game_categories c
-            INNER JOIN word_game_category_qualifications cq
-                    ON cq.category_id = c.id AND cq.qualification_id = ?
-            INNER JOIN word_game_questions q
-                    ON q.category_id = c.id
-                   AND q.qualification_id = ?
-                   AND q.is_active = 1
-                   AND q.answer_length IN (' . $placeholders . ')
-            WHERE c.is_active = 1
-            GROUP BY c.id, c.name, c.order_index
-            HAVING eligible_count >= ? AND eligible_chars >= ?
-            ORDER BY c.order_index ASC, c.name ASC';
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute(array_merge([$qualificationId, $qualificationId], $allowed, [$minQ, $targetChars]));
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-    foreach ($rows as $row) {
-        $categoryId = trim((string)($row['category_id'] ?? ''));
-        if ($categoryId === '') {
-            continue;
-        }
+    foreach (word_game_get_accessible_category_ids_for_qualification($pdo, $qualificationId) as $categoryId) {
         try {
             word_game_pick_questions_for_category($pdo, '', $qualificationId, $categoryId);
-            word_game_debug_log('best category lookup for qualification', [
-                'qualification_id' => $qualificationId,
-                'selected_category_id' => $categoryId,
-                'eligible_count' => (int)($row['eligible_count'] ?? 0),
-            ]);
             return $categoryId;
         } catch (Throwable $ignored) {
-            word_game_debug_log('best category candidate skipped', [
+            word_game_debug_log('category candidate skipped', [
                 'qualification_id' => $qualificationId,
                 'category_id' => $categoryId,
                 'error_class' => get_class($ignored),
             ]);
         }
     }
-
-    word_game_debug_log('best category lookup for qualification', [
-        'qualification_id' => $qualificationId,
-        'candidate_count' => count($rows),
-        'selected_category_id' => null,
-    ]);
 
     return null;
 }
@@ -570,73 +368,105 @@ function word_game_sort_pool_for_selection(array $pool): array
     return $pool;
 }
 
-function word_game_find_exact_question_subset(array $pool, int $targetChars, int $minQ, int $maxQ): array
+function word_game_find_exact_question_subset(array $pool, int $targetChars, int $minQ, int $maxQ, bool $alreadySorted = false): array
 {
-    $pool = array_values(word_game_sort_pool_for_selection($pool));
-    $poolCount = count($pool);
-    if ($poolCount === 0 || $targetChars <= 0 || $minQ > $maxQ) {
+    $pool = array_values($alreadySorted ? $pool : word_game_sort_pool_for_selection($pool));
+    if (empty($pool) || $targetChars <= 0 || $minQ > $maxQ) {
         return [];
     }
 
-    $suffixMaxChars = array_fill(0, $poolCount + 1, 0);
-    for ($i = $poolCount - 1; $i >= 0; $i--) {
-        $suffixMaxChars[$i] = $suffixMaxChars[$i + 1] + max(0, (int)($pool[$i]['answer_length'] ?? 0));
-    }
-
-    $memo = [];
-    $search = static function (int $index, int $remainingChars, int $pickedCount) use (&$search, &$memo, $pool, $poolCount, $targetChars, $minQ, $maxQ, $suffixMaxChars): ?array {
-        if ($remainingChars === 0) {
-            return ($pickedCount >= $minQ && $pickedCount <= $maxQ) ? [] : null;
+    // dp[soruSayisi][karakterToplami] = seçilen havuz indeksleri
+    $dp = [0 => [0 => []]];
+    foreach ($pool as $index => $row) {
+        $length = max(0, (int)($row['answer_length'] ?? 0));
+        if ($length <= 0 || $length > $targetChars) {
+            continue;
         }
 
-        if ($index >= $poolCount || $remainingChars < 0 || $pickedCount > $maxQ) {
-            return null;
-        }
-
-        if (($pickedCount + ($poolCount - $index)) < $minQ) {
-            return null;
-        }
-
-        if ($suffixMaxChars[$index] < $remainingChars) {
-            return null;
-        }
-
-        $memoKey = $index . '|' . $remainingChars . '|' . $pickedCount;
-        if (array_key_exists($memoKey, $memo)) {
-            return $memo[$memoKey];
-        }
-
-        $row = $pool[$index];
-        $len = max(0, (int)($row['answer_length'] ?? 0));
-
-        if ($len > 0 && $remainingChars >= $len) {
-            $withCurrent = $search($index + 1, $remainingChars - $len, $pickedCount + 1);
-            if (is_array($withCurrent)) {
-                array_unshift($withCurrent, $row);
-                return $memo[$memoKey] = $withCurrent;
+        for ($count = $maxQ - 1; $count >= 0; $count--) {
+            if (!isset($dp[$count])) {
+                continue;
+            }
+            $sums = array_keys($dp[$count]);
+            rsort($sums, SORT_NUMERIC);
+            foreach ($sums as $sum) {
+                $newSum = (int)$sum + $length;
+                $newCount = $count + 1;
+                if ($newSum > $targetChars || isset($dp[$newCount][$newSum])) {
+                    continue;
+                }
+                $path = $dp[$count][$sum];
+                $path[] = $index;
+                $dp[$newCount][$newSum] = $path;
             }
         }
-
-        $withoutCurrent = $search($index + 1, $remainingChars, $pickedCount);
-        return $memo[$memoKey] = $withoutCurrent;
-    };
-
-    $result = $search(0, $targetChars, 0);
-    if (!is_array($result)) {
-        return [];
     }
 
-    $count = count($result);
-    $sum = array_sum(array_map(static fn(array $row): int => (int)($row['answer_length'] ?? 0), $result));
-    if ($count < $minQ || $count > $maxQ || $sum !== $targetChars) {
-        return [];
+    for ($count = $minQ; $count <= $maxQ; $count++) {
+        if (!isset($dp[$count][$targetChars])) {
+            continue;
+        }
+        return array_values(array_map(
+            static fn(int $index): array => $pool[$index],
+            $dp[$count][$targetChars]
+        ));
     }
 
-    return array_values($result);
+    return [];
 }
 
-function word_game_pick_questions_for_category(PDO $pdo, string $userId, string $qualificationId, string $categoryId): array
+function word_game_get_accessible_category_ids_for_qualification(PDO $pdo, string $qualificationId): array
 {
+    $qualificationId = trim($qualificationId);
+    if ($qualificationId === '') {
+        return [];
+    }
+
+    $stmt = $pdo->prepare('SELECT c.id
+                           FROM word_game_categories c
+                           INNER JOIN word_game_category_qualifications cq ON cq.category_id = c.id
+                           WHERE cq.qualification_id = ? AND c.is_active = 1
+                           ORDER BY COALESCE(c.order_index, 0) ASC, c.name ASC');
+    $stmt->execute([$qualificationId]);
+
+    $ids = [];
+    foreach (($stmt->fetchAll(PDO::FETCH_COLUMN) ?: []) as $id) {
+        $id = trim((string)$id);
+        if ($id !== '') {
+            $ids[$id] = true;
+        }
+    }
+    return array_keys($ids);
+}
+
+function word_game_deduplicate_question_pool(array $pool): array
+{
+    $seenAnswers = [];
+    $result = [];
+    foreach ($pool as $row) {
+        $normalized = trim((string)($row['answer_normalized'] ?? ''));
+        if ($normalized === '' || isset($seenAnswers[$normalized])) {
+            continue;
+        }
+        $seenAnswers[$normalized] = true;
+        $result[] = $row;
+    }
+    return $result;
+}
+
+function word_game_pick_questions_from_category_pool(PDO $pdo, string $userId, string $qualificationId, array $categoryIds): array
+{
+    $qualificationId = trim($qualificationId);
+    $userId = trim($userId);
+    $categoryIds = array_values(array_unique(array_filter(array_map(
+        static fn($id): string => trim((string)$id),
+        $categoryIds
+    ), static fn(string $id): bool => $id !== '')));
+
+    if ($qualificationId === '' || empty($categoryIds)) {
+        throw new RuntimeException('Bu yeterlilik için aktif kelime oyunu başlığı bulunamadı.');
+    }
+
     $qSchema = word_game_questions_schema($pdo);
     if (empty($qSchema['category_id'])) {
         throw new RuntimeException('WORD_GAME_SCHEMA|category_id kolonu bulunamadı.');
@@ -652,38 +482,44 @@ function word_game_pick_questions_for_category(PDO $pdo, string $userId, string 
         throw new RuntimeException('Bu ayarlara uygun kelime oyunu oluşturulamadı.');
     }
 
-    $in = implode(',', array_fill(0, count($allowed), '?'));
+    $categoryPlaceholders = implode(',', array_fill(0, count($categoryIds), '?'));
+    $lengthPlaceholders = implode(',', array_fill(0, count($allowed), '?'));
     $sql = 'SELECT q.`' . $qSchema['id'] . '` AS id,
-                   q.`' . $qSchema['qualification_id'] . '` AS qualification_id,
+                   q.`' . $qSchema['category_id'] . '` AS category_id,
                    q.`' . $qSchema['question_text'] . '` AS question_text,
                    q.`' . $qSchema['answer_text'] . '` AS answer_text,
                    q.`' . $qSchema['answer_normalized'] . '` AS answer_normalized,
                    q.`' . $qSchema['answer_length'] . '` AS answer_length,
-                   h.seen_count,
-                   h.last_seen_at
+                   COALESCE(h.seen_count, 0) AS seen_count,
+                   h.last_seen_at,
+                   COALESCE(c.order_index, 0) AS category_order,
+                   COALESCE(q.order_index, 0) AS question_order
             FROM `' . $qSchema['table'] . '` q
+            INNER JOIN word_game_categories c ON c.id = q.`' . $qSchema['category_id'] . '` AND c.is_active = 1
             LEFT JOIN word_game_user_question_history h
-              ON h.user_id = ? AND h.word_game_question_id = q.`' . $qSchema['id'] . '` 
-            WHERE q.`' . $qSchema['category_id'] . '` = ?
-              AND q.`' . $qSchema['qualification_id'] . '` = ?
+              ON h.user_id = ? AND h.word_game_question_id = q.`' . $qSchema['id'] . '`
+            WHERE q.`' . $qSchema['category_id'] . '` IN (' . $categoryPlaceholders . ')
               AND q.`' . $qSchema['is_active'] . '` = 1
-              AND q.`' . $qSchema['answer_length'] . '` IN (' . $in . ')
-            ORDER BY COALESCE(h.seen_count, 0) ASC, h.last_seen_at ASC';
+              AND q.`' . $qSchema['answer_length'] . '` IN (' . $lengthPlaceholders . ')
+            ORDER BY COALESCE(h.seen_count, 0) ASC,
+                     CASE WHEN h.last_seen_at IS NULL THEN 0 ELSE 1 END ASC,
+                     h.last_seen_at ASC,
+                     COALESCE(c.order_index, 0) ASC,
+                     COALESCE(q.order_index, 0) ASC';
 
-    $params = array_merge([$userId, $categoryId, $qualificationId], $allowed);
     $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
+    $stmt->execute(array_merge([$userId], $categoryIds, $allowed));
     $pool = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    if (empty($pool)) {
-        throw new RuntimeException('Bu yeterlilik için kelime oyunu oluşturulamadı. Başlık eşleştirmesi, aktif sorular ve karakter uzunluğu ayarlarını kontrol edin.');
-    }
 
-    $best = word_game_find_exact_question_subset($pool, $targetChars, $minQ, $maxQ);
+    // Aynı cevap birden fazla başlığa girilmiş olsa bile tek oturumda yalnızca bir kez kullanılabilir.
+    $pool = word_game_sort_pool_for_selection($pool);
+    $pool = word_game_deduplicate_question_pool($pool);
+    $best = word_game_find_exact_question_subset($pool, $targetChars, $minQ, $maxQ, true);
 
     if (empty($best)) {
-        word_game_debug_log('question selection failed', [
-            'category_id' => $categoryId,
+        word_game_debug_log('question pool selection failed', [
             'qualification_id' => $qualificationId,
+            'category_ids' => $categoryIds,
             'target_chars' => $targetChars,
             'min_questions' => $minQ,
             'max_questions' => $maxQ,
@@ -693,27 +529,35 @@ function word_game_pick_questions_for_category(PDO $pdo, string $userId, string 
         throw new RuntimeException('Bu yeterlilik için kelime oyunu oluşturulamadı. Başlık eşleştirmesi, aktif sorular ve karakter uzunluğu ayarlarını kontrol edin.');
     }
 
-    $selectedTotalChars = array_sum(array_map(static fn(array $row): int => (int)($row['answer_length'] ?? 0), $best));
-    word_game_debug_log('question selection success', [
-        'category_id' => $categoryId,
+    word_game_debug_log('question pool selection success', [
         'qualification_id' => $qualificationId,
+        'category_ids' => $categoryIds,
         'selected_question_count' => count($best),
-        'selected_total_chars' => $selectedTotalChars,
+        'selected_total_chars' => array_sum(array_map(static fn(array $row): int => (int)($row['answer_length'] ?? 0), $best)),
         'target_chars' => $targetChars,
-        'min_questions' => $minQ,
-        'max_questions' => $maxQ,
     ]);
 
     return array_map(static function (array $row) use ($qualificationId): array {
         return [
             'id' => (string)$row['id'],
-            'qualification_id' => (string)($row['qualification_id'] ?: $qualificationId),
+            'qualification_id' => $qualificationId,
+            'category_id' => (string)($row['category_id'] ?? ''),
             'question_text' => (string)$row['question_text'],
             'answer_text' => (string)$row['answer_text'],
             'answer_normalized' => (string)$row['answer_normalized'],
             'answer_length' => (int)$row['answer_length'],
         ];
     }, $best);
+}
+
+function word_game_pick_questions_for_category(PDO $pdo, string $userId, string $qualificationId, string $categoryId): array
+{
+    $categoryId = trim($categoryId);
+    if ($categoryId === '') {
+        throw new InvalidArgumentException('category_id zorunludur.');
+    }
+
+    return word_game_pick_questions_from_category_pool($pdo, $userId, $qualificationId, [$categoryId]);
 }
 
 function word_game_calculate_server_remaining_seconds(array $session, ?int $durationSeconds = null): int
