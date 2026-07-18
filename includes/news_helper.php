@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/safe_http_fetch.php';
+
 require_once __DIR__ . '/functions.php';
 
 function news_uuid(): string
@@ -269,7 +271,13 @@ function news_extract_rss_items(string $feedXml): array
     }
 
     libxml_use_internal_errors(true);
-    $xml = simplexml_load_string($feedXml, 'SimpleXMLElement', LIBXML_NOCDATA);
+    if (strlen($feedXml) > 2097152 || preg_match('/<!DOCTYPE|<!ENTITY/i', $feedXml)) {
+        throw new RuntimeException('RSS XML güvenlik kontrolünden geçemedi.');
+    }
+    $previous = libxml_use_internal_errors(true);
+    $xml = simplexml_load_string($feedXml, 'SimpleXMLElement', LIBXML_NOCDATA | LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+    libxml_clear_errors();
+    libxml_use_internal_errors($previous);
     if (!$xml) {
         return [];
     }
@@ -475,7 +483,7 @@ function news_fetch_rss_source(PDO $pdo, array $source): array
             ],
         ]);
 
-        $xml = @file_get_contents($feedUrl, false, $ctx);
+        $xml = safe_http_fetch_rss($feedUrl);
         if (!is_string($xml) || trim($xml) === '') {
             throw new RuntimeException('Feed içeriği alınamadı.');
         }

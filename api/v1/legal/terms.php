@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/response_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/legal_html_sanitizer.php';
 
 api_require_method('GET');
 
@@ -41,7 +42,7 @@ try {
     api_success('Yasal metin getirildi.', [
         'doc_key' => (string)$row['doc_key'],
         'title' => (string)$row['title'],
-        'content' => (string)$row['content'],
+        'content' => legal_sanitize_html((string)$row['content']),
         'status' => (string)$row['status'],
         'version' => max(1, (int)$row['version']),
         'updated_at' => $row['updated_at'] ?? null,

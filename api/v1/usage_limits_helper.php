@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/auth_helper.php';
+require_once __DIR__ . '/guest_device_quota_helper.php';
 require_once dirname(__DIR__, 2) . '/includes/app_runtime_settings_helper.php';
 
 if (!defined('USAGE_LIMITS_SUBSCRIPTION_DEBUG_PARAM')) {
@@ -168,13 +169,15 @@ function usage_limits_revenuecat_verification_enabled(): bool
     }
 
     $apiKey = usage_limits_get_revenuecat_api_key();
-    $enabled = is_string($apiKey) && trim($apiKey) !== '';
+    $entitlementId = usage_limits_get_revenuecat_premium_entitlement_id();
+    $enabled = is_string($apiKey) && trim($apiKey) !== ''
+        && is_string($entitlementId) && trim($entitlementId) !== '';
     return $enabled;
 }
 
 function usage_limits_get_revenuecat_api_key(): ?string
 {
-    $constantCandidates = ['REVENUECAT_SECRET_API_KEY', 'RC_SECRET_API_KEY', 'REVENUECAT_API_KEY'];
+    $constantCandidates = ['REVENUECAT_SECRET_API_KEY', 'RC_SECRET_API_KEY'];
     foreach ($constantCandidates as $const) {
         if (defined($const)) {
             $value = trim((string)constant($const));
@@ -184,7 +187,7 @@ function usage_limits_get_revenuecat_api_key(): ?string
         }
     }
 
-    $envCandidates = ['REVENUECAT_SECRET_API_KEY', 'RC_SECRET_API_KEY', 'REVENUECAT_API_KEY'];
+    $envCandidates = ['REVENUECAT_SECRET_API_KEY', 'RC_SECRET_API_KEY'];
     foreach ($envCandidates as $envKey) {
         $value = trim((string)(getenv($envKey) ?: ''));
         if ($value !== '') {
@@ -193,6 +196,12 @@ function usage_limits_get_revenuecat_api_key(): ?string
     }
 
     return null;
+}
+
+function usage_limits_get_revenuecat_premium_entitlement_id(): ?string
+{
+    $value = trim((string)(getenv('REVENUECAT_PREMIUM_ENTITLEMENT_ID') ?: ''));
+    return $value !== '' ? $value : null;
 }
 
 function usage_limits_http_get_json(string $url, array $headers = [], int $timeoutSeconds = 15): array
@@ -305,7 +314,8 @@ function usage_limits_extract_revenuecat_truth(array $responseJson, string $rcAp
         }
     }
 
-    if ($selected === null && !empty($activeEntitlements)) {
+    // Do not promote an unrelated active entitlement to Premium.
+    if ($selected === null && ($preferredEntitlementId === null || $preferredEntitlementId === '') && !empty($activeEntitlements)) {
         usort($activeEntitlements, static function (array $a, array $b): int {
             return strcmp((string)($b['expires_at'] ?? ''), (string)($a['expires_at'] ?? ''));
         });
@@ -1557,8 +1567,19 @@ function usage_limits_build_feature_summary(
 ): array {
     $usageDateTr = $usageDateTr ?: usage_limits_tr_date();
     $dailyLimit = usage_limits_get_daily_limit($featureKey, $pdo);
-    $counter = usage_limits_get_or_create_counter($pdo, $userId, $qualificationId, $featureKey, $usageDateTr);
-    $usedCount = (int)($counter['used_count'] ?? 0);
+    $deviceHash = guest_device_quota_hash_for_user($pdo, $userId);
+    if ($deviceHash !== null) {
+        $usedCount = guest_device_quota_get_used(
+            $pdo,
+            $deviceHash,
+            $qualificationId,
+            $usageDateTr,
+            $featureKey
+        );
+    } else {
+        $counter = usage_limits_get_or_create_counter($pdo, $userId, $qualificationId, $featureKey, $usageDateTr);
+        $usedCount = (int)($counter['used_count'] ?? 0);
+    }
 
     if ($isPro) {
         return [
@@ -1724,6 +1745,24 @@ function usage_limits_consume(PDO $pdo, string $userId, string $qualificationId,
     }
 
     $dailyLimit = usage_limits_get_daily_limit($featureKey, $pdo);
+    $deviceHash = guest_device_quota_hash_for_user($pdo, $userId);
+    if ($deviceHash !== null) {
+        $consumed = guest_device_quota_consume(
+            $pdo,
+            $deviceHash,
+            $qualificationId,
+            $usageDateTr,
+            $featureKey,
+            $amount,
+            $dailyLimit
+        );
+        return [
+            'is_pro' => false,
+            'consumed' => $consumed,
+            'summary' => usage_limits_get_summary($pdo, $userId, $qualificationId),
+        ];
+    }
+
     $counter = usage_limits_get_or_create_counter($pdo, $userId, $qualificationId, $featureKey, $usageDateTr);
     $used = (int)($counter['used_count'] ?? 0);
 

@@ -2,6 +2,7 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once dirname(__DIR__) . '/auth_rate_limit_helper.php';
 
 api_require_method('POST');
 
@@ -17,16 +18,25 @@ try {
         api_error('Geçersiz email formatı.', 422);
     }
 
-    api_request_password_reset_otp($pdo, $email);
+    auth_rate_limit_assert_allowed($pdo, 'password_reset', $email);
+    auth_rate_limit_record(
+        $pdo,
+        'password_reset',
+        $email,
+        PASSWORD_RESET_MAX_REQUESTS,
+        PASSWORD_RESET_WINDOW_SECONDS,
+        PASSWORD_RESET_WINDOW_SECONDS
+    );
 
-    api_success('Şifre sıfırlama kodu gönderildi.', [
+    try {
+        api_request_password_reset_otp($pdo, $email);
+    } catch (Throwable $mailError) {
+        error_log('[password-reset-request] Request could not be completed.');
+    }
+
+    api_success('Hesap mevcutsa şifre sıfırlama kodu gönderildi.', [
         'success' => true,
     ]);
 } catch (Throwable $e) {
-    $code = (int)$e->getCode();
-    if ($code >= 400 && $code < 500) {
-        api_error($e->getMessage(), $code);
-    }
-
-    api_error('İşlem sırasında bir sunucu hatası oluştu.', 500);
+    api_success('Hesap mevcutsa şifre sıfırlama kodu gönderildi.', ['success' => true]);
 }

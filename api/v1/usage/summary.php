@@ -79,8 +79,9 @@ function rewarded_build_summary(PDO $pdo, string $userId, bool $isPro, array $ru
 
     $studyBonus = max(1, (int)($runtime['rewarded_study_bonus'] ?? 10));
     $examBonus = max(1, (int)($runtime['rewarded_mock_exam_bonus'] ?? 1));
-    $studyLimit = max(0, (int)($runtime['rewarded_study_daily_ad_limit'] ?? 3));
-    $examLimit = max(0, (int)($runtime['rewarded_mock_exam_daily_ad_limit'] ?? 1));
+    // SSV entegrasyonu tamamlanana kadar ödüllü reklamlar fail-closed kapalıdır.
+    $studyLimit = 0;
+    $examLimit = 0;
     $studyWatched = max(0, (int)($counts['study'] ?? 0));
     $examWatched = max(0, (int)($counts['exam'] ?? 0));
 

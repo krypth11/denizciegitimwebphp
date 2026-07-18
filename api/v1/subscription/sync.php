@@ -175,6 +175,9 @@ try {
     ]);
 
     $beforeStatus = usage_limits_get_user_subscription_status($pdo, $userId);
+    $beforeNormalized = usage_limits_normalize_subscription_row($beforeStatus, $userId);
+    $manualPremiumActive = strtolower(trim((string)($beforeStatus['provider'] ?? ''))) === 'manual'
+        && usage_limits_is_subscription_active($beforeStatus);
 
     $clientIsPro = subscription_sync_parse_optional_bool($payload, 'is_pro');
     $clientPlanCode = subscription_sync_parse_optional_string($payload, 'plan_code');
@@ -187,11 +190,8 @@ try {
     $entitlementActive = subscription_sync_parse_optional_bool($payload, 'entitlement_active');
     $purchaseSource = subscription_sync_parse_optional_string($payload, 'purchase_source');
     $clientExpiresAt = subscription_sync_parse_expires_at($payload);
-    $clientFallbackEligible =
-        (!empty($clientIsPro))
-        || (!empty($entitlementActive))
-        || ($clientEntitlementId !== null && $clientEntitlementId !== '')
-        || ($productId !== null && $productId !== '');
+    // Client purchase fields are telemetry only; they never authorize Premium.
+    $clientFallbackEligible = false;
     $existingState = usage_limits_normalize_subscription_row($beforeStatus, $userId);
     $authenticatedAppUserId = $userId;
     $preferredRcAppUserId = $loggedInAppUserId
@@ -231,18 +231,20 @@ try {
             'logged_in_app_user_id' => $loggedInAppUserId,
         ],
     ];
-    $rcAppUserIdCandidates = usage_limits_collect_revenuecat_app_user_id_candidates($pdo, $userId, $beforeStatus, $resolverOptions);
-    $resolvedRcAppUserId = usage_limits_resolve_revenuecat_app_user_id($pdo, $userId, $beforeStatus, $resolverOptions);
+    // RevenueCat is logged in with the authenticated backend user ID. Never
+    // verify a client-supplied app_user_id: it could belong to another payer.
+    $rcAppUserIdCandidates = [$authenticatedAppUserId];
+    $resolvedRcAppUserId = $authenticatedAppUserId;
     $selectedRcAppUserId = $resolvedRcAppUserId;
 
-    $verificationMode = 'client_payload';
-    $verificationTruth = null;
-    $verificationTruthActive = false;
+    $verificationMode = $manualPremiumActive ? 'admin_manual_preserved' : 'revenuecat_required';
+    $verificationTruth = $manualPremiumActive ? $beforeNormalized : null;
+    $verificationTruthActive = $manualPremiumActive;
     $verificationAttempts = [];
     $verificationFailed = false;
     $verificationErrorMessage = null;
 
-    if (usage_limits_revenuecat_verification_enabled()) {
+    if (usage_limits_revenuecat_verification_enabled() && !$manualPremiumActive) {
         $verificationCandidates = $rcAppUserIdCandidates;
         if ($resolvedRcAppUserId !== null && !in_array($resolvedRcAppUserId, $verificationCandidates, true)) {
             array_unshift($verificationCandidates, $resolvedRcAppUserId);
@@ -258,7 +260,10 @@ try {
                 }
 
                 try {
-                    $candidateTruth = usage_limits_fetch_revenuecat_subscription_truth($candidateRcId, $clientEntitlementId);
+                    $candidateTruth = usage_limits_fetch_revenuecat_subscription_truth(
+                        $candidateRcId,
+                        usage_limits_get_revenuecat_premium_entitlement_id()
+                    );
                     $candidateActive = usage_limits_is_subscription_active($candidateTruth);
                     $verificationAttempts[] = [
                         'candidate_rc_app_user_id' => $candidateRcId,
@@ -291,7 +296,7 @@ try {
                 }
             }
 
-            if ($verificationTruth === null && is_array($firstInactiveTruth) && !$clientFallbackEligible) {
+            if ($verificationTruth === null && is_array($firstInactiveTruth)) {
                 $verificationTruth = $firstInactiveTruth;
                 $verificationTruthActive = usage_limits_is_subscription_active($verificationTruth);
                 $verificationMode = 'revenuecat_server_verified_inactive';
@@ -300,9 +305,9 @@ try {
             }
 
             if ($verificationTruth === null) {
-                $verificationMode = ($verificationFailed && $clientFallbackEligible)
-                    ? 'client_payload_fallback_after_verification_failure'
-                    : 'client_payload_fallback_after_verification_inconclusive';
+                $verificationMode = $verificationFailed
+                    ? 'revenuecat_verification_failed'
+                    : 'revenuecat_verification_inconclusive';
 
                 if ($verificationFailed) {
                     subscription_sync_debug_log('revenuecat_verification_unavailable', [
@@ -346,16 +351,24 @@ try {
         }
     }
 
-    if ($verificationTruth === null && $clientIsPro === null && empty($existingState['exists'])) {
-        subscription_sync_validation_error('is_pro zorunludur (RevenueCat doğrulaması yoksa).');
+    if ($verificationTruth === null) {
+        // Old client-fallback rows cannot be distinguished from genuine purchases.
+        // Fail closed by revoking any non-manual state when server proof is absent.
+        usage_limits_upsert_subscription_status($pdo, $userId, [
+            'is_pro' => false,
+            'plan_code' => null,
+            'entitlement_id' => null,
+            'rc_app_user_id' => $authenticatedAppUserId,
+            'expires_at' => gmdate('Y-m-d H:i:s'),
+            'last_synced_at' => gmdate('Y-m-d H:i:s'),
+        ]);
+        if (!usage_limits_revenuecat_verification_enabled()) {
+            throw new RuntimeException('Abonelik doğrulaması yapılandırılmamış.', 503);
+        }
+        throw new RuntimeException('Abonelik sağlayıcı tarafından doğrulanamadı.', 503);
     }
 
-    $clientExpiresAtTs = ($clientExpiresAt !== null ? strtotime($clientExpiresAt) : false);
-    $clientHasFutureExpiry = ($clientExpiresAtTs !== false && $clientExpiresAtTs > time());
-    $effectiveClientIsPro =
-        ($clientIsPro !== null ? (bool)$clientIsPro : false)
-        || ($entitlementActive !== null ? (bool)$entitlementActive : false)
-        || ($productId !== null && $productId !== '');
+    $effectiveClientIsPro = false;
 
     $preferredWriteRcAppUserId = $resolvedRcAppUserId
         ?? $loggedInAppUserId
@@ -373,21 +386,11 @@ try {
     }
 
     $effectiveState = [
-        'is_pro' => $verificationTruth['is_pro']
-            ?? $effectiveClientIsPro
-            ?? false,
-        'plan_code' => $verificationTruth['plan_code']
-            ?? $clientPlanCode
-            ?? $productId
-            ?? ($existingState['plan_code'] ?? null),
-        'entitlement_id' => $verificationTruth['entitlement_id']
-            ?? $clientEntitlementId
-            ?? ($existingState['entitlement_id'] ?? null),
-        'rc_app_user_id' => $verificationTruth['rc_app_user_id']
-            ?? $preferredWriteRcAppUserId,
-        'expires_at' => $verificationTruth['expires_at']
-            ?? $clientExpiresAt
-            ?? ($existingState['expires_at'] ?? null),
+        'is_pro' => !empty($verificationTruth['is_pro']),
+        'plan_code' => $verificationTruth['plan_code'] ?? null,
+        'entitlement_id' => $verificationTruth['entitlement_id'] ?? null,
+        'rc_app_user_id' => $verificationTruth['rc_app_user_id'] ?? $preferredWriteRcAppUserId,
+        'expires_at' => $verificationTruth['expires_at'] ?? null,
         'last_synced_at' => gmdate('Y-m-d H:i:s'),
     ];
 
@@ -396,19 +399,6 @@ try {
         $effectiveState['is_pro'] = false;
     }
 
-    if ($effectiveClientIsPro === true && !$serverVerifiedInactive) {
-        $effectiveState['is_pro'] = true;
-    }
-
-    if (!empty($effectiveState['is_pro'])) {
-        if (empty($effectiveState['entitlement_id']) && !empty($existingState['entitlement_id'])) {
-            $effectiveState['entitlement_id'] = $existingState['entitlement_id'];
-        }
-
-        if (($effectiveState['expires_at'] ?? null) === null && $clientHasFutureExpiry) {
-            $effectiveState['expires_at'] = $clientExpiresAt;
-        }
-    }
 
     subscription_sync_debug_log('effective_state_computed', [
         'authenticated_user_id' => $userId,
@@ -711,13 +701,21 @@ try {
         'request_payload' => $payload ?? null,
     ]);
 
+    $status = (int)$e->getCode();
+    $status = ($status >= 400 && $status < 600) ? $status : 500;
+    $errorCode = $status === 503
+        ? 'SUBSCRIPTION_VERIFICATION_UNAVAILABLE'
+        : 'SUBSCRIPTION_SYNC_FAILED';
     api_send_json([
         'success' => false,
-        'message' => 'Abonelik senkronizasyonu sırasında bir hata oluştu.',
+        'error_code' => $errorCode,
+        'message' => $status === 503
+            ? 'Abonelik şu anda güvenli biçimde doğrulanamıyor.'
+            : 'Abonelik senkronizasyonu sırasında bir hata oluştu.',
         'data' => null,
         'debug' => subscription_sync_debug_enabled() ? [
             'exception_message' => $e->getMessage(),
             'user_id' => $userId ?? null,
         ] : null,
-    ], 500);
+    ], $status);
 }

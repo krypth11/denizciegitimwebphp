@@ -46,7 +46,11 @@ function base64url_encode($data)
 
 function base64url_decode($data)
 {
-    return base64_decode(strtr($data, '-_', '+/'));
+    if (!is_string($data) || !preg_match('/^[A-Za-z0-9_-]+$/', $data)) {
+        return false;
+    }
+    $padding = (4 - strlen($data) % 4) % 4;
+    return base64_decode(strtr($data, '-_', '+/') . str_repeat('=', $padding), true);
 }
 
 function jwt_encode($payload)
@@ -71,6 +75,14 @@ function jwt_decode($jwt)
     $payload = base64url_decode($tokenParts[1]);
     $signatureProvided = $tokenParts[2];
 
+    if (!is_string($header) || !is_string($payload)) {
+        return false;
+    }
+    $headerData = json_decode($header, true);
+    if (!is_array($headerData) || ($headerData['typ'] ?? null) !== 'JWT' || ($headerData['alg'] ?? null) !== 'HS256') {
+        return false;
+    }
+
     $base64UrlHeader = base64url_encode($header);
     $base64UrlPayload = base64url_encode($payload);
     $signature = hash_hmac('sha256', $base64UrlHeader . '.' . $base64UrlPayload, JWT_SECRET, true);
@@ -85,7 +97,14 @@ function jwt_decode($jwt)
         return false;
     }
 
-    if (isset($payload['exp']) && (int)$payload['exp'] < time()) {
+    $now = time();
+    if (!isset($payload['iss'], $payload['aud'], $payload['iat'], $payload['nbf'], $payload['exp'])) {
+        return false;
+    }
+    if (!hash_equals(JWT_ISSUER, (string)$payload['iss']) || !hash_equals(JWT_AUDIENCE, (string)$payload['aud'])) {
+        return false;
+    }
+    if ((int)$payload['iat'] > $now + 60 || (int)$payload['nbf'] > $now + 60 || (int)$payload['exp'] <= $now) {
         return false;
     }
 
@@ -94,12 +113,17 @@ function jwt_decode($jwt)
 
 function create_token($user_id, $email, $is_admin = false)
 {
+    $now = time();
     $payload = [
+        'iss' => JWT_ISSUER,
+        'aud' => JWT_AUDIENCE,
         'user_id' => $user_id,
         'email' => $email,
         'is_admin' => (bool)$is_admin,
-        'iat' => time(),
-        'exp' => time() + JWT_EXPIRY,
+        'iat' => $now,
+        'nbf' => $now,
+        'exp' => $now + JWT_EXPIRY,
+        'jti' => bin2hex(random_bytes(16)),
     ];
 
     return jwt_encode($payload);

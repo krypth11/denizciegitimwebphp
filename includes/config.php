@@ -8,11 +8,23 @@ ini_set('display_errors', '0');
 // Timezone
 date_default_timezone_set('Europe/Istanbul');
 
-// Database bağlantı
-define('DB_HOST', 'localhost');
-define('DB_USER', 'u2621168_dbadmin');
-define('DB_PASS', 'ARDAbeyza59.');
-define('DB_NAME', 'u2621168_denizciegitim');
+require_once __DIR__ . '/security_config.php';
+
+function config_required_env(string $name): string
+{
+    $value = getenv($name);
+    if (!is_string($value) || trim($value) === '') {
+        throw new RuntimeException('Required application configuration is missing: ' . $name);
+    }
+    return trim($value);
+}
+
+// Database bağlantı: güvenlik nedeniyle bütün değerler zorunlu environment değişkenleridir.
+define('DB_HOST', config_required_env('DB_HOST'));
+define('DB_PORT', security_env_int('DB_PORT', 3306, 1, 65535));
+define('DB_USER', config_required_env('DB_USER'));
+define('DB_PASS', config_required_env('DB_PASSWORD'));
+define('DB_NAME', config_required_env('DB_NAME'));
 
 // Site ayarları
 define('SITE_URL', 'https://denizciegitim.com');
@@ -35,10 +47,13 @@ define('FIREBASE_SERVICE_ACCOUNT_PATH', getenv('FIREBASE_SERVICE_ACCOUNT_PATH') 
 define('FIREBASE_FCM_SCOPE', 'https://www.googleapis.com/auth/firebase.messaging');
 define('FIREBASE_FCM_TIMEOUT', 15);
 
-// JWT ayarları
-define('JWT_SECRET', 'dEnIzCi_EgItIm_2026_sEcReT_kEy_ChAnGe_Me');
-define('JWT_EXPIRY', 86400); // 24 saat
 define('SESSION_TIMEOUT', 1800); // 30 dakika
+
+define('AUTH_RATE_LIMIT_MAX_ATTEMPTS', security_env_int('AUTH_RATE_LIMIT_MAX_ATTEMPTS', 8, 3, 100));
+define('AUTH_RATE_LIMIT_WINDOW_SECONDS', security_env_int('AUTH_RATE_LIMIT_WINDOW_SECONDS', 900, 60, 86400));
+define('AUTH_RATE_LIMIT_BLOCK_SECONDS', security_env_int('AUTH_RATE_LIMIT_BLOCK_SECONDS', 900, 60, 86400));
+define('PASSWORD_RESET_MAX_REQUESTS', security_env_int('PASSWORD_RESET_MAX_REQUESTS', 3, 1, 20));
+define('PASSWORD_RESET_WINDOW_SECONDS', security_env_int('PASSWORD_RESET_WINDOW_SECONDS', 3600, 60, 86400));
 
 // Email / OTP ayarları (environment üzerinden yönet)
 define('SMTP_HOST', getenv('SMTP_HOST') ?: '');
@@ -81,7 +96,7 @@ if (session_status() === PHP_SESSION_NONE) {
 // PDO bağlantı
 try {
     $pdo = new PDO(
-        "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=utf8mb4",
+        "mysql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME . ";charset=utf8mb4",
         DB_USER,
         DB_PASS,
         [
@@ -91,7 +106,7 @@ try {
         ]
     );
 } catch (PDOException $e) {
-    error_log('Database connection error: ' . $e->getMessage());
+    error_log('Database connection could not be established.');
     http_response_code(500);
     die('Sistem hatası oluştu. Lütfen daha sonra tekrar deneyin.');
 }

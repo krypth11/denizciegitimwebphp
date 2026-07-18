@@ -4,6 +4,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once '../includes/config.php';
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
+require_once '../includes/legal_html_sanitizer.php';
 
 $authUser = require_admin();
 
@@ -133,6 +134,7 @@ try {
         if (!empty($errors)) {
             legal_json(false, 'Validasyon hatası.', [], 422, $errors);
         }
+        $content = legal_sanitize_html($content);
 
         $adminId = (string)($authUser['user_id'] ?? ($_SESSION['user_id'] ?? ''));
 

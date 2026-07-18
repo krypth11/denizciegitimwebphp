@@ -2,13 +2,14 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
+require_once dirname(__DIR__) . '/auth_rate_limit_helper.php';
 
 api_require_method('POST');
 
 try {
     $payload = api_get_request_data();
 
-    $email = trim((string)($payload['email'] ?? ''));
+    $email = strtolower(trim((string)($payload['email'] ?? '')));
     $password = (string)($payload['password'] ?? '');
 
     if ($email === '' || $password === '') {
@@ -19,15 +20,23 @@ try {
         api_error('Geçersiz email formatı.', 422);
     }
 
+    auth_rate_limit_assert_allowed($pdo, 'login', $email);
+
     $user = api_find_user_by_email($pdo, $email);
-    if (!$user) {
+    $hash = (string)($user['password_hash'] ?? '$2y$10$abcdefghijklmnopqrstuu9Bx7i8uWlBqVqDPY4VjA9M5YtQhF9C');
+    if (!$user || !verify_password($password, $hash)) {
+        auth_rate_limit_record(
+            $pdo,
+            'login',
+            $email,
+            AUTH_RATE_LIMIT_MAX_ATTEMPTS,
+            AUTH_RATE_LIMIT_WINDOW_SECONDS,
+            AUTH_RATE_LIMIT_BLOCK_SECONDS
+        );
         api_error('Email veya şifre hatalı.', 401);
     }
 
-    $hash = (string)($user['password_hash'] ?? '');
-    if ($hash === '' || !verify_password($password, $hash)) {
-        api_error('Email veya şifre hatalı.', 401);
-    }
+    auth_rate_limit_clear($pdo, 'login', $email);
 
     $token = api_create_user_token($pdo, (string)$user['id']);
     api_update_last_sign_in($pdo, (string)$user['id']);

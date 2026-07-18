@@ -2352,7 +2352,8 @@ function api_request_password_reset_otp(PDO $pdo, string $email): array
     $normalizedEmail = strtolower(trim($email));
     $user = api_find_password_reset_user_by_email($pdo, $normalizedEmail);
     if (!$user || empty($user['id'])) {
-        api_error('Bu e-posta adresiyle kayıtlı kullanıcı bulunamadı.', 404);
+        password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT);
+        return ['success' => true];
     }
 
     $code = api_generate_email_otp_code();
@@ -2395,11 +2396,6 @@ function api_complete_password_reset(PDO $pdo, string $email, string $code, stri
         api_error('Bu e-posta adresiyle kayıtlı kullanıcı bulunamadı.', 404);
     }
 
-    $record = api_validate_password_reset_otp($pdo, $normalizedEmail, $code);
-    if ((string)($record['user_id'] ?? '') !== (string)$user['id']) {
-        api_error('Kod doğrulaması başarısız.', 422);
-    }
-
     $passwordHash = hash_password($password);
     if (!is_string($passwordHash) || trim($passwordHash) === '') {
         api_error('Şifre güncellenemedi.', 500);
@@ -2415,6 +2411,20 @@ function api_complete_password_reset(PDO $pdo, string $email, string $code, stri
     try {
         $pdo->beginTransaction();
 
+        $record = api_validate_password_reset_otp($pdo, $normalizedEmail, $code);
+        if ((string)($record['user_id'] ?? '') !== (string)$user['id']) {
+            throw new RuntimeException('Kod doğrulaması başarısız.', 422);
+        }
+
+        $sqlUse = 'UPDATE `' . $otpSchema['table'] . '` '
+            . 'SET `' . $otpSchema['used_at'] . '` = NOW() '
+            . 'WHERE `' . $otpSchema['id'] . '` = ? AND `' . $otpSchema['used_at'] . '` IS NULL';
+        $stmtUse = $pdo->prepare($sqlUse);
+        $stmtUse->execute([(string)$record['id']]);
+        if ($stmtUse->rowCount() !== 1) {
+            throw new RuntimeException('Kod daha önce kullanılmış.', 409);
+        }
+
         $set = ['`' . $profileSchema['password'] . '` = ?'];
         $params = [$passwordHash];
         if ($profileSchema['updated_at']) {
@@ -2426,12 +2436,6 @@ function api_complete_password_reset(PDO $pdo, string $email, string $code, stri
             . ' WHERE `' . $profileSchema['id'] . '` = ?';
         $stmtPassword = $pdo->prepare($sqlPassword);
         $stmtPassword->execute($params);
-
-        $sqlUse = 'UPDATE `' . $otpSchema['table'] . '` '
-            . 'SET `' . $otpSchema['used_at'] . '` = NOW() '
-            . 'WHERE `' . $otpSchema['id'] . '` = ? AND `' . $otpSchema['used_at'] . '` IS NULL';
-        $stmtUse = $pdo->prepare($sqlUse);
-        $stmtUse->execute([(string)$record['id']]);
 
         $token = api_create_user_token($pdo, (string)$user['id']);
         api_update_last_sign_in($pdo, (string)$user['id']);

@@ -1045,7 +1045,8 @@ function kg_get_daily_usage_status(PDO $pdo, string $userId, bool $isPremium): a
     $practiceLimit = max(0, kg_get_practice_daily_limit($pdo));
     $rankedDailyLimit = max(0, kg_get_daily_attempt_limit($pdo));
     $rankedFreeLimit = max(0, kg_get_ranked_free_daily_limit($pdo));
-    $rankedRewardedLimit = max(0, kg_get_ranked_rewarded_daily_limit($pdo));
+    // Sağlayıcı SSV entegrasyonu yokken reklam kaynaklı ranked slot verilmez.
+    $rankedRewardedLimit = 0;
 
     $stmt = $pdo->prepare('SELECT practice_used, ranked_free_used, ranked_rewarded_used FROM kart_game_daily_usage WHERE user_id = ? AND usage_date = ? LIMIT 1');
     $stmt->execute([$userId, $today]);
@@ -1154,7 +1155,7 @@ function kg_consume_start_run_right(PDO $pdo, string $userId, string $gameMode, 
         $practiceLimit = max(0, kg_get_practice_daily_limit($pdo));
         $rankedDailyLimit = max(0, kg_get_daily_attempt_limit($pdo));
         $rankedFreeLimit = max(0, kg_get_ranked_free_daily_limit($pdo));
-        $rankedRewardedLimit = max(0, kg_get_ranked_rewarded_daily_limit($pdo));
+        $rankedRewardedLimit = 0;
 
         if ($isPracticeMode) {
             if ($practiceUsed >= $practiceLimit) {
