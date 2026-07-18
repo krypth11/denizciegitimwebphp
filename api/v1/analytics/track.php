@@ -23,7 +23,7 @@ function analytics_client_ip(): string
     return filter_var($remote, FILTER_VALIDATE_IP) ? $remote : '0.0.0.0';
 }
 
-function analytics_location(string $timezone): array
+function analytics_country_fallback(string $timezone): array
 {
     $code = strtoupper(analytics_text($_SERVER['HTTP_CF_IPCOUNTRY'] ?? $_SERVER['HTTP_X_COUNTRY_CODE'] ?? '', 2));
     $map = [
@@ -40,7 +40,70 @@ function analytics_location(string $timezone): array
     ];
     if ($code === '' && $timezone === 'Europe/Istanbul') $code = 'TR';
     $item = $map[$code] ?? null;
-    return [$code ?: null, $item[0] ?? null, $item[1] ?? null, $item[2] ?? null];
+    return [$code ?: null, $item[0] ?? null, null, null, $item[1] ?? null, $item[2] ?? null];
+}
+
+function analytics_geoip(PDO $pdo, string $ip, string $ipHash, string $timezone): array
+{
+    $fallback = analytics_country_fallback($timezone);
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+        return $fallback;
+    }
+
+    try {
+        $stmt = $pdo->prepare('SELECT country_code,country_name,region_name,city_name,latitude,longitude,lookup_status
+            FROM visitor_analytics_geo_cache WHERE ip_hash=? AND expires_at>NOW() LIMIT 1');
+        $stmt->execute([$ipHash]);
+        $cached = $stmt->fetch();
+        if ($cached) {
+            return $cached['lookup_status'] === 'success'
+                ? [$cached['country_code'], $cached['country_name'], $cached['region_name'], $cached['city_name'], $cached['latitude'], $cached['longitude']]
+                : $fallback;
+        }
+    } catch (Throwable $e) {
+        // The tracking endpoint must remain available before/while the cache migration is deployed.
+    }
+
+    if (!function_exists('curl_init')) return $fallback;
+    $ch = curl_init('https://ipwho.is/' . rawurlencode($ip));
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT_MS => 1200,
+        CURLOPT_TIMEOUT_MS => 2500,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_HTTPHEADER => ['Accept: application/json'],
+        CURLOPT_USERAGENT => 'DenizciEgitim-VisitorAnalytics/1.0',
+    ]);
+    $raw = curl_exec($ch);
+    $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    curl_close($ch);
+    $data = is_string($raw) && strlen($raw) <= 65536 && $status === 200 ? json_decode($raw, true) : null;
+
+    $lat = is_array($data) && is_numeric($data['latitude'] ?? null) ? (float)$data['latitude'] : null;
+    $lng = is_array($data) && is_numeric($data['longitude'] ?? null) ? (float)$data['longitude'] : null;
+    $valid = is_array($data) && ($data['success'] ?? false) === true
+        && preg_match('/^[A-Z]{2}$/', strtoupper((string)($data['country_code'] ?? '')))
+        && $lat !== null && $lat >= -90 && $lat <= 90 && $lng !== null && $lng >= -180 && $lng <= 180;
+    $location = $valid ? [
+        strtoupper((string)$data['country_code']), analytics_text($data['country'] ?? '', 100) ?: null,
+        analytics_text($data['region'] ?? '', 120) ?: null, analytics_text($data['city'] ?? '', 120) ?: null,
+        $lat, $lng,
+    ] : $fallback;
+
+    try {
+        $cache = $pdo->prepare('INSERT INTO visitor_analytics_geo_cache
+            (ip_hash,country_code,country_name,region_name,city_name,latitude,longitude,lookup_status,resolved_at,expires_at)
+            VALUES (?,?,?,?,?,?,?,?,NOW(),DATE_ADD(NOW(),INTERVAL ? DAY))
+            ON DUPLICATE KEY UPDATE country_code=VALUES(country_code),country_name=VALUES(country_name),region_name=VALUES(region_name),city_name=VALUES(city_name),latitude=VALUES(latitude),longitude=VALUES(longitude),lookup_status=VALUES(lookup_status),resolved_at=NOW(),expires_at=VALUES(expires_at)');
+        $cache->execute([$ipHash, $valid ? $location[0] : null, $valid ? $location[1] : null, $valid ? $location[2] : null,
+            $valid ? $location[3] : null, $valid ? $location[4] : null, $valid ? $location[5] : null,
+            $valid ? 'success' : 'failed', $valid ? 30 : 1]);
+    } catch (Throwable $e) {
+        // GeoIP caching is an enhancement; a cache write failure must not lose page views.
+    }
+    return $location;
 }
 
 try {
@@ -55,8 +118,9 @@ try {
     if (!str_starts_with($path, '/')) $path = '/';
     $title = analytics_text($p['title'] ?? '', 255) ?: null;
     $timezone = analytics_text($p['timezone'] ?? '', 64);
-    [$countryCode, $countryName, $lat, $lng] = analytics_location($timezone);
-    $ipHash = hash_hmac('sha256', 'analytics-ip:' . analytics_client_ip(), guest_device_quota_hmac_key());
+    $clientIp = analytics_client_ip();
+    $ipHash = hash_hmac('sha256', 'analytics-ip:' . $clientIp, guest_device_quota_hmac_key());
+    [$countryCode, $countryName, $regionName, $cityName, $lat, $lng] = analytics_geoip($pdo, $clientIp, $ipHash, $timezone);
     $visitorHash = hash_hmac('sha256', 'analytics-visitor:' . $visitorId, guest_device_quota_hmac_key());
     $auth = api_resolve_auth($pdo);
     $userId = $auth['user']['id'] ?? null;
@@ -66,7 +130,7 @@ try {
     $isHeartbeat = !empty($p['heartbeat']);
     $params = [
         $sessionId, $visitorHash, $userId, $ipHash, $path, $path,
-        $referrerHost, $countryCode, $countryName, $lat, $lng,
+        $referrerHost, $countryCode, $countryName, $regionName, $cityName, $lat, $lng,
         analytics_text($p['device_type'] ?? 'unknown', 24), analytics_text($p['browser'] ?? 'Unknown', 48),
         analytics_text($p['os'] ?? 'Unknown', 48), analytics_text($p['language'] ?? '', 24) ?: null,
         $timezone ?: null, analytics_text($p['screen'] ?? '', 24) ?: null,
@@ -75,9 +139,12 @@ try {
         $isHeartbeat ? 0 : 1,
     ];
     $sql = 'INSERT INTO visitor_analytics_sessions
-        (session_id,visitor_hash,user_id,ip_hash,first_seen_at,last_seen_at,pageview_count,landing_path,last_path,referrer_host,country_code,country_name,latitude,longitude,device_type,browser_name,os_name,language_code,timezone_name,screen_size,utm_source,utm_medium,utm_campaign)
-        VALUES (?,?,?,?,NOW(),NOW(),1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON DUPLICATE KEY UPDATE user_id=COALESCE(VALUES(user_id),user_id),last_seen_at=NOW(),last_path=VALUES(last_path),pageview_count=pageview_count+?';
+        (session_id,visitor_hash,user_id,ip_hash,first_seen_at,last_seen_at,pageview_count,landing_path,last_path,referrer_host,country_code,country_name,region_name,city_name,latitude,longitude,device_type,browser_name,os_name,language_code,timezone_name,screen_size,utm_source,utm_medium,utm_campaign)
+        VALUES (?,?,?,?,NOW(),NOW(),1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON DUPLICATE KEY UPDATE user_id=COALESCE(VALUES(user_id),user_id),last_seen_at=NOW(),last_path=VALUES(last_path),
+        country_code=COALESCE(VALUES(country_code),country_code),country_name=COALESCE(VALUES(country_name),country_name),
+        region_name=COALESCE(VALUES(region_name),region_name),city_name=COALESCE(VALUES(city_name),city_name),
+        latitude=COALESCE(VALUES(latitude),latitude),longitude=COALESCE(VALUES(longitude),longitude),pageview_count=pageview_count+?';
     $pdo->prepare($sql)->execute($params);
 
     if (!$isHeartbeat) {

@@ -12,7 +12,7 @@ function va_json(array $data): void { echo json_encode(['success'=>true,'data'=>
 try {
     $range = in_array($_GET['range'] ?? '7d', ['today','7d','30d','90d'], true) ? $_GET['range'] : '7d';
     $since = ['today'=>'CURDATE()','7d'=>'DATE_SUB(NOW(), INTERVAL 7 DAY)','30d'=>'DATE_SUB(NOW(), INTERVAL 30 DAY)','90d'=>'DATE_SUB(NOW(), INTERVAL 90 DAY)'][$range];
-    $active = $pdo->query("SELECT session_id,user_id,last_path,country_code,country_name,city_name,latitude,longitude,device_type,browser_name,os_name,last_seen_at,TIMESTAMPDIFF(SECOND,last_seen_at,NOW()) age_seconds FROM visitor_analytics_sessions WHERE last_seen_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE) ORDER BY last_seen_at DESC")->fetchAll();
+    $active = $pdo->query("SELECT session_id,user_id,last_path,country_code,country_name,region_name,city_name,latitude,longitude,device_type,browser_name,os_name,last_seen_at,TIMESTAMPDIFF(SECOND,last_seen_at,NOW()) age_seconds FROM visitor_analytics_sessions WHERE last_seen_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE) ORDER BY last_seen_at DESC")->fetchAll();
     $summary = $pdo->query("SELECT COUNT(*) sessions,COUNT(DISTINCT visitor_hash) visitors,COALESCE(SUM(pageview_count),0) pageviews,COUNT(DISTINCT CASE WHEN user_id IS NOT NULL THEN user_id END) registered_users FROM visitor_analytics_sessions WHERE first_seen_at >= $since")->fetch();
     $summary['active_now'] = count($active);
     $summary['avg_pages'] = ((int)$summary['sessions'] > 0) ? round((int)$summary['pageviews']/(int)$summary['sessions'],1) : 0;
