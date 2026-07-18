@@ -22,7 +22,7 @@ try {
     $browsers = $pdo->query("SELECT browser_name label,COUNT(*) value FROM visitor_analytics_sessions WHERE first_seen_at >= $since GROUP BY browser_name ORDER BY value DESC LIMIT 8")->fetchAll();
     $sources = $pdo->query("SELECT COALESCE(NULLIF(utm_source,''),NULLIF(referrer_host,''),'Doğrudan') label,COUNT(*) value FROM visitor_analytics_sessions WHERE first_seen_at >= $since GROUP BY label ORDER BY value DESC LIMIT 10")->fetchAll();
     $pages = $pdo->query("SELECT path label,COUNT(*) views,COUNT(DISTINCT session_id) sessions FROM visitor_analytics_pageviews WHERE occurred_at >= $since GROUP BY path ORDER BY views DESC LIMIT 15")->fetchAll();
-    $recent = $pdo->query("SELECT s.session_id,s.user_id,s.country_name,s.device_type,s.browser_name,s.os_name,s.last_path,s.pageview_count,s.first_seen_at,s.last_seen_at,p.full_name,p.email FROM visitor_analytics_sessions s LEFT JOIN profiles p ON p.id=s.user_id WHERE s.first_seen_at >= $since ORDER BY s.last_seen_at DESC LIMIT 100")->fetchAll();
+    $recent = $pdo->query("SELECT s.session_id,s.user_id,s.country_name,s.device_type,s.browser_name,s.os_name,s.last_path,s.pageview_count,s.first_seen_at,s.last_seen_at,p.full_name,p.email FROM visitor_analytics_sessions s LEFT JOIN user_profiles p ON p.id=s.user_id WHERE s.first_seen_at >= $since ORDER BY s.last_seen_at DESC LIMIT 100")->fetchAll();
     va_json(compact('summary','active','trend','countries','devices','browsers','sources','pages','recent','range'));
 } catch (Throwable $e) {
     http_response_code(500);
