@@ -44,6 +44,7 @@ $menuGroups = [
     ],
     [
         ['slug' => 'users', 'url' => '/pages/users.php', 'icon' => 'bi-people', 'label' => 'Kullanıcılar'],
+        ['slug' => 'visitor-analytics', 'url' => '/pages/visitor-analytics.php', 'icon' => 'bi-globe2', 'label' => 'Ziyaretçi Analizi'],
         [
             'slug' => 'subscription-management',
             'icon' => 'bi-stars',

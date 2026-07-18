@@ -8,6 +8,7 @@ ini_set('display_errors', '0');
 // Timezone
 date_default_timezone_set('Europe/Istanbul');
 
+require_once __DIR__ . '/local_config_loader.php';
 require_once __DIR__ . '/security_config.php';
 
 function config_required_env(string $name): string
