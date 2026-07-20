@@ -12,6 +12,7 @@ $menuGroups = [
         ['slug' => 'question-reports', 'url' => '/pages/question-reports.php', 'icon' => 'bi-flag', 'label' => 'Soru Bildirimleri'],
         ['slug' => 'question-scope-bulk', 'url' => '/pages/question-scope-bulk.php', 'icon' => 'bi-diagram-3', 'label' => 'Toplu Soru Kapsamı'],
         ['slug' => 'questions-export', 'url' => '/pages/questions-export.php', 'icon' => 'bi-file-earmark-arrow-down', 'label' => 'Soru Dışa Aktar'],
+        ['slug' => 'maritime-english', 'url' => '/pages/maritime-english.php', 'icon' => 'bi-translate', 'label' => 'Maritime English'],
         [
             'slug' => 'word-game',
             'icon' => 'bi-controller',
