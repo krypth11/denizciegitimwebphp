@@ -15,6 +15,62 @@ try {
         $qualifications = $pdo->query('SELECT id, name FROM qualifications WHERE is_active = 1 ORDER BY order_index, name')->fetchAll(PDO::FETCH_ASSOC) ?: [];
         me_admin_json(true, '', ['categories' => $rows, 'qualifications' => $qualifications]);
     }
+    if ($action === 'list') {
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $perPage = max(10, min(100, (int)($_GET['per_page'] ?? 20)));
+        $categoryId = trim((string)($_GET['category_id'] ?? ''));
+        $questionType = trim((string)($_GET['question_type'] ?? ''));
+        $isActive = trim((string)($_GET['is_active'] ?? ''));
+        $search = trim((string)($_GET['search'] ?? ''));
+        $allowedTypes = ['context_meaning', 'fill_blank', 'translation', 'dialogue', 'word_order', 'wrong_usage', 'matching'];
+        if ($questionType !== '' && !in_array($questionType, $allowedTypes, true)) {
+            me_admin_json(false, 'Geçersiz soru tipi.', [], 422);
+        }
+        if ($isActive !== '' && !in_array($isActive, ['0', '1'], true)) {
+            me_admin_json(false, 'Geçersiz durum filtresi.', [], 422);
+        }
+
+        $where = [];
+        $params = [];
+        if ($categoryId !== '') { $where[] = 't.category_id = ?'; $params[] = $categoryId; }
+        if ($questionType !== '') { $where[] = 'q.question_type = ?'; $params[] = $questionType; }
+        if ($isActive !== '') { $where[] = 'q.is_active = ?'; $params[] = (int)$isActive; }
+        if ($search !== '') {
+            $where[] = '(q.prompt LIKE ? OR t.term_en LIKE ? OR t.term_tr LIKE ? OR q.options_json LIKE ?)';
+            $like = '%' . $search . '%';
+            array_push($params, $like, $like, $like, $like);
+        }
+        $whereSql = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+        $fromSql = ' FROM maritime_english_questions q
+                     INNER JOIN maritime_english_terms t ON t.id = q.term_id
+                     INNER JOIN maritime_english_categories c ON c.id = t.category_id
+                     LEFT JOIN qualifications qu ON qu.id = t.qualification_id ';
+        $countStmt = $pdo->prepare('SELECT COUNT(*)' . $fromSql . $whereSql);
+        $countStmt->execute($params);
+        $total = (int)$countStmt->fetchColumn();
+        $totalPages = max(1, (int)ceil($total / $perPage));
+        $page = min($page, $totalPages);
+        $offset = ($page - 1) * $perPage;
+        $sql = 'SELECT q.id, q.question_type, q.prompt, q.options_json, q.correct_option_key,
+                       q.difficulty, q.is_active, q.sort_order, q.created_at,
+                       t.term_en, t.term_tr, c.name AS category_name, qu.name AS qualification_name'
+             . $fromSql . $whereSql
+             . ' ORDER BY q.created_at DESC, c.sort_order ASC, t.term_en ASC, q.sort_order ASC LIMIT ' . $perPage . ' OFFSET ' . $offset;
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $items = array_map(static function (array $row): array {
+            $options = json_decode((string)$row['options_json'], true);
+            $row['options'] = is_array($options) ? $options : [];
+            unset($row['options_json']);
+            $row['is_active'] = (int)$row['is_active'];
+            $row['sort_order'] = (int)$row['sort_order'];
+            return $row;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        me_admin_json(true, '', [
+            'items' => $items,
+            'pagination' => ['page' => $page, 'per_page' => $perPage, 'total' => $total, 'total_pages' => $totalPages],
+        ]);
+    }
     if ($action === 'parse') {
         $result = me_import_parse((string)($_POST['content'] ?? ''));
         me_admin_json((bool)$result['success'], $result['success'] ? 'Metin başarıyla analiz edildi.' : 'Metin doğrulanamadı.', $result, $result['success'] ? 200 : 422);
