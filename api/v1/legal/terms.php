@@ -12,7 +12,7 @@ function legal_public_default_document($docKey)
         return [
             'doc_key' => 'terms',
             'title' => 'Denizci Eğitim – Kullanım Koşulları',
-            'content' => '<h3>Denizci Eğitim – Kullanım Koşulları</h3><p>Bu alan için güncel kullanım koşulları metnini admin panelden güncelleyebilirsiniz.</p><p><em>Placeholder metin:</em> Kullanıcı tarafından sağlanacak güncel sözleşme metni burada yayınlanacaktır.</p>',
+            'content' => '<h3>Denizci Eğitim – Kullanım Koşulları</h3><p>Bu alan için güncel kullanım koşulları metnini admin panelden güncelleyebilirsiniz.</p><p><em>Placeholder metin:</em> Kullanıcı tarafından sağlanacak güncel sözleşme metni burada yayınlanacaktır.</p><p>Hizmet sağlayıcı: DIGITALAND LTD — Company Number: 16365430 — Contact: support@denizciegitim.com</p>',
             'status' => 'published',
             'version' => 1,
             'updated_at' => null,
@@ -22,7 +22,7 @@ function legal_public_default_document($docKey)
     return [
         'doc_key' => 'privacy',
         'title' => 'Denizci Eğitim – Gizlilik Politikası',
-        'content' => '<h3>Denizci Eğitim – Gizlilik Politikası</h3><p>Bu alan için güncel gizlilik politikası metnini admin panelden güncelleyebilirsiniz.</p><p><em>Placeholder metin:</em> Denizci Eğitim / DIGITALAND LTD bilgilerine göre hazırlanacak metin burada yayınlanacaktır.</p>',
+        'content' => '<h3>Denizci Eğitim – Gizlilik Politikası</h3><p>Bu alan için güncel gizlilik politikası metnini admin panelden güncelleyebilirsiniz.</p><p><em>Placeholder metin:</em> Denizci Eğitim / DIGITALAND LTD bilgilerine göre hazırlanacak metin burada yayınlanacaktır.</p><p>Veri sorumlusu: DIGITALAND LTD — Company Number: 16365430 — Contact: support@denizciegitim.com</p>',
         'status' => 'published',
         'version' => 1,
         'updated_at' => null,

@@ -38,8 +38,6 @@ $menuGroups = [
         ['slug' => 'ai-question-review', 'url' => '/pages/ai-question-review.php', 'icon' => 'bi-robot', 'label' => 'AI Soru Kontrol'],
     ],
     [
-        ['slug' => 'maritime-english', 'url' => '/pages/maritime-english.php', 'icon' => 'bi-translate', 'label' => 'Maritime English'],
-        ['slug' => 'me-questions', 'url' => '/pages/me-questions.php', 'icon' => 'bi-chat-square-text', 'label' => 'ME Sorular'],
         ['slug' => 'maritime-signals', 'url' => '/pages/maritime-signals.php', 'icon' => 'bi-flag', 'label' => 'İşaretler'],
     ],
     [

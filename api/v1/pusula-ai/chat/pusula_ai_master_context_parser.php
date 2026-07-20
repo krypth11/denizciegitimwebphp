@@ -177,7 +177,7 @@ function pusula_ai_classify_master_context_block(string $question, string $answe
     if ($has(['premium'])) {
         return 'premium_info';
     }
-    if ($has(['uygulama', 'çalışma alanı', 'offline', 'topluluk', 'word game', 'kart oyunu', 'maritime english'])) {
+    if ($has(['uygulama', 'çalışma alanı', 'offline', 'topluluk', 'word game', 'kart oyunu'])) {
         return 'app_info';
     }
     if ($has(['özellik', 'modül', 'pusula ai nelerde yardımcı olabilir', 'yardımcı olabilir'])) {
@@ -214,7 +214,6 @@ function pusula_ai_master_context_feature_targets(): array
         'statistics' => ['istatistik', 'statistics', 'performans'],
         'community' => ['topluluk', 'community'],
         'offline' => ['offline', 'çevrimdışı', 'cevrimdisi', 'çevrim dışı', 'cevrim disi'],
-        'maritime_english' => ['maritime english', 'maritime_english', 'denizcilik ingilizcesi'],
         'word_game' => ['word game', 'word_game', 'kelime oyunu'],
         'card_game' => ['card game', 'card_game', 'kart oyunu'],
         'exams' => ['deneme', 'sınav', 'sinav', 'exams', 'deneme alanı'],

@@ -53,7 +53,7 @@ function legal_default_document($docKey)
     return [
         'doc_key' => 'privacy',
         'title' => 'Denizci Eğitim – Gizlilik Politikası',
-        'content' => '<h3>Denizci Eğitim – Gizlilik Politikası</h3><p>Bu alan için güncel gizlilik politikası metnini admin panelden güncelleyebilirsiniz.</p><p><em>Placeholder metin:</em> Denizci Eğitim / DIGITALAND LTD bilgilerine göre hazırlanacak metin burada yayınlanacaktır.</p>',
+        'content' => '<h3>Denizci Eğitim – Gizlilik Politikası</h3><p>Bu alan için güncel gizlilik politikası metnini admin panelden güncelleyebilirsiniz.</p><p><em>Placeholder metin:</em> Denizci Eğitim / DIGITALAND LTD bilgilerine göre hazırlanacak metin burada yayınlanacaktır.</p><p>İletişim: support@denizciegitim.com</p>',
         'status' => 'draft',
         'version' => 1,
         'updated_at' => null,

@@ -2,7 +2,6 @@
 
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/study_helper.php';
-require_once dirname(__DIR__) . '/maritime_content_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/question_scope_helper.php';
 
 api_require_method('POST');
@@ -37,67 +36,15 @@ try {
         api_error('selected_answer sadece A/B/C/D/E olabilir.', 422);
     }
 
-    $allowedSources = ['study', 'daily_quiz', 'exam', 'maritime_english', 'maritime-english', 'me', 'me_quiz', 'maritime_english_quiz'];
+    $allowedSources = ['study', 'daily_quiz', 'exam'];
     $source = strtolower(trim((string)($payload['source'] ?? 'study')));
     if (!in_array($source, $allowedSources, true)) {
-        $source = 'study';
+        api_error('Desteklenmeyen cevap kaynağı.', 422);
     }
 
     $sessionId = isset($payload['session_id']) ? trim((string)$payload['session_id']) : null;
     if ($sessionId === '') {
         $sessionId = null;
-    }
-
-    $payloadScope = strtolower(trim((string)($payload['question_scope'] ?? $payload['question_type'] ?? '')));
-    $isMaritimeEnglish = mc_is_maritime_english_source($source)
-        || in_array($payloadScope, ['maritime_english', 'maritime-english', 'me'], true);
-
-    if ($isMaritimeEnglish) {
-        $debugStep = 'me_question_meta_fetch';
-        $questionMeta = mc_get_maritime_english_question_meta($pdo, $questionId);
-        if (!$questionMeta['exists']) {
-            api_error('Maritime English sorusu bulunamadı.', 404);
-        }
-
-        $debugStep = 'me_option_e_check';
-        if ($selectedAnswer === 'E' && empty($questionMeta['option_e'])) {
-            api_error('Bu Maritime English sorusu için E şıkkı bulunmuyor.', 422);
-        }
-
-        $debugStep = 'me_correctness_compute';
-        $computedIsCorrect = false;
-        if (!empty($questionMeta['correct_answer'])) {
-            $computedIsCorrect = ($selectedAnswer === strtoupper((string)$questionMeta['correct_answer']));
-        } elseif (array_key_exists('is_correct', $payload)) {
-            $computedIsCorrect = filter_var($payload['is_correct'], FILTER_VALIDATE_BOOLEAN);
-        }
-
-        $eventInsertWarning = null;
-        $debugStep = 'me_event_insert';
-        try {
-            study_insert_attempt_event($pdo, [
-                'user_id' => $userId,
-                'question_id' => $questionId,
-                'course_id' => null,
-                'qualification_id' => $questionMeta['category_id'] ?? null,
-                'topic_id' => $questionMeta['topic_id'] ?? null,
-                'session_id' => $sessionId,
-                'source' => 'maritime_english',
-                'selected_answer' => $selectedAnswer,
-                'is_correct' => $computedIsCorrect,
-            ]);
-        } catch (Throwable $eventError) {
-            $eventInsertWarning = $eventError->getMessage();
-        }
-
-        api_success('Maritime English cevabı kaydedildi.', [
-            'source' => 'maritime_english',
-            'question_id' => $questionId,
-            'selected_answer' => $selectedAnswer,
-            'is_correct' => $computedIsCorrect,
-            'progress' => null,
-            'event_insert_warning' => $eventInsertWarning,
-        ]);
     }
 
     $debugStep = 'question_meta_fetch';

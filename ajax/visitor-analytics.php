@@ -5,6 +5,8 @@ require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 require_admin();
 
 function va_json(array $data): void { echo json_encode(['success'=>true,'data'=>$data], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); exit; }

@@ -55,7 +55,7 @@ function offline_sync_debug_log(string $stage, array $context = []): void
 function offline_sync_normalize_source(?string $source): string
 {
     $value = strtolower(trim((string)$source));
-    $allowed = ['study', 'daily_quiz', 'exam', 'mock_exam', 'mock-exam', 'maritime_english', 'maritime-english', 'me', 'me_quiz', 'maritime_english_quiz', 'offline_sync'];
+    $allowed = ['study', 'daily_quiz', 'exam', 'mock_exam', 'mock-exam', 'offline_sync'];
     if (!in_array($value, $allowed, true)) {
         return 'offline_sync';
     }

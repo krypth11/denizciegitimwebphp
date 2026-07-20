@@ -206,7 +206,6 @@ try {
         'statistics',
         'community',
         'offline',
-        'maritime_english',
         'word_game',
         'card_game',
         'exams',

@@ -200,14 +200,6 @@ function pusula_ai_chat_navigation_target_definitions(): array
                 'çevrimdışı', 'cevrimdisi', 'çevrim dışı', 'cevrim disi',
             ],
         ],
-        'maritime_english' => [
-            'title' => 'Maritime English Alanına Git',
-            'label' => 'Maritime English',
-            'terms' => [
-                'maritime_english', 'maritime english', 'maritime', 'denizcilik ingilizcesi',
-                'ingilizce', 'english',
-            ],
-        ],
         'pusula_ai' => [
             'title' => 'Pusula Ai Ekranına Git',
             'label' => 'Pusula Ai',
@@ -223,7 +215,6 @@ function pusula_ai_chat_navigation_supported_targets(): array
         'statistics',
         'community',
         'offline',
-        'maritime_english',
         'word_game',
         'card_game',
         'exams',
@@ -367,7 +358,6 @@ function pusula_ai_chat_build_navigation_reply_from_target(?array $target): stri
         'statistics' => 'İstatistikler bölümünü açabilirim.',
         'community' => 'Topluluk alanına geçebilirsin.',
         'offline' => 'Offline içerikler bölümünü açabilirim.',
-        'maritime_english' => 'Maritime English alanını açabilirim.',
         'word_game' => 'Kelime Oyununu açabilirim.',
         'card_game' => 'Kart Oyununu açabilirim.',
         'exams' => 'Deneme alanını açabilirim.',
@@ -420,13 +410,6 @@ function pusula_ai_chat_soft_intent_target_clusters(): array
             ],
             'weak' => ['offline', 'çevrimdışı', 'cevrimdisi', 'internetsiz içerik', 'internetsiz icerik'],
         ],
-        'maritime_english' => [
-            'strong' => [
-                'maritime english aç', 'maritime english ac',
-                'denizcilik ingilizcesi çalışayım', 'denizcilik ingilizcesi calisayim',
-            ],
-            'weak' => ['maritime english', 'denizcilik ingilizcesi', 'ingilizce tarafına geçelim', 'ingilizce tarafina gecelim'],
-        ],
         'card_game' => [
             'strong' => [
                 'kart oyununu aç', 'kart oyununu ac', 'kart çalışalım', 'kart calisalim',
@@ -472,11 +455,6 @@ function pusula_ai_chat_soft_intent_contains(string $text, string $term): bool
 
 function pusula_ai_chat_soft_intent_build_clarification(array $rankedTargets, string $message): string
 {
-    $text = pusula_ai_chat_soft_intent_normalize_text($message);
-    if ($text !== '' && (mb_strpos($text, 'ingilizce', 0, 'UTF-8') !== false || mb_strpos($text, 'english', 0, 'UTF-8') !== false)) {
-        return 'Maritime English alanına mı, yoksa Kelime Oyunu tarafına mı geçmek istersin?';
-    }
-
     $top = (string)($rankedTargets[0]['target'] ?? '');
     $second = (string)($rankedTargets[1]['target'] ?? '');
     $pair = [$top, $second];
@@ -492,7 +470,6 @@ function pusula_ai_chat_soft_intent_build_clarification(array $rankedTargets, st
         'statistics' => 'İstatistikler',
         'community' => 'Topluluk',
         'offline' => 'Offline İçerikler',
-        'maritime_english' => 'Maritime English',
         'card_game' => 'Kart Oyunu',
         'exams' => 'Deneme Alanı',
     ];
@@ -509,7 +486,6 @@ function pusula_ai_chat_build_soft_navigation_reply(string $target): string
         'statistics' => 'İstatistikler bölümünü açabilirim.',
         'community' => 'Topluluk alanını açabilirim.',
         'offline' => 'Offline içerikler bölümünü açabilirim.',
-        'maritime_english' => 'Maritime English alanını açabilirim.',
         'card_game' => 'Kart Oyununu açabilirim.',
         'exams' => 'Sana uygun bir deneme başlatabiliriz.',
     ];
@@ -853,7 +829,6 @@ function pusula_ai_chat_detect_intent(string $message, array $knowledgeBundle = 
             'istatistik', 'statistics',
             'topluluk', 'community',
             'offline', 'çevrimdışı', 'cevrimdisi',
-            'maritime english', 'maritime_english',
             'pusula ai', 'pusula_ai',
             'deneme alanı', 'exams',
         ])
@@ -1006,7 +981,6 @@ function pusula_ai_chat_detect_education_intent(string $text): ?string
             'istatistik', 'statistics',
             'topluluk', 'community',
             'offline', 'çevrimdışı', 'cevrimdisi',
-            'maritime english', 'maritime_english',
             'pusula ai', 'pusula_ai',
             'deneme alanı', 'exams',
         ])

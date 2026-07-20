@@ -17,7 +17,6 @@ if (!function_exists('notification_deep_link_pages')) {
             ['value' => 'news', 'label' => 'Haberler'],
             ['value' => 'word_game', 'label' => 'Kelime Oyunu'],
             ['value' => 'offline', 'label' => 'Offline İçerikler'],
-            ['value' => 'maritime', 'label' => 'Maritime English'],
             ['value' => 'daily_quiz', 'label' => 'Daily Quiz'],
             ['value' => 'profile', 'label' => 'Profil'],
             ['value' => 'notification_detail', 'label' => 'Bildirim Detayı'],

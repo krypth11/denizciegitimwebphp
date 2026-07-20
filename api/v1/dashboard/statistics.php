@@ -55,10 +55,6 @@ function stats_normalize_source(?string $source): string
         return 'study';
     }
 
-    if (in_array($normalized, ['maritime_english', 'maritime-english', 'me', 'me_quiz', 'maritime_english_quiz'], true)) {
-        return 'maritime_english';
-    }
-
     if (in_array($normalized, ['daily_quiz', 'daily-quiz', 'daily quiz'], true)) {
         return 'daily_quiz';
     }
@@ -205,7 +201,6 @@ try {
 
     $eventCols = get_table_columns($pdo, 'question_attempt_events');
     $topicCols = get_table_columns($pdo, 'topics');
-    $meCategoryCols = get_table_columns($pdo, 'maritime_english_categories');
 
     $evUserIdCol = stats_first_col($eventCols, ['user_id']);
     $evQuestionIdCol = stats_first_col($eventCols, ['question_id']);
@@ -219,9 +214,6 @@ try {
     $topicIdCol = stats_first_col($topicCols, ['id']);
     $topicNameCol = stats_first_col($topicCols, ['name', 'title']);
     $topicCourseIdCol = stats_first_col($topicCols, ['course_id']);
-
-    $meCategoryIdCol = stats_first_col($meCategoryCols, ['id', 'category_id']);
-    $meCategoryNameCol = stats_first_col($meCategoryCols, ['name', 'title', 'category_name']);
 
     $sqlTotals = 'SELECT '
         . 'COALESCE(SUM(CASE WHEN `is_correct` = 1 THEN 1 ELSE 0 END),0) AS total_correct, '
@@ -240,13 +232,6 @@ try {
     $sourceMap = [
         'study' => [
             'source' => 'study',
-            'total_solved' => 0,
-            'total_correct' => 0,
-            'total_wrong' => 0,
-            'success_rate' => 0.0,
-        ],
-        'maritime_english' => [
-            'source' => 'maritime_english',
             'total_solved' => 0,
             'total_correct' => 0,
             'total_wrong' => 0,
@@ -378,8 +363,6 @@ try {
     $qCols = get_table_columns($pdo, 'questions');
     $cCols = get_table_columns($pdo, 'courses');
     $qualCols = get_table_columns($pdo, 'qualifications');
-    $meqCols = get_table_columns($pdo, 'maritime_english_questions');
-    $metCols = get_table_columns($pdo, 'maritime_english_topics');
 
     $qIdCol = stats_first_col($qCols, ['id']);
     $qCourseIdCol = stats_first_col($qCols, ['course_id']);
@@ -389,12 +372,6 @@ try {
     $qualIdCol = stats_first_col($qualCols, ['id']);
     $qualNameCol = stats_first_col($qualCols, ['name', 'title']);
 
-    $meqIdCol = stats_first_col($meqCols, ['id', 'question_id']);
-    $meqTopicIdCol = stats_first_col($meqCols, ['topic_id', 'maritime_english_topic_id']);
-    $metIdCol = stats_first_col($metCols, ['id', 'topic_id']);
-    $metNameCol = stats_first_col($metCols, ['name', 'title', 'topic_name']);
-    $metCategoryIdCol = stats_first_col($metCols, ['category_id', 'maritime_english_category_id']);
-
     if ($qIdCol && $qCourseIdCol && $cIdCol && $cNameCol && $cQualificationIdCol && $qualIdCol && $qualNameCol && $evQuestionIdCol) {
         $resolvedCourseExpr = $evCourseIdCol
             ? ('COALESCE(e.' . stats_q($evCourseIdCol) . ', q.' . stats_q($qCourseIdCol) . ')')
@@ -403,9 +380,6 @@ try {
             ? ('COALESCE(e.' . stats_q($evQualificationIdCol) . ', c.' . stats_q($cQualificationIdCol) . ')')
             : ('c.' . stats_q($cQualificationIdCol));
         $standardScopeWhere = ['e.`user_id` = ?'];
-        if ($evSourceCol) {
-            $standardScopeWhere[] = 'LOWER(TRIM(COALESCE(e.' . stats_q($evSourceCol) . ', ""))) NOT IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")';
-        }
 
         $sqlQualificationStats = 'SELECT '
             . $resolvedQualificationExpr . ' AS qualification_id, '
@@ -509,76 +483,6 @@ try {
         }
     }
 
-    if ($meqIdCol && $meqTopicIdCol && $metIdCol && $metNameCol) {
-        $sqlMeCourseStats = 'SELECT '
-            . 't.' . stats_q($metIdCol) . ' AS topic_id, '
-            . 't.' . stats_q($metNameCol) . ' AS topic_name, '
-            . 'COUNT(*) AS total_solved, '
-            . 'SUM(CASE WHEN e.`is_correct` = 1 THEN 1 ELSE 0 END) AS total_correct, '
-            . 'SUM(CASE WHEN e.`is_correct` = 0 THEN 1 ELSE 0 END) AS total_wrong '
-            . 'FROM `question_attempt_events` e '
-            . 'INNER JOIN `maritime_english_questions` meq ON e.`question_id` = meq.' . stats_q($meqIdCol) . ' '
-            . 'INNER JOIN `maritime_english_topics` t ON meq.' . stats_q($meqTopicIdCol) . ' = t.' . stats_q($metIdCol) . ' '
-            . 'WHERE e.`user_id` = ? '
-            . 'AND LOWER(TRIM(COALESCE(e.`source`, ""))) IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz") '
-            . 'GROUP BY t.' . stats_q($metIdCol) . ', t.' . stats_q($metNameCol) . ' '
-            . 'ORDER BY total_solved DESC, topic_name ASC';
-
-        $stmtMeCourseStats = $pdo->prepare($sqlMeCourseStats);
-        $stmtMeCourseStats->execute([$userId]);
-        $rowsMeCourseStats = $stmtMeCourseStats->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-        $meTotalSolved = 0;
-        $meTotalCorrect = 0;
-        $meTotalWrong = 0;
-
-        foreach ($rowsMeCourseStats as $row) {
-            $normalized = stats_normalize_bucket((int)($row['total_correct'] ?? 0), (int)($row['total_wrong'] ?? 0));
-            $totalSolved = (int)$normalized['total_solved'];
-            $totalCorrect = (int)$normalized['total_correct'];
-            $totalWrong = (int)$normalized['total_wrong'];
-
-            $meTotalSolved += $totalSolved;
-            $meTotalCorrect += $totalCorrect;
-            $meTotalWrong += $totalWrong;
-
-            $statistics['course_stats'][] = [
-                'course_id' => (string)($row['topic_id'] ?? ''),
-                'course_name' => (string)($row['topic_name'] ?? ''),
-                'qualification_id' => 'maritime_english',
-                'qualification_name' => 'Maritime English',
-                'total_solved' => $totalSolved,
-                'total_answer_attempts' => $totalSolved,
-                'solved_count' => $totalSolved,
-                'answered_count' => $totalSolved,
-                'total_correct' => $totalCorrect,
-                'total_wrong' => $totalWrong,
-                'success_rate' => (float)$normalized['success_rate'],
-            ];
-
-            $statistics['stats_rows'][] = [
-                'qualification_name' => 'Maritime English',
-                'course_name' => (string)($row['topic_name'] ?? ''),
-                'total_solved' => $totalSolved,
-                'total_correct' => $totalCorrect,
-                'total_wrong' => $totalWrong,
-                'success_rate' => (float)$normalized['success_rate'],
-            ];
-        }
-
-        if ($meTotalSolved > 0) {
-            $meNormalized = stats_normalize_bucket($meTotalCorrect, $meTotalWrong);
-            $statistics['qualification_stats'][] = [
-                'qualification_id' => 'maritime_english',
-                'qualification_name' => 'Maritime English',
-                'total_solved' => (int)$meNormalized['total_solved'],
-                'total_correct' => (int)$meNormalized['total_correct'],
-                'total_wrong' => (int)$meNormalized['total_wrong'],
-                'success_rate' => (float)$meNormalized['success_rate'],
-            ];
-        }
-    }
-
     // Topic bazlı istatistikler (details.php ile hizalı)
     $qTopicIdCol = stats_first_col($qCols, ['topic_id']);
     if (
@@ -612,10 +516,6 @@ try {
             $resolvedTopicExpr . ' IS NOT NULL',
             'TRIM(COALESCE(' . $resolvedTopicExpr . ', "")) <> ""',
         ];
-        if ($evSourceCol) {
-            $topicWhere[] = 'LOWER(TRIM(COALESCE(e.' . stats_q($evSourceCol) . ', ""))) NOT IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")';
-        }
-
         $topicSql = 'SELECT '
             . 't.' . stats_q($topicIdCol) . ' AS topic_id, '
             . 't.' . stats_q($topicNameCol) . ' AS topic_name, '
@@ -643,60 +543,6 @@ try {
         $rowsTopicStats = $stmtTopicStats->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         foreach ($rowsTopicStats as $row) {
-            $correct = (int)($row['total_correct'] ?? 0);
-            $wrong = (int)($row['total_wrong'] ?? 0);
-            $attempts = (int)($row['total_answer_attempts'] ?? 0);
-
-            $statistics['topic_stats'][] = [
-                'topic_id' => (string)($row['topic_id'] ?? ''),
-                'topic_name' => (string)($row['topic_name'] ?? ''),
-                'course_id' => $row['course_id'] ?? null,
-                'course_name' => (string)($row['course_name'] ?? ''),
-                'qualification_id' => $row['qualification_id'] ?? null,
-                'qualification_name' => (string)($row['qualification_name'] ?? ''),
-                'total_answer_attempts' => $attempts,
-                'solved_count' => $attempts,
-                'answered_count' => $attempts,
-                'total_correct' => $correct,
-                'total_wrong' => $wrong,
-                'success_rate' => (float)stats_rate($correct, $wrong),
-                'last_activity_at' => $row['last_activity_at'] ?? null,
-            ];
-        }
-    }
-
-    if ($evUserIdCol && $evTopicIdCol && $evCorrectCol && $metIdCol && $metNameCol && $evSourceCol) {
-        $meTopicWhere = [
-            'e.' . stats_q($evUserIdCol) . ' = ?',
-            'e.' . stats_q($evTopicIdCol) . ' IS NOT NULL',
-            'TRIM(COALESCE(e.' . stats_q($evTopicIdCol) . ', "")) <> ""',
-            'LOWER(TRIM(COALESCE(e.' . stats_q($evSourceCol) . ', ""))) IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")',
-        ];
-
-        $meTopicSql = 'SELECT '
-            . 'mt.' . stats_q($metIdCol) . ' AS topic_id, '
-            . 'mt.' . stats_q($metNameCol) . ' AS topic_name, '
-            . "'maritime_english' AS course_id, "
-            . "'Maritime English' AS course_name, "
-            . ($meCategoryIdCol ? 'mc.' . stats_q($meCategoryIdCol) . ' AS qualification_id, ' : 'NULL AS qualification_id, ')
-            . (($meCategoryIdCol && $meCategoryNameCol) ? 'mc.' . stats_q($meCategoryNameCol) . ' AS qualification_name, ' : "'Maritime English' AS qualification_name, ")
-            . 'COUNT(*) AS total_answer_attempts, '
-            . 'SUM(CASE WHEN e.' . stats_q($evCorrectCol) . ' = 1 THEN 1 ELSE 0 END) AS total_correct, '
-            . 'SUM(CASE WHEN e.' . stats_q($evCorrectCol) . ' = 0 THEN 1 ELSE 0 END) AS total_wrong, '
-            . ($evAttemptedAtCol ? 'MAX(e.' . stats_q($evAttemptedAtCol) . ')' : 'NULL') . ' AS last_activity_at '
-            . 'FROM `question_attempt_events` e '
-            . 'INNER JOIN `maritime_english_topics` mt ON e.' . stats_q($evTopicIdCol) . ' = mt.' . stats_q($metIdCol) . ' '
-            . (($meCategoryIdCol && $meCategoryNameCol && $metCategoryIdCol) ? 'LEFT JOIN `maritime_english_categories` mc ON mt.' . stats_q($metCategoryIdCol) . ' = mc.' . stats_q($meCategoryIdCol) . ' ' : '')
-            . 'WHERE ' . implode(' AND ', $meTopicWhere) . ' '
-            . 'GROUP BY mt.' . stats_q($metIdCol) . ', mt.' . stats_q($metNameCol)
-            . (($meCategoryIdCol && $meCategoryNameCol && $metCategoryIdCol) ? ', mc.' . stats_q($meCategoryIdCol) . ', mc.' . stats_q($meCategoryNameCol) : '')
-            . ' ORDER BY total_answer_attempts DESC, topic_name ASC';
-
-        $stmtMeTopicStats = $pdo->prepare($meTopicSql);
-        $stmtMeTopicStats->execute([$userId]);
-        $rowsMeTopicStats = $stmtMeTopicStats->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-        foreach ($rowsMeTopicStats as $row) {
             $correct = (int)($row['total_correct'] ?? 0);
             $wrong = (int)($row['total_wrong'] ?? 0);
             $attempts = (int)($row['total_answer_attempts'] ?? 0);

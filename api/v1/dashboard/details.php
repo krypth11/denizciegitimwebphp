@@ -119,8 +119,6 @@ try {
     $qualCols = get_table_columns($pdo, 'qualifications');
     $tCols = get_table_columns($pdo, 'topics');
     $evCols = get_table_columns($pdo, 'question_attempt_events');
-    $metCols = get_table_columns($pdo, 'maritime_english_topics');
-    $mecCols = get_table_columns($pdo, 'maritime_english_categories');
 
     $upQuestionId = dd_first($upCols, ['question_id']);
     $upCorrectCount = dd_first($upCols, ['correct_answer_count', 'correct_count']);
@@ -152,13 +150,6 @@ try {
     $tName = dd_first($tCols, ['name', 'title']);
     $tCourseId = dd_first($tCols, ['course_id']);
 
-    $metId = dd_first($metCols, ['id', 'topic_id']);
-    $metName = dd_first($metCols, ['name', 'title', 'topic_name']);
-    $metCategoryId = dd_first($metCols, ['category_id', 'maritime_english_category_id']);
-
-    $mecId = dd_first($mecCols, ['id', 'category_id']);
-    $mecName = dd_first($mecCols, ['name', 'title', 'category_name']);
-
     if ($evUserId && $evCorrect && $evQuestionId && $qId && $qCourseId && $cId && $cName && $cQualificationId && $qualId && $qualName) {
         $resolvedCourseExpr = $evCourseId
             ? ('COALESCE(e.' . dd_q($evCourseId) . ', q.' . dd_q($qCourseId) . ')')
@@ -173,10 +164,6 @@ try {
             'TRIM(COALESCE(' . $resolvedCourseExpr . ', "")) <> ""',
         ];
         $params = [$userId];
-        if ($evSource) {
-            $where[] = 'LOWER(TRIM(COALESCE(e.' . dd_q($evSource) . ', ""))) NOT IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")';
-        }
-
         $courseSql = 'SELECT '
             . $resolvedCourseExpr . ' AS course_id, '
             . 'COALESCE(c.' . dd_q($cName) . ', "") AS course_name, '
@@ -273,10 +260,6 @@ try {
                 $where[] = $dateSql;
                 $params = array_merge($params, $dateParams);
             }
-            if ($evSource) {
-                $where[] = 'LOWER(TRIM(COALESCE(e.' . dd_q($evSource) . ', ""))) NOT IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")';
-            }
-
             $sql = 'SELECT '
                 . 't.' . dd_q($tId) . ' AS topic_id, '
                 . 't.' . dd_q($tName) . ' AS topic_name, '
@@ -297,65 +280,6 @@ try {
                 . 'GROUP BY t.' . dd_q($tId) . ', t.' . dd_q($tName) . ', '
                 . $resolvedTopicCourseExpr . ', c.' . dd_q($cName) . ', '
                 . $resolvedTopicQualificationExpr . ', qf.' . dd_q($qualName)
-                . ' ORDER BY total_answer_attempts DESC, topic_name ASC';
-
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($params);
-            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
-            foreach ($rows as $row) {
-                $correct = (int)($row['total_correct'] ?? 0);
-                $wrong = (int)($row['total_wrong'] ?? 0);
-                $attempts = (int)($row['total_answer_attempts'] ?? 0);
-                $details['topic_stats'][] = [
-                    'topic_id' => (string)($row['topic_id'] ?? ''),
-                    'topic_name' => (string)($row['topic_name'] ?? ''),
-                    'course_id' => $row['course_id'] ?? null,
-                    'course_name' => (string)($row['course_name'] ?? ''),
-                    'qualification_id' => $row['qualification_id'] ?? null,
-                    'qualification_name' => (string)($row['qualification_name'] ?? ''),
-                    'total_answer_attempts' => $attempts,
-                    'total_correct' => $correct,
-                    'total_wrong' => $wrong,
-                    'success_rate' => dd_rate($correct, $wrong),
-                    'last_activity_at' => $row['last_activity_at'] ?? null,
-                    'solved_count' => $attempts,
-                    'answered_count' => $attempts,
-                ];
-            }
-        }
-
-        // Maritime English topic istatistikleri (events source = maritime_english*)
-        if ($evSource && $metId && $metName && $metCategoryId) {
-            $where = [
-                'e.' . dd_q($evUserId) . ' = ?',
-                'e.' . dd_q($evTopicId) . ' IS NOT NULL',
-                'TRIM(COALESCE(e.' . dd_q($evTopicId) . ', "")) <> ""',
-                'LOWER(TRIM(COALESCE(e.' . dd_q($evSource) . ', ""))) IN ("maritime_english", "maritime-english", "me", "me_quiz", "maritime_english_quiz")',
-            ];
-            $params = [$userId];
-            if ($dateSql !== '') {
-                $where[] = $dateSql;
-                $params = array_merge($params, $dateParams);
-            }
-
-            $sql = 'SELECT '
-                . 'mt.' . dd_q($metId) . ' AS topic_id, '
-                . 'mt.' . dd_q($metName) . ' AS topic_name, '
-                . "'maritime_english' AS course_id, "
-                . "'Maritime English' AS course_name, "
-                . ($mecId ? 'mc.' . dd_q($mecId) . ' AS qualification_id, ' : 'NULL AS qualification_id, ')
-                . (($mecId && $mecName) ? 'mc.' . dd_q($mecName) . ' AS qualification_name, ' : "'Maritime English' AS qualification_name, ")
-                . 'COUNT(*) AS total_answer_attempts, '
-                . 'SUM(CASE WHEN e.' . dd_q($evCorrect) . ' = 1 THEN 1 ELSE 0 END) AS total_correct, '
-                . 'SUM(CASE WHEN e.' . dd_q($evCorrect) . ' = 0 THEN 1 ELSE 0 END) AS total_wrong, '
-                . 'MAX(e.' . dd_q($evAttemptedAt) . ') AS last_activity_at '
-                . 'FROM `question_attempt_events` e '
-                . 'INNER JOIN `maritime_english_topics` mt ON e.' . dd_q($evTopicId) . ' = mt.' . dd_q($metId) . ' '
-                . (($mecId && $mecName) ? 'LEFT JOIN `maritime_english_categories` mc ON mt.' . dd_q($metCategoryId) . ' = mc.' . dd_q($mecId) . ' ' : '')
-                . 'WHERE ' . implode(' AND ', $where) . ' '
-                . 'GROUP BY mt.' . dd_q($metId) . ', mt.' . dd_q($metName)
-                . (($mecId && $mecName) ? ', mc.' . dd_q($mecId) . ', mc.' . dd_q($mecName) : '')
                 . ' ORDER BY total_answer_attempts DESC, topic_name ASC';
 
             $stmt = $pdo->prepare($sql);
