@@ -66,8 +66,9 @@ function me_learning_bucket(array $row): string
     return 'new';
 }
 
-function me_select_terms(PDO $pdo, string $userId, string $qualificationId): array
+function me_select_terms(PDO $pdo, string $userId, string $qualificationId, ?string $categoryId = null): array
 {
+    $categorySql = $categoryId !== null && $categoryId !== '' ? ' AND t.category_id = ?' : '';
     $stmt = $pdo->prepare(
         "SELECT t.id, t.term_en, t.term_tr, t.short_explanation, c.name AS category_name,
                 ut.learning_state, ut.next_review_at, ut.wrong_count, ut.correct_count
@@ -75,14 +76,16 @@ function me_select_terms(PDO $pdo, string $userId, string $qualificationId): arr
          INNER JOIN maritime_english_categories c ON c.id = t.category_id AND c.is_active = 1
          LEFT JOIN maritime_english_user_terms ut ON ut.term_id = t.id AND ut.user_id = ?
          WHERE t.is_active = 1 AND t.content_status = 'published'
-           AND (t.qualification_id IS NULL OR t.qualification_id = ?)
+           AND (t.qualification_id IS NULL OR t.qualification_id = ?)' . $categorySql . '
            AND (SELECT COUNT(*) FROM maritime_english_questions q WHERE q.term_id = t.id AND q.is_active = 1) >= 2
          ORDER BY
            CASE WHEN ut.next_review_at IS NOT NULL AND ut.next_review_at <= NOW() THEN 0 ELSE 1 END,
            COALESCE(ut.wrong_count, 0) DESC,
            RAND()"
     );
-    $stmt->execute([$userId, $qualificationId]);
+    $params = [$userId, $qualificationId];
+    if ($categorySql !== '') $params[] = $categoryId;
+    $stmt->execute($params);
     $buckets = ['new' => [], 'learning' => [], 'review' => []];
     foreach (($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) as $row) {
         $buckets[me_learning_bucket($row)][] = $row;
@@ -114,11 +117,17 @@ function me_select_terms(PDO $pdo, string $userId, string $qualificationId): arr
     return $selected;
 }
 
-function me_create_session(PDO $pdo, string $userId, string $qualificationId): array
+function me_create_session(PDO $pdo, string $userId, string $qualificationId, ?string $categoryId = null): array
 {
-    $terms = me_select_terms($pdo, $userId, $qualificationId);
+    if ($categoryId !== null && $categoryId !== '') {
+        $categoryStmt = $pdo->prepare('SELECT id FROM maritime_english_categories WHERE id = ? AND is_active = 1');
+        $categoryStmt->execute([$categoryId]);
+        if (!$categoryStmt->fetchColumn()) throw new RuntimeException('Seçilen kategori bulunamadı.', 404);
+    }
+    $terms = me_select_terms($pdo, $userId, $qualificationId, $categoryId);
     if (count($terms) < 5) {
-        throw new RuntimeException('Oturum başlatmak için en az 5 yayımlanmış kelime ve her kelimeye ait en az 2 soru gereklidir.', 422);
+        $scope = $categoryId ? 'Bu kategoride' : 'Oturum başlatmak için';
+        throw new RuntimeException($scope . ' en az 5 yayımlanmış kelime ve her kelimeye ait en az 2 soru gereklidir.', 422);
     }
 
     $questionPools = [];
@@ -228,10 +237,12 @@ function me_result_payload(PDO $pdo, string $sessionId, string $userId): array
     $terms = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     $total = (int)$session['question_count'];
     $correct = (int)$session['correct_count'];
+    $answered = (int)$session['answered_count'];
     return [
         'session_id' => $sessionId, 'status' => (string)$session['status'], 'total' => $total,
+        'answered' => $answered, 'unanswered' => max(0, $total - $answered),
         'correct' => $correct, 'wrong' => (int)$session['wrong_count'],
-        'success_percent' => $total > 0 ? round(($correct / $total) * 100, 1) : 0,
+        'success_percent' => $answered > 0 ? round(($correct / $answered) * 100, 1) : 0,
         'terms' => array_map(static fn($r) => [
             'term_en' => (string)$r['term_en'], 'term_tr' => (string)$r['term_tr'],
             'state' => (string)($r['learning_state'] ?? 'learning'),
