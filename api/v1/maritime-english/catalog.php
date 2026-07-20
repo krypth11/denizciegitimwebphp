@@ -10,7 +10,9 @@ try {
     $stmt = $pdo->prepare(
         "SELECT c.id, c.name, c.description, c.sort_order,
                 COUNT(DISTINCT CASE WHEN t.is_active = 1 AND t.content_status = 'published'
-                  AND (t.qualification_id IS NULL OR t.qualification_id = ?) THEN t.id END) AS term_count,
+                  AND (t.qualification_id IS NULL OR t.qualification_id = ?)
+                  AND (SELECT COUNT(*) FROM maritime_english_questions tq WHERE tq.term_id = t.id AND tq.is_active = 1) >= 2
+                  THEN t.id END) AS term_count,
                 COUNT(DISTINCT CASE WHEN q.is_active = 1 AND t.is_active = 1 AND t.content_status = 'published'
                   AND (t.qualification_id IS NULL OR t.qualification_id = ?) THEN q.id END) AS question_count,
                 COUNT(DISTINCT CASE WHEN ut.user_id = ? AND ut.learning_state = 'mastered' THEN t.id END) AS mastered_count,
