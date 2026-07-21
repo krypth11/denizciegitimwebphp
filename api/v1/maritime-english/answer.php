@@ -22,7 +22,16 @@ try {
         $pdo->prepare("UPDATE maritime_english_sessions SET status = 'expired', updated_at = NOW() WHERE id = ?")->execute([$sessionId]);
         throw new RuntimeException('Oturumun süresi dolmuş.', 410);
     }
-    $stmt = $pdo->prepare('SELECT * FROM maritime_english_session_items WHERE id = ? AND session_id = ? FOR UPDATE');
+    $stmt = $pdo->prepare(
+        'SELECT i.*
+         FROM maritime_english_session_items i
+         INNER JOIN maritime_english_questions q
+           ON q.id = i.question_id AND q.is_active = 1 AND q.deleted_at IS NULL
+         INNER JOIN maritime_english_terms t
+           ON t.id = i.term_id AND t.is_active = 1 AND t.content_status = \'published\'
+         WHERE i.id = ? AND i.session_id = ?
+         FOR UPDATE'
+    );
     $stmt->execute([$itemId, $sessionId]);
     $item = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$item) throw new RuntimeException('Soru bulunamadı.', 404);

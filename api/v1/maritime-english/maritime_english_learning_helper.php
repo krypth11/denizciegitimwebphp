@@ -69,20 +69,21 @@ function me_learning_bucket(array $row): string
 function me_select_terms(PDO $pdo, string $userId, string $qualificationId, ?string $categoryId = null): array
 {
     $categorySql = $categoryId !== null && $categoryId !== '' ? ' AND t.category_id = ?' : '';
-    $stmt = $pdo->prepare(
-        "SELECT t.id, t.term_en, t.term_tr, t.short_explanation, c.name AS category_name,
-                ut.learning_state, ut.next_review_at, ut.wrong_count, ut.correct_count
-         FROM maritime_english_terms t
-         INNER JOIN maritime_english_categories c ON c.id = t.category_id AND c.is_active = 1
-         LEFT JOIN maritime_english_user_terms ut ON ut.term_id = t.id AND ut.user_id = ?
-         WHERE t.is_active = 1 AND t.content_status = 'published'
-           AND (t.qualification_id IS NULL OR t.qualification_id = ?)' . $categorySql . '
-           AND (SELECT COUNT(*) FROM maritime_english_questions q WHERE q.term_id = t.id AND q.is_active = 1) >= 2
-         ORDER BY
-           CASE WHEN ut.next_review_at IS NOT NULL AND ut.next_review_at <= NOW() THEN 0 ELSE 1 END,
-           COALESCE(ut.wrong_count, 0) DESC,
-           RAND()"
-    );
+    $sql = "SELECT t.id, t.term_en, t.term_tr, t.short_explanation, c.name AS category_name,
+                   ut.learning_state, ut.next_review_at, ut.wrong_count, ut.correct_count
+            FROM maritime_english_terms t
+            INNER JOIN maritime_english_categories c ON c.id = t.category_id AND c.is_active = 1
+            LEFT JOIN maritime_english_user_terms ut ON ut.term_id = t.id AND ut.user_id = ?
+            WHERE t.is_active = 1 AND t.content_status = 'published'
+              AND (t.qualification_id IS NULL OR t.qualification_id = ?)"
+        . $categorySql
+        . " AND (SELECT COUNT(*) FROM maritime_english_questions q
+                 WHERE q.term_id = t.id AND q.is_active = 1 AND q.deleted_at IS NULL) >= 2
+            ORDER BY
+              CASE WHEN ut.next_review_at IS NOT NULL AND ut.next_review_at <= NOW() THEN 0 ELSE 1 END,
+              COALESCE(ut.wrong_count, 0) DESC,
+              RAND()";
+    $stmt = $pdo->prepare($sql);
     $params = [$userId, $qualificationId];
     if ($categorySql !== '') $params[] = $categoryId;
     $stmt->execute($params);
@@ -133,7 +134,9 @@ function me_create_session(PDO $pdo, string $userId, string $qualificationId, ?s
     $questionPools = [];
     $qStmt = $pdo->prepare(
         'SELECT id, term_id, question_type, prompt, options_json, correct_option_key
-         FROM maritime_english_questions WHERE term_id = ? AND is_active = 1 ORDER BY RAND()'
+         FROM maritime_english_questions
+         WHERE term_id = ? AND is_active = 1 AND deleted_at IS NULL
+         ORDER BY RAND()'
     );
     foreach ($terms as $term) {
         $qStmt->execute([(string)$term['id']]);
