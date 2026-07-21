@@ -113,7 +113,7 @@ function me_import_save(PDO $pdo, string $categoryId, ?string $qualificationId, 
         $sentenceInsert->execute([me_import_uuid(), $termId, (string)$sentence['en'], (string)$sentence['tr'], (int)$sentence['number'], $termId, (string)$sentence['en']]);
         $sentenceCount += $sentenceInsert->rowCount();
     }
-    $questionInsert = $pdo->prepare('INSERT INTO maritime_english_questions (id, term_id, question_type, prompt, options_json, correct_option_key, explanation, sort_order, is_active, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW() WHERE NOT EXISTS (SELECT 1 FROM maritime_english_questions WHERE term_id = ? AND prompt = ?)');
+    $questionInsert = $pdo->prepare('INSERT INTO maritime_english_questions (id, term_id, question_type, prompt, options_json, correct_option_key, explanation, sort_order, is_active, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW() WHERE NOT EXISTS (SELECT 1 FROM maritime_english_questions WHERE term_id = ? AND prompt = ? AND deleted_at IS NULL)');
     $questionCount = 0;
     foreach (($data['questions'] ?? []) as $question) {
         $questionInsert->execute([

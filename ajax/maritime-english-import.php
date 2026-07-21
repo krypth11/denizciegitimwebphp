@@ -30,7 +30,7 @@ try {
             me_admin_json(false, 'Geçersiz durum filtresi.', [], 422);
         }
 
-        $where = [];
+        $where = ['q.deleted_at IS NULL'];
         $params = [];
         if ($categoryId !== '') { $where[] = 't.category_id = ?'; $params[] = $categoryId; }
         if ($questionType !== '') { $where[] = 'q.question_type = ?'; $params[] = $questionType; }
@@ -70,6 +70,31 @@ try {
             'items' => $items,
             'pagination' => ['page' => $page, 'per_page' => $perPage, 'total' => $total, 'total_pages' => $totalPages],
         ]);
+    }
+    if ($action === 'bulk_delete') {
+        $decodedIds = json_decode((string)($_POST['ids'] ?? ''), true);
+        if (!is_array($decodedIds)) me_admin_json(false, 'Silinecek soru listesi geçersiz.', [], 422);
+        $uniqueIds = [];
+        foreach ($decodedIds as $rawId) {
+            $id = trim((string)$rawId);
+            if ($id === '' || strlen($id) > 64 || !preg_match('/^[a-zA-Z0-9-]+$/', $id)) {
+                me_admin_json(false, 'Geçersiz soru kimliği gönderildi.', [], 422);
+            }
+            $uniqueIds[$id] = $id;
+        }
+        $ids = array_values($uniqueIds);
+        if (!$ids) me_admin_json(false, 'En az bir soru seçmelisiniz.', [], 422);
+        if (count($ids) > 500) me_admin_json(false, 'Tek işlemde en fazla 500 soru silinebilir.', [], 422);
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $pdo->beginTransaction();
+        $stmt = $pdo->prepare("UPDATE maritime_english_questions
+                               SET is_active = 0, deleted_at = NOW(), updated_at = NOW()
+                               WHERE id IN ($placeholders) AND deleted_at IS NULL");
+        $stmt->execute($ids);
+        $deletedCount = $stmt->rowCount();
+        $pdo->commit();
+        me_admin_json(true, $deletedCount . ' soru silindi.', ['deleted_count' => $deletedCount]);
     }
     if ($action === 'parse') {
         $result = me_import_parse((string)($_POST['content'] ?? ''));
