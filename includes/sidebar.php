@@ -2,6 +2,7 @@
 $menuGroups = [
     [
         ['slug' => 'dashboard', 'url' => '/dashboard.php', 'icon' => 'bi-speedometer2', 'label' => 'Dashboard'],
+        ['slug' => 'admin-notifications', 'url' => '/pages/admin-notifications.php', 'icon' => 'bi-bell-fill', 'label' => 'Bildirimlerim'],
     ],
     [
         ['slug' => 'qualification-headings', 'url' => '/pages/qualification-headings.php', 'icon' => 'bi-diagram-3', 'label' => 'Yeterlilik Başlıkları'],
@@ -210,6 +211,9 @@ function render_sidebar_menu($menuGroups, $current_page, $instanceKey = 'default
 </div>
 
 <main class="main-content">
+    <a id="adminNotificationBell" href="/pages/admin-notifications.php" class="admin-notification-bell d-none" aria-label="Yeni admin bildirimleri"><i class="bi bi-bell-fill"></i><span id="adminNotificationCount">0</span></a>
+    <style>.admin-notification-bell{position:fixed;right:22px;top:18px;z-index:1090;width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#0d6efd;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.25);text-decoration:none;font-size:1.2rem}.admin-notification-bell span{position:absolute;right:-4px;top:-5px;min-width:22px;height:22px;padding:0 5px;border-radius:11px;background:#dc3545;color:#fff;font-size:11px;line-height:22px;text-align:center;font-weight:700}</style>
+    <script>(function(){const bell=document.getElementById('adminNotificationBell'),count=document.getElementById('adminNotificationCount');async function refresh(){try{const r=await fetch('/ajax/admin-notifications.php?action=unread_count',{credentials:'same-origin',cache:'no-store'}),j=await r.json(),n=Number(j.data?.count||0);count.textContent=n>99?'99+':String(n);bell.classList.toggle('d-none',n<1);}catch(e){bell.classList.add('d-none');}}refresh();setInterval(refresh,30000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});})();</script>
     <div class="mobile-menu-row d-lg-none mb-3">
         <button class="btn btn-secondary btn-sm" type="button" data-bs-toggle="offcanvas" data-bs-target="#adminSidebar" aria-controls="adminSidebar">
             <i class="bi bi-list"></i> Menü

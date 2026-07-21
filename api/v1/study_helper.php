@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/auth_helper.php';
+require_once dirname(__DIR__, 2) . '/includes/admin_notification_helper.php';
 
 function study_q(string $column): string
 {
@@ -1078,5 +1079,8 @@ function study_insert_question_report(PDO $pdo, string $userId, string $question
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    return $reportId ?: (string)$pdo->lastInsertId();
+    $createdReportId = $reportId ?: (string)$pdo->lastInsertId();
+    admin_notification_create($pdo, ['event_type'=>'question_report','source_type'=>'question_report','source_id'=>$createdReportId,'title'=>'Yeni soru bildirimi','message'=>'Bir kullanıcı soruyu incelemeniz için bildirdi.','severity'=>'normal','target_url'=>'/pages/question-reports.php?report_id='.rawurlencode($createdReportId)]);
+
+    return $createdReportId;
 }

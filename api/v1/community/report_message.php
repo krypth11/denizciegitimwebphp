@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/community_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/admin_notification_helper.php';
 
 api_require_method('POST');
 
@@ -84,7 +85,8 @@ try {
     }
 
     $cols = [$report['id'], $report['message_id'], $reportedByCol, $report['reason'], $report['created_at']];
-    $vals = [generate_uuid(), $messageId, $userId, $reason, community_now()];
+    $reportId = generate_uuid();
+    $vals = [$reportId, $messageId, $userId, $reason, community_now()];
     if ($report['message_owner_user_id']) {
         $cols[] = $report['message_owner_user_id'];
         $vals[] = (string)($message['user_id'] ?? '');
@@ -98,6 +100,7 @@ try {
     $holders = implode(', ', array_fill(0, count($cols), '?'));
     $stmt = $pdo->prepare("INSERT INTO `{$report['table']}` ({$quoted}) VALUES ({$holders})");
     $stmt->execute($vals);
+    admin_notification_create($pdo, ['event_type'=>'community_message_report','source_type'=>'community_report','source_id'=>$reportId,'title'=>'Topluluk mesajı raporlandı','message'=>$reason,'severity'=>'normal','target_url'=>'/pages/community-reports.php?report_id='.rawurlencode($reportId)]);
 
     api_success('Mesaj raporlandı.');
 } catch (Throwable $e) {

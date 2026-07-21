@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/support_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/admin_notification_helper.php';
 
 api_require_method('POST');
 
@@ -57,6 +58,7 @@ try {
 
         support_add_message($pdo, $ticketId, $userId, 'user', $message);
         $pdo->commit();
+        admin_notification_create($pdo, ['event_type'=>'support_ticket','source_type'=>'support','source_id'=>$ticketId,'title'=>'Yeni destek talebi','message'=>$subject,'severity'=>'normal','target_url'=>'/pages/support-tickets.php?ticket_id='.rawurlencode($ticketId)]);
     } catch (Throwable $inner) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();

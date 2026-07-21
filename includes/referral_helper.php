@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/../api/v1/usage_limits_helper.php';
+require_once __DIR__ . '/admin_notification_helper.php';
 
 if (!defined('REFERRAL_CODE_ALPHABET')) define('REFERRAL_CODE_ALPHABET', 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789');
 
@@ -173,6 +174,7 @@ function referral_apply_code_to_user(PDO $pdo, string $userId, string $referralC
     $id=generate_uuid();
     $status = !empty($flags) ? 'suspicious' : 'active';
     $pdo->prepare('INSERT INTO user_referral_links (id, referrer_user_id, referred_user_id, referral_code, source, device_hash, ip_hash, status, fraud_flags_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())')->execute([$id,$ref,$userId,$code,'api',$deviceHash,$ipHash,$status,referral_json($flags)]);
+    if ($status === 'suspicious') admin_notification_create($pdo, ['event_type'=>'suspicious_referral_link','source_type'=>'referral','source_id'=>$id,'title'=>'Şüpheli referans bağlantısı','message'=>implode(', ',$flags),'severity'=>'high','target_url'=>'/pages/referral-events.php']);
     return ['id'=>$id,'referrer_user_id'=>$ref,'referred_user_id'=>$userId,'referral_code'=>$code,'status'=>$status,'is_suspicious'=>!empty($flags),'fraud_flags'=>$flags];
 }
 
@@ -189,6 +191,7 @@ function referral_create_reward_event(PDO $pdo,array $p): string
 {
     $id=generate_uuid();
     $pdo->prepare('INSERT INTO referral_reward_events (id,event_kind,status,referrer_user_id,referred_user_id,purchase_user_id,referral_link_id,revenuecat_webhook_event_id,source_event_id,revenuecat_transaction_id,product_id,plan_code,store,event_type,referrer_reward_days,referred_reward_days,buyer_bonus_days,referrer_bonus_percent_delta,buyer_bonus_percent_snapshot,hold_days,purchased_at,eligible_at,fraud_flags_json,admin_note,raw_event_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW())')->execute([$id,$p['event_kind'],$p['status']??'pending',$p['referrer_user_id']??null,$p['referred_user_id']??null,$p['purchase_user_id']??null,$p['referral_link_id']??null,$p['revenuecat_webhook_event_id']??null,$p['source_event_id']??$p['revenuecat_event_id']??null,$p['revenuecat_transaction_id']??null,$p['product_id']??null,$p['plan_code']??null,$p['store']??null,$p['event_type']??null,(int)($p['referrer_reward_days']??0),(int)($p['referred_reward_days']??0),(int)($p['buyer_bonus_days']??0),(int)($p['referrer_bonus_percent_delta']??0),(int)($p['buyer_bonus_percent_snapshot']??0),(int)($p['hold_days']??$p['waiting_days']??0),$p['purchased_at']??null,$p['eligible_at']??referral_now(),referral_json($p['fraud_flags']??[]),$p['admin_note']??null,referral_json($p['raw_event']??$p['meta']??[])]);
+    if (($p['status'] ?? 'pending') === 'suspicious') admin_notification_create($pdo, ['event_type'=>'suspicious_referral_reward','source_type'=>'referral','source_id'=>$id,'title'=>'Şüpheli referans ödülü','message'=>'Manuel inceleme bekleyen referans ödülü oluştu.','severity'=>'high','target_url'=>'/pages/referral-events.php']);
     return $id;
 }
 

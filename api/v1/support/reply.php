@@ -3,6 +3,7 @@
 require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/auth_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/support_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/admin_notification_helper.php';
 
 api_require_method('POST');
 
@@ -46,6 +47,7 @@ try {
             support_ticket_increment_followup($pdo, $ticketId);
         }
         $pdo->commit();
+        admin_notification_create($pdo, ['event_type'=>'support_user_reply','source_type'=>'support','source_id'=>$messageId,'title'=>'Destek talebine yeni cevap','message'=>(string)($ticket['subject'] ?? 'Kullanıcı destek talebine cevap verdi.'),'severity'=>'normal','target_url'=>'/pages/support-tickets.php?ticket_id='.rawurlencode($ticketId)]);
     } catch (Throwable $inner) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();

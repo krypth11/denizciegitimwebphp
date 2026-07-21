@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/admin_notification_helper.php';
 
 if (!function_exists('notification_q')) {
     function notification_q(string $identifier): string
@@ -1104,6 +1105,10 @@ if (!function_exists('send_push_notification')) {
         if ($n['updated_at']) $update[$n['updated_at']] = date('Y-m-d H:i:s');
 
         notification_update_row($pdo, $n['table'], $update, notification_q($n['id']) . ' = ?', [$notificationId]);
+
+        if ($success === 0 && ($failed > 0 || $initError !== null)) {
+            admin_notification_create($pdo, ['event_type'=>'push_delivery_failed','source_type'=>'push','source_id'=>$notificationId,'title'=>'Bildirim gönderimi başarısız','message'=>$failed.' gönderim başarısız oldu.','severity'=>$initError !== null?'high':'normal','target_url'=>'/pages/notifications-history.php?notification_id='.rawurlencode($notificationId)]);
+        }
 
         return [
             'notification_id' => $notificationId,

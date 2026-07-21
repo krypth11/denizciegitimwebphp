@@ -4,6 +4,7 @@ require_once dirname(__DIR__) . '/api_bootstrap.php';
 require_once dirname(__DIR__) . '/usage_limits_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/subscription_management_helper.php';
 require_once dirname(__DIR__, 3) . '/includes/referral_helper.php';
+require_once dirname(__DIR__, 3) . '/includes/admin_notification_helper.php';
 
 api_require_method('POST');
 
@@ -206,6 +207,13 @@ try {
 
     $pdo->commit();
 
+    if (in_array($processStatus, ['failed','unmatched_user','conflict'], true)) {
+        admin_notification_create($pdo, ['event_type'=>'subscription_issue','source_type'=>'subscription','source_id'=>$eventId,'title'=>'Sorunlu abonelik işlemi','message'=>$eventType.' · '.$processStatus,'severity'=>'high','target_url'=>'/pages/subscription-issues.php']);
+    }
+    if (in_array($eventType, ['BILLING_ISSUE','REFUND'], true)) {
+        admin_notification_create($pdo, ['event_type'=>'subscription_'.$eventType,'source_type'=>'subscription','source_id'=>$eventId,'title'=>$eventType==='REFUND'?'Abonelik iadesi':'Abonelik ödeme sorunu','message'=>'RevenueCat '.$eventType.' olayı alındı.','severity'=>$eventType==='BILLING_ISSUE'?'high':'normal','target_url'=>'/pages/subscription-events.php']);
+    }
+
     api_send_json([
         'success' => true,
         'message' => 'Webhook event işlendi.',
@@ -253,6 +261,8 @@ try {
         ]);
     } catch (Throwable $ignored) {
     }
+
+    admin_notification_create($pdo, ['event_type'=>'subscription_failed','source_type'=>'subscription','source_id'=>$eventId,'title'=>'Abonelik webhook işlemi başarısız','message'=>'RevenueCat olayı işlenemedi.','severity'=>'critical','target_url'=>'/pages/subscription-issues.php']);
 
     api_send_json([
         'success' => false,
