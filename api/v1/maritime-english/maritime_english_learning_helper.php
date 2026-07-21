@@ -125,9 +125,9 @@ function me_create_session(PDO $pdo, string $userId, string $qualificationId, ?s
         if (!$categoryStmt->fetchColumn()) throw new RuntimeException('Seçilen kategori bulunamadı.', 404);
     }
     $terms = me_select_terms($pdo, $userId, $qualificationId, $categoryId);
-    if (count($terms) < 5) {
+    if (!$terms) {
         $scope = $categoryId ? 'Bu kategoride' : 'Oturum başlatmak için';
-        throw new RuntimeException($scope . ' en az 5 yayımlanmış kelime ve her kelimeye ait en az 2 soru gereklidir.', 422);
+        throw new RuntimeException($scope . ' en az 1 yayımlanmış kelime ve bu kelimeye ait en az 2 soru gereklidir.', 422);
     }
 
     $questionPools = [];
@@ -140,9 +140,15 @@ function me_create_session(PDO $pdo, string $userId, string $qualificationId, ?s
         $questionPools[(string)$term['id']] = $qStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
+    $availableQuestionCount = array_sum(array_map('count', $questionPools));
+    $targetQuestionCount = min(12, $availableQuestionCount);
+    if ($targetQuestionCount < 2) {
+        throw new RuntimeException('Oturum başlatmak için en az 2 aktif soru gereklidir.', 422);
+    }
+
     $ordered = [];
     $lastTermId = '';
-    while (count($ordered) < 12) {
+    while (count($ordered) < $targetQuestionCount) {
         $progress = false;
         foreach ($terms as $term) {
             $termId = (string)$term['id'];
@@ -152,18 +158,33 @@ function me_create_session(PDO $pdo, string $userId, string $qualificationId, ?s
             $ordered[] = $question;
             $lastTermId = $termId;
             $progress = true;
-            if (count($ordered) >= 12) break;
+            if (count($ordered) >= $targetQuestionCount) break;
+        }
+        if (!$progress) {
+            // Henüz tek kelimelik prototip içerik varsa aynı kelimenin kalan
+            // sorularıyla kısa oturumu tamamla. Yeni kelimeler eklendiğinde
+            // yukarıdaki round-robin sıralama otomatik olarak devreye girer.
+            foreach ($terms as $term) {
+                $termId = (string)$term['id'];
+                if (empty($questionPools[$termId])) continue;
+                $question = array_shift($questionPools[$termId]);
+                $question['_term'] = $term;
+                $ordered[] = $question;
+                $lastTermId = $termId;
+                $progress = true;
+                break;
+            }
         }
         if (!$progress) break;
     }
-    if (count($ordered) < 12) throw new RuntimeException('12 soruluk oturum için yeterli aktif soru bulunamadı.', 422);
+    if (count($ordered) < 2) throw new RuntimeException('Oturum için yeterli aktif soru bulunamadı.', 422);
 
     $sessionId = me_uuid();
     $pdo->prepare(
         "INSERT INTO maritime_english_sessions
          (id, user_id, qualification_id, status, question_count, expires_at, started_at, created_at, updated_at)
-         VALUES (?, ?, ?, 'active', 12, DATE_ADD(NOW(), INTERVAL 2 HOUR), NOW(), NOW(), NOW())"
-    )->execute([$sessionId, $userId, $qualificationId]);
+         VALUES (?, ?, ?, 'active', ?, DATE_ADD(NOW(), INTERVAL 2 HOUR), NOW(), NOW(), NOW())"
+    )->execute([$sessionId, $userId, $qualificationId, count($ordered)]);
 
     $insert = $pdo->prepare(
         'INSERT INTO maritime_english_session_items

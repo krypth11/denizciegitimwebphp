@@ -28,7 +28,7 @@ try {
         'id' => (string)$r['id'], 'name' => (string)$r['name'], 'description' => (string)($r['description'] ?? ''),
         'term_count' => (int)$r['term_count'], 'question_count' => (int)$r['question_count'],
         'mastered_count' => (int)$r['mastered_count'], 'learning_count' => (int)$r['learning_count'],
-        'available' => (int)$r['term_count'] >= 5 && (int)$r['question_count'] >= 10,
+        'available' => (int)$r['term_count'] >= 1 && (int)$r['question_count'] >= 2,
     ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     api_send_json(['success' => true, 'data' => ['categories' => $categories]]);
 } catch (Throwable $e) { api_error('Maritime English kategorileri alınamadı.', 500); }
