@@ -6,6 +6,7 @@ require_once '../includes/auth.php';
 require_once '../includes/functions.php';
 require_once '../includes/question_scope_helper.php';
 require_once '../includes/upload_helper.php';
+require_once '../includes/question_video_helper.php';
 
 $user = require_admin();
 $action = $_GET['action'] ?? $_POST['action'] ?? '';
@@ -97,6 +98,7 @@ try {
     $hasStatus = is_array($questionCols) && in_array('status', $questionCols, true);
     $hasIsActive = is_array($questionCols) && in_array('is_active', $questionCols, true);
     $hasQuestionBadgeType = is_array($questionCols) && in_array('question_badge_type', $questionCols, true);
+    $hasVideoSolutionId = is_array($questionCols) && in_array('video_solution_id', $questionCols, true);
 
     switch ($action) {
         case 'list_qualifications':
@@ -382,6 +384,7 @@ try {
             $option_e = sanitize_input($_POST['option_e'] ?? '');
             $correct_answer = strtoupper(trim((string)($_POST['correct_answer'] ?? '')));
             $explanation = sanitize_input($_POST['explanation'] ?? '');
+            $video_solution_id = question_normalize_youtube_video_id($_POST['video_solution_url'] ?? '');
 
             if (empty($course_id) || empty($question_type) || empty($question_text) ||
                 empty($option_a) || empty($option_b) || empty($option_c) ||
@@ -437,6 +440,9 @@ try {
                 }
                 if ($hasQuestionBadgeType) {
                     $insertData['question_badge_type'] = $question_badge_type;
+                }
+                if ($hasVideoSolutionId) {
+                    $insertData['video_solution_id'] = $video_solution_id;
                 }
                 $insertData = array_merge($insertData, $imageData);
 
@@ -563,6 +569,7 @@ try {
             $option_e = sanitize_input($_POST['option_e'] ?? '');
             $correct_answer = strtoupper(trim((string)($_POST['correct_answer'] ?? '')));
             $explanation = sanitize_input($_POST['explanation'] ?? '');
+            $video_solution_id = question_normalize_youtube_video_id($_POST['video_solution_url'] ?? '');
 
             if (empty($id)) {
                 echo json_encode([
@@ -656,6 +663,9 @@ try {
                 }
                 if ($hasQuestionBadgeType) {
                     $updateData['question_badge_type'] = $question_badge_type;
+                }
+                if ($hasVideoSolutionId) {
+                    $updateData['video_solution_id'] = $video_solution_id;
                 }
 
                 $newImageData = [];

@@ -654,6 +654,8 @@ function mock_exam_get_attempt_schema(PDO $pdo): array
         'actual_question_count' => mock_exam_pick($cols, ['actual_question_count'], false),
         'duration_seconds_limit' => mock_exam_pick($cols, ['duration_seconds_limit'], false),
         'elapsed_seconds' => mock_exam_pick($cols, ['elapsed_seconds'], false),
+        'video_paused_seconds' => mock_exam_pick($cols, ['video_paused_seconds'], false),
+        'video_pause_started_at' => mock_exam_pick($cols, ['video_pause_started_at'], false),
         'status' => mock_exam_pick($cols, ['status'], false),
         'warning_message' => mock_exam_pick($cols, ['warning_message'], false),
         'source_attempt_id' => mock_exam_pick($cols, ['source_attempt_id'], false),
@@ -884,10 +886,13 @@ function mock_exam_build_attempt_time_state(array $row): array
 
     $nowTs = time();
     $startedAtTs = mock_exam_parse_datetime_to_timestamp(isset($row['started_at']) ? (string)$row['started_at'] : null);
+    $pausedSeconds = max(0, (int)($row['video_paused_seconds'] ?? 0));
+    $pauseStartedAtTs = mock_exam_parse_datetime_to_timestamp(isset($row['video_pause_started_at']) ? (string)$row['video_pause_started_at'] : null);
+    $activePauseSeconds = ($status === 'in_progress' && $pauseStartedAtTs !== null) ? max(0, $nowTs - $pauseStartedAtTs) : 0;
 
     $effectiveElapsed = $persistedElapsed;
     if ($status === 'in_progress' && $startedAtTs !== null) {
-        $derivedElapsed = max(0, $nowTs - $startedAtTs);
+        $derivedElapsed = max(0, $nowTs - $startedAtTs - $pausedSeconds - $activePauseSeconds);
         $effectiveElapsed = max($persistedElapsed, $derivedElapsed);
     }
 
@@ -896,7 +901,7 @@ function mock_exam_build_attempt_time_state(array $row): array
 
     $expiresAt = null;
     if ($startedAtTs !== null) {
-        $expiresAt = gmdate(DATE_ATOM, $startedAtTs + $totalDuration);
+        $expiresAt = gmdate(DATE_ATOM, $startedAtTs + $totalDuration + $pausedSeconds + $activePauseSeconds);
     }
 
     $resumeState = 'completed';
@@ -1134,7 +1139,8 @@ function mock_exam_fetch_candidate_questions(PDO $pdo, string $qualificationId, 
         }
     }
 
-    $sql = 'SELECT DISTINCT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, q.image_url, q.question_image_large_url, q.question_image_thumb_url, q.explanation_image_large_url, q.explanation_image_thumb_url, ' . $questionBadgeExpr . ' AS question_badge_type, q.created_at AS source_question_created_at, c.name AS course_name '
+    $videoSolutionExpr = in_array('video_solution_id', $questionCols, true) ? 'q.video_solution_id' : 'NULL';
+    $sql = 'SELECT DISTINCT q.id, ' . $scopeCourseExpr . ' AS course_id, ' . $scopeTopicExpr . ' AS topic_id, q.question_type, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.option_e, q.correct_answer, q.explanation, ' . $videoSolutionExpr . ' AS video_solution_id, q.image_url, q.question_image_large_url, q.question_image_thumb_url, q.explanation_image_large_url, q.explanation_image_thumb_url, ' . $questionBadgeExpr . ' AS question_badge_type, q.created_at AS source_question_created_at, c.name AS course_name '
         . 'FROM questions q INNER JOIN courses c ON c.id = ' . $scopeCourseExpr
         . ' WHERE ' . implode(' AND ', $where);
 
@@ -1603,7 +1609,8 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
     $sourceQuestionBadgeSelect = in_array('question_badge_type', $questionCols, true)
         ? 'qsrc.question_badge_type'
         : "'normal'";
-    $sql = 'SELECT aq.*, qsrc.created_at AS source_question_created_at, ' . $sourceQuestionBadgeSelect . ' AS source_question_badge_type'
+    $sourceVideoSelect = in_array('video_solution_id', $questionCols, true) ? 'qsrc.video_solution_id' : 'NULL';
+    $sql = 'SELECT aq.*, qsrc.created_at AS source_question_created_at, ' . $sourceQuestionBadgeSelect . ' AS source_question_badge_type, ' . $sourceVideoSelect . ' AS source_video_solution_id'
         . ' FROM ' . mock_exam_q($aq['table']) . ' aq'
         . ' LEFT JOIN questions qsrc ON qsrc.id = aq.' . mock_exam_q($aq['question_id'])
         . ' WHERE aq.' . mock_exam_q($aq['attempt_id']) . ' = ?'
@@ -1649,6 +1656,7 @@ function mock_exam_fetch_attempt_questions(PDO $pdo, string $attemptId, bool $wi
             'source_question_created_at' => $createdAtForBadge,
             'question_badge_type' => $badgeType,
             'is_new_question' => $badgeType === 'new',
+            'video_solution_id' => $r['source_video_solution_id'] ?? null,
         ];
         if ($withResultFields) {
             $explanation = $aq['explanation'] ? ($r[$aq['explanation']] ?? null) : null;

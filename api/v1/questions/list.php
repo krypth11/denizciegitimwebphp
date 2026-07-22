@@ -112,6 +112,7 @@ try {
         $hasCol('option_e') ? ($qc('option_e') . ' AS option_e') : 'NULL AS option_e',
         $hasCol('correct_answer') ? ($qc('correct_answer') . ' AS correct_answer') : "'' AS correct_answer",
         $hasCol('explanation') ? ($qc('explanation') . ' AS explanation') : "'' AS explanation",
+        $hasCol('video_solution_id') ? ($qc('video_solution_id') . ' AS video_solution_id') : 'NULL AS video_solution_id',
         $hasCol('image_url') ? ($qc('image_url') . ' AS image_url') : 'NULL AS image_url',
         $hasCol('question_image_large_url') ? ($qc('question_image_large_url') . ' AS question_image_large_url') : 'NULL AS question_image_large_url',
         $hasCol('question_image_thumb_url') ? ($qc('question_image_thumb_url') . ' AS question_image_thumb_url') : 'NULL AS question_image_thumb_url',
