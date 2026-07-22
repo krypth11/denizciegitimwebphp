@@ -469,6 +469,7 @@ try {
             'correct_answer' => (string)($row['correct_answer'] ?? ''),
             'explanation' => $explanation,
             'formatted_explanation' => format_explanation_text($explanation),
+            'video_solution_id' => $row['video_solution_id'] ?? null,
             'image_url' => $questionImageUrl,
             'question_image_url' => $questionImageUrl,
             'question_image_thumb_url' => $row['question_image_thumb_url'] ?? null,
